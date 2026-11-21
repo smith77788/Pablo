@@ -29,6 +29,7 @@ _EXPECTED = (
     "infragram_op_poisoned_total",
     "infragram_op_flood_defers_total",
     "infragram_flood_sleep_truncated_total",
+    "infragram_op_shared_account_joins_total",
 )
 
 

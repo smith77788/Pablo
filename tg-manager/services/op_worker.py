@@ -716,6 +716,62 @@ _accounts_in_use: set[int] = set()
 _operation_account_locks: dict[int, set[int]] = {}
 _accounts_lock = asyncio.Lock()
 
+# ── Совместная работа операций на одном аккаунте (FLEET_SHARED_SESSIONS=1) ──
+# Без флага аккаунт держит РОВНО одна операция: вторая ждёт до 20 минут и
+# падает «все аккаунты заняты». Владелец просит обратного: живой человек
+# совмещает несколько дел, и Telegram видит это как нормальное поведение.
+#
+# С флагом аккаунт, который держат ОПЕРАЦИИ этого процесса, может взять ещё
+# одна операция — до OP_ACCOUNT_MAX_SHARED_OPS одновременно. Почему это не
+# AUTH_KEY_DUPLICATED: аренда в БД по-прежнему одна на процесс (её держит
+# _accounts_in_use и продлевает renew_leases), а подключение к Telegram у
+# аккаунта одно на процесс — общее (services/shared_sessions.py). Делится
+# только право слать запросы через него; темп между запросами держит то же
+# общее подключение.
+#
+# Фоновые циклы (прогрев, призрак, пре-флайт) остаются ИСКЛЮЧАЮЩИМИ: аккаунт,
+# занятый ими, операции не делят, и наоборот.
+#
+# _op_shares[acc] — сколько операций держат аккаунт. 0/нет — аккаунт держит
+# фоновый цикл (или никто). Освобождение аренды — когда счётчик дошёл до нуля.
+_op_shares: dict[int, int] = {}
+_MAX_SHARED_OPS = _int_env("OP_ACCOUNT_MAX_SHARED_OPS", 3, 1, 16)
+# Операция, в задаче которой идёт код: по ней захват и освобождение аккаунтов
+# понимают, ЧЬЮ долю трогать. Ставится в _run_op_task и наследуется дочерними
+# задачами (asyncio копирует контекст).
+_current_op: "contextvars.ContextVar[int | None]" = contextvars.ContextVar(
+    "op_worker_current_op", default=None)
+
+
+def shared_ops_mode() -> bool:
+    """Делят ли операции аккаунты (один флаг с общим подключением)."""
+    try:
+        from services import shared_sessions as _ss
+        return _ss.enabled()
+    except Exception:
+        return False
+
+
+def _shareable_locked(aid: int, op_id: "int | None") -> bool:
+    """Можно ли операции op_id присоединиться к аккаунту (под _accounts_lock)."""
+    if op_id is None or aid not in _accounts_in_use:
+        return False
+    n = _op_shares.get(aid, 0)
+    if n <= 0 or n >= _MAX_SHARED_OPS:
+        return False
+    return aid not in _operation_account_locks.get(op_id, set())
+
+
+def _drop_share_locked(aid: int) -> bool:
+    """Снять одну долю операции с аккаунта. True — аккаунт свободен целиком."""
+    n = _op_shares.get(aid, 0) - 1
+    if n > 0:
+        _op_shares[aid] = n
+        return False
+    _op_shares.pop(aid, None)
+    _accounts_in_use.discard(aid)
+    return True
+
 # Опциональный пул БД для персистентных обновлений in_operation.
 # Устанавливается через init_op_worker_pool() при старте.
 _db_pool: "asyncpg.Pool | None" = None
@@ -2080,9 +2136,29 @@ async def release_accounts(acc_ids: list[int]) -> None:
     Args:
         acc_ids: List of account IDs to release.
     """
+    op_id = _current_op.get()
+    if shared_ops_mode() and op_id is not None:
+        # Отпускаем только СВОЮ долю: аккаунт, на котором ещё работает другая
+        # операция, не освобождается и не теряет аренду.
+        freed: list[int] = []
+        async with _accounts_lock:
+            mine = _operation_account_locks.get(op_id, set())
+            for aid in (int(a) for a in acc_ids):
+                if aid in mine:
+                    mine.discard(aid)
+                    if _drop_share_locked(aid):
+                        freed.append(aid)
+                elif _op_shares.get(aid, 0) <= 0:
+                    _accounts_in_use.discard(aid)
+                    freed.append(aid)
+            if not mine:
+                _operation_account_locks.pop(op_id, None)
+        await _db_release(freed)
+        return
     async with _accounts_lock:
         for aid in acc_ids:
             _accounts_in_use.discard(aid)
+            _op_shares.pop(int(aid), None)
             for locked_acc_ids in _operation_account_locks.values():
                 locked_acc_ids.discard(aid)
     await _db_release([int(a) for a in acc_ids])
@@ -2125,6 +2201,9 @@ async def try_claim_accounts(acc_ids: list[int]) -> list[int]:
     остался бы «занят» в памяти навсегда, не будучи занятым на деле.
     """
     ids = [int(a) for a in acc_ids]
+    op_id = _current_op.get()
+    if shared_ops_mode() and op_id is not None:
+        return await _claim_shared(op_id, ids)
     async with _accounts_lock:
         local = [a for a in ids if a not in _accounts_in_use]
         _accounts_in_use.update(local)          # предварительный захват
@@ -2181,9 +2260,54 @@ async def release_operation_accounts(op_id: int) -> None:
     async with _accounts_lock:
         acc_ids = _operation_account_locks.pop(op_id, set())
         for aid in acc_ids:
+            if _op_shares.get(aid, 0) > 0:
+                # Доля операции: аккаунт свободен, только если она последняя.
+                if _drop_share_locked(aid):
+                    freed.append(aid)
+                continue
             _accounts_in_use.discard(aid)
             freed.append(aid)
     await _db_release(freed)
+
+
+async def _claim_shared(op_id: int, ids: list[int]) -> list[int]:
+    """Захват под операцию в режиме совместной работы (см. _op_shares).
+
+    Свободный аккаунт берётся как раньше (локально + аренда в БД) и становится
+    «операционным» с одной долей. Аккаунт, который уже держат ДРУГИЕ операции
+    этого процесса, получает ещё одну долю без похода в БД: аренда уже наша и
+    продлевается heartbeat'ом. Аккаунт фонового цикла и свой же аккаунт
+    повторно не берутся — ровно как без флага.
+    """
+    fresh: list[int] = []
+    joined: list[int] = []
+    async with _accounts_lock:
+        for aid in ids:
+            if aid not in _accounts_in_use:
+                fresh.append(aid)
+                _accounts_in_use.add(aid)
+            elif _shareable_locked(aid, op_id):
+                _op_shares[aid] = _op_shares.get(aid, 0) + 1
+                joined.append(aid)
+        held = _operation_account_locks.setdefault(op_id, set())
+        held.update(fresh)
+        held.update(joined)
+        for aid in fresh:
+            _op_shares[aid] = 1
+    granted = set(await _db_claim(fresh)) if fresh else set()
+    lost = [a for a in fresh if a not in granted]
+    if lost:
+        async with _accounts_lock:
+            held = _operation_account_locks.get(op_id, set())
+            for aid in lost:
+                _accounts_in_use.discard(aid)
+                _op_shares.pop(aid, None)
+                held.discard(aid)
+            if not held:
+                _operation_account_locks.pop(op_id, None)
+    if joined:
+        _reliability_metric("infragram_op_shared_account_joins_total", len(joined))
+    return [a for a in ids if a in granted or a in joined]
 
 
 async def _claim_available_accounts(
@@ -2204,6 +2328,13 @@ async def _claim_available_accounts(
     # от упавших процессов (сброс сторожем только через 60 мин) иначе раздули бы
     # делитель, и ОДИНОЧНАЯ операция получила бы лишь долю флота вместо всего
     # свободного флота (симптом «стартует лишь несколько аккаунтов из N»).
+    if shared_ops_mode():
+        # Совместная работа: доля флота не режется — каждая операция берёт
+        # весь доступный флот, а одновременность на аккаунте ограничивает
+        # OP_ACCOUNT_MAX_SHARED_OPS и общий темп подключения.
+        by_id = {int(a["id"]): a for a in accounts}
+        got = set(await _claim_shared(op_id, list(by_id)))
+        return [a for a in accounts if int(a["id"]) in got]
     concurrency = 1
     if owner_id and _db_pool:
         try:
@@ -2294,6 +2425,9 @@ async def _rebalance_claim(op_id: int, owner_id: int, held: list) -> list:
     Для таких типов честный дележ — это НЕ отдавать флот посреди прогона, а
     просить меньше на входе (доля считается при захвате)."""
     if not held or not owner_id or not _db_pool:
+        return held
+    if shared_ops_mode():
+        # Операции делят аккаунты, а не флот: отдавать нечего.
         return held
     try:
         async with _active_lock:
@@ -4957,6 +5091,7 @@ async def _stand_down_after_lease_loss(
             held = [int(a) for a in _accounts_in_use]
             _accounts_in_use.clear()
             _operation_account_locks.clear()
+            _op_shares.clear()
         if held:
             try:
                 await _db_release(held)
@@ -5089,11 +5224,20 @@ async def shutdown(
         except (TypeError, ValueError):
             requeued = 0
 
+    # Общие подключения аккаунтов закрыть ДО снятия аренд: иначе следующий
+    # держатель аренды подключится, пока наше ещё живо.
+    try:
+        from services import shared_sessions as _ss
+        await asyncio.wait_for(_ss.close_all(), timeout=15.0)
+    except Exception as e:
+        log_exc_swallow(log, f"op_worker: закрытие общих подключений: {e}")
+
     # Снять СВОИ аренды немедленно, не дожидаясь TTL (см. пункт 1 выше).
     async with _accounts_lock:
         held = [int(a) for a in _accounts_in_use]
         _accounts_in_use.clear()
         _operation_account_locks.clear()
+        _op_shares.clear()
     if held:
         await _db_release(held)
 
@@ -6228,6 +6372,9 @@ async def _run_op_task(pool: asyncpg.Pool, bot: Bot, row: dict) -> None:
         user_id=owner_id,
         op_id=f"op{op_id}",
     )
+    # Чья это задача — для совместной работы операций на одном аккаунте
+    # (захват и освобождение трогают только долю этой операции).
+    _current_op.set(int(op_id))
     _t_started = time.monotonic()      # метрика длительности операции (аудит №6)
     params = (
         row["params"]
