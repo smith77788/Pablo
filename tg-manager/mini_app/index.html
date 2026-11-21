@@ -19877,7 +19877,7 @@ function renderBoostPresets() {
   const ICO = {views:'👁', reactions:'❤', stories:'📖', subscribers:'👥', bot_starts:'🚀'};
   row.innerHTML = _boostPresets().map((p, i) =>
     `<span class="preset-chip" role="button" tabindex="0" onclick="useBoostPreset(${i})">${ICO[p.type]||'🚀'} ${esc(p.name)}</span>`
-    + `<span class="preset-chip" role="button" tabindex="0" aria-label="Удалить набор" title="Удалить набор" onclick="delBoostPreset(${i})">✕</span>`).join('')
+    + `<span class="preset-chip" role="button" tabindex="0" aria-label="Удалить набор" title="Удалить набор" onclick="delBoostPreset(${i}, this)">✕</span>`).join('')
     + '<span class="preset-chip" role="button" tabindex="0" onclick="saveBoostPreset()">💾 Сохранить набор</span>';
 }
 function useBoostPreset(i) {
@@ -19892,9 +19892,9 @@ async function saveBoostPreset() {
   saveFormPrefs('boostPresets', {list: list.slice(0, 12)});
   renderBoostPresets(); toast('💾 Набор «'+name+'» сохранён');
 }
-async function delBoostPreset(i) {
+async function delBoostPreset(i, _el) {
   const list = _boostPresets(); const p = list[i]; if (!p) return;
-  if (!await askConfirm('Удалить набор «'+p.name+'»?')) return;
+  if (!await confirmDelete('Удалить набор «'+p.name+'»', _el)) return;
   list.splice(i, 1); saveFormPrefs('boostPresets', {list}); renderBoostPresets();
 }
 async function openBoost() {
