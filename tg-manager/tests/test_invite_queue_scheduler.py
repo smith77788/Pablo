@@ -689,14 +689,24 @@ def test_failure_reasons_come_from_engine_structure(stand):
     )
 
 
-def test_bulk_flag_defaults_to_environment_not_forced_off(stand):
+def test_bulk_flag_defaults_to_environment_not_forced_off(stand, monkeypatch):
     """Отсутствие настройки у операции означает «как решит окружение»: иначе
-    глобальный INVITE_BULK_API нельзя было бы включить вообще."""
+    глобальный INVITE_BULK_API нельзя было бы включить вообще. Решение теперь
+    принимает канарейка (services/mass_rollout) и передаёт движку готовым."""
+    from services import mass_rollout
+    monkeypatch.delenv("INVITE_BULK_API", raising=False)
+    mass_rollout._reset_for_tests()
     s = stand(lambda acc_id, refs, dry=False: _ok(len(refs)))
     _run(_Pool(), TARGETS[:5])
-    assert s.bulk_seen and all(b is None for b in s.bulk_seen), (
-        f"операция без настройки не должна навязывать режим: {s.bulk_seen}"
-    )
+    assert s.bulk_seen and all(b is False for b in s.bulk_seen), (
+        f"без настроек пакетный путь выключен: {s.bulk_seen}")
+    monkeypatch.setenv("INVITE_BULK_API", "1")
+    mass_rollout._reset_for_tests()
+    s.bulk_seen.clear()
+    _run(_Pool(), TARGETS[:5])
+    assert s.bulk_seen and all(b is True for b in s.bulk_seen), (
+        f"глобальный INVITE_BULK_API обязан доходить до движка: {s.bulk_seen}")
+    mass_rollout._reset_for_tests()
 
 
 def test_bulk_flag_of_the_operation_reaches_the_engine(stand):
