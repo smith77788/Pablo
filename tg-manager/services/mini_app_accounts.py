@@ -502,7 +502,9 @@ def setup_routes(app: web.Application, pool) -> None:
         if not admin:
             srow = await _safe_fetchrow(pool,
                 "SELECT (twofa_enc IS NOT NULL) AS twofa_saved, "
-                "(reserve_session_enc IS NOT NULL) AS has_reserve, reserve_auth_hash "
+                "(reserve_session_enc IS NOT NULL) AS has_reserve, reserve_auth_hash, "
+                "CASE WHEN twofa_reset_until > now() THEN twofa_reset_until END AS reset_until, "
+                "(twofa_mismatch_at IS NOT NULL) AS password_changed "
                 "FROM tg_accounts WHERE id=$1 AND owner_id=$2", acc_id, uid)
             guard = {}
             try:
@@ -519,6 +521,11 @@ def setup_routes(app: web.Application, pool) -> None:
                 "has_reserve": bool(srow and srow["has_reserve"]),
                 "foreign_sessions": int(acc["foreign_sessions"] or 0),
                 "guard": guard,
+                # Сигналы атаки (services/account_alarm): запрошенный сброс
+                # пароля 2FA и пароль, сменённый не через Infragram.
+                "reset_until": (srow["reset_until"].isoformat()
+                                if srow and srow.get("reset_until") else None),
+                "password_changed": bool(srow and srow.get("password_changed")),
             }
         return _json_resp({
             "account": acc,
@@ -1020,6 +1027,10 @@ def setup_routes(app: web.Application, pool) -> None:
                 pse.get_login_code(acc["session_str"], {**dict(acc), "_low_risk": True}), timeout=30
             )
             if res.get("ok"):
+                # Код прочитал владелец — значит, вход его: дозор атаки
+                # (services/account_alarm) не будет тревожить об этом коде.
+                from services import account_alarm as _alarm
+                await _alarm.note_code_read(pool, uid, acc_id)
                 return _json_resp({"ok": True, "code": res["code"]})
             return _err(res.get("error") or "Код не найден", 404)
         except asyncio.TimeoutError:
@@ -1178,6 +1189,33 @@ def setup_routes(app: web.Application, pool) -> None:
         from services import session_watch as _sw
         await _sw.set_trust(pool, uid, acc_id, h, on)
         return _json_resp({"ok": True, "trusted": on})
+
+    async def account_security_action(request: web.Request) -> web.Response:
+        """Защитное действие по аккаунту: отменить сброс пароля 2FA, поставить
+        пароль 2FA, закрыть чужие сеансы (кроме «это я» и запасного ключа).
+        Те же действия, что кнопки под тревогой в боте."""
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            acc_id = int(request.match_info["acc_id"])
+        except (KeyError, ValueError):
+            return _err("Неверный идентификатор аккаунта", 400)
+        action = request.match_info.get("action", "")
+        from services import account_alarm as _alarm
+        fn = {"decline_reset": _alarm.decline_reset_now,
+              "set_twofa": _alarm.set_twofa_now,
+              "close_foreign": _alarm.close_foreign_now}.get(action)
+        if fn is None:
+            return _err("Неизвестное действие", 400)
+        try:
+            res = await asyncio.wait_for(fn(pool, uid, acc_id), timeout=60)
+        except asyncio.TimeoutError:
+            return _err("Аккаунт не ответил за минуту — проверьте прокси/сессию", 400)
+        if not res.get("ok"):
+            return _err(res.get("error") or "Не получилось", 400)
+        return _json_resp({k: v for k, v in res.items() if k != "error"})
+
     async def account_public_channel_capacity(request: web.Request) -> web.Response:
         from services.account_manager import probe_public_channel_capacity
         from services.network_builder import project_pilot_enabled
@@ -2422,6 +2460,7 @@ def setup_routes(app: web.Application, pool) -> None:
     app.router.add_get("/api/miniapp/account/{acc_id}/sessions", account_sessions)
     app.router.add_post("/api/miniapp/account/{acc_id}/session/close", account_session_close)
     app.router.add_post("/api/miniapp/account/{acc_id}/session/trust", account_session_trust)
+    app.router.add_post("/api/miniapp/account/{acc_id}/security/{action}", account_security_action)
     app.router.add_post("/api/miniapp/account/{acc_id}/public_channel_capacity", account_public_channel_capacity)
     app.router.add_get("/api/miniapp/accounts/export_json", accounts_export_json)
     app.router.add_post("/api/miniapp/account/{acc_id}/toggle", account_toggle)

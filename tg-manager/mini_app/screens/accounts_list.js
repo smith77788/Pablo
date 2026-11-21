@@ -461,14 +461,41 @@ async function accSessTrust(h, on, btn) {
   }
 }
 
+// Защитные действия по аккаунту — те же, что кнопки под тревогой в боте
+// (services/account_alarm): отменить сброс пароля 2FA, поставить пароль,
+// закрыть чужие сеансы (кроме «это я» и запасного ключа).
+const ACC_SEC_LABELS = {
+  decline_reset: ['Отменить запрошенный сброс пароля 2FA?', '🛡 Сброс пароля отменён'],
+  set_twofa: ['Поставить аккаунту свой пароль 2FA? Он сохранится в «Профили → Пароли 2FA».', '🔐 Пароль 2FA поставлен'],
+  close_foreign: ['Закрыть все чужие сеансы аккаунта? Помеченные «это я» останутся.', '🚪 Чужие сеансы закрыты'],
+};
+async function accSecAction(accId, action, btn) {
+  const lbl = ACC_SEC_LABELS[action];
+  if (!lbl || !await askConfirm(lbl[0])) return;
+  if (btn) btn.disabled = true;
+  try {
+    const r = await api('/api/miniapp/account/'+Number(accId)+'/security/'+action, {method:'POST', body:'{}'});
+    tg.HapticFeedback?.notificationOccurred('success');
+    toast(action==='close_foreign' && r && r.total===0 ? '✅ Чужих сеансов нет'
+      : action==='set_twofa' && r && r.already ? '🔐 Пароль 2FA уже стоит' : lbl[1]);
+    // Перерисовать тот экран, с которого нажали: «Защиту» или карточку.
+    if (STACK.length && STACK[STACK.length-1] === 's-shield') openShield();
+    else if (STACK.length && STACK[STACK.length-1] === 's-accsessions') openAccSessions(Number(accId));
+    else openAccount(Number(accId));
+  } catch(e) {
+    if (btn) btn.disabled = false;
+    toast('⚠️ '+errRu(e, 'Не получилось'));
+  }
+}
+
 // «Все чужие» — существующая операция оформления (profile_setter close_sessions),
 // та же, что на экране «Профили → Очистка и сеансы». Доверенные она не трогает:
 // Telegram закрывает все, кроме текущего, а помеченные своими после прохода
 // дозора снова не считаются чужими.
 async function accSessCloseAll() {
-  if (!await askConfirm('Завершить ВСЕ чужие сеансы этого аккаунта? Останется только наше рабочее устройство. Помеченные «это я» тоже будут закрыты — Telegram закрывает все, кроме текущего.')) return;
+  if (!await askConfirm('Завершить все чужие сеансы этого аккаунта? Сеансы, помеченные «это я», и наш запасной ключ останутся.')) return;
   try {
-    await api('/api/miniapp/account/'+ACC_SESS_ID+'/profile', {method:'POST', body:JSON.stringify({op:'close_sessions'})});
+    await api('/api/miniapp/account/'+ACC_SESS_ID+'/security/close_foreign', {method:'POST', body:'{}'});
     tg.HapticFeedback?.notificationOccurred('success');
     toast('🛡 Чужие сеансы закрыты');
     openAccSessions(ACC_SESS_ID);
