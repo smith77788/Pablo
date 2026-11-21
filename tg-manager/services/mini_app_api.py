@@ -23,7 +23,7 @@ from services import account_status as _acc_status
 from services import operation_bus as _obus
 from services import osint_search as _osint
 from services import op_status
-from services.mini_app_auth import (validate_init_data, make_token, parse_token,
+from services.mini_app_auth import (validate_init_data, make_token, parse_token, parse_token_sid,
                                     signing_secret_ok, make_url_ticket,
                                     parse_url_ticket, url_ticket_ttl)
 from services.secret_masking import redact_secrets, scrub_payload
@@ -1447,14 +1447,35 @@ def _get_uid(request: web.Request) -> int | None:
 
 
 def _uid_from_credentials(request: web.Request) -> int | None:
-    """Разбор заголовка/пропуска без кэша и подмен — для слоёв перед ручками."""
+    """Разбор заголовка/пропуска без кэша и подмен — для слоёв перед ручками.
+
+    Завершённый сеанс владельца (services/owner_sessions) отбивается здесь же:
+    токен с его номером ещё подписан и не истёк, но больше ничего не открывает.
+    """
     auth = request.headers.get("Authorization", "")
     if auth.startswith("Bearer "):
-        return parse_token(auth[7:], _bot_token())
+        # parse_token — общая дверь (её подменяют стенды); номер сеанса
+        # читается отдельно и только для проверки отзыва.
+        uid = parse_token(auth[7:], _bot_token())
+        if uid:
+            sid = parse_token_sid(auth[7:], _bot_token())[1]
+            if sid:
+                from services import owner_sessions as _os
+                if _os.is_revoked(sid):
+                    return None
+        return uid
     ticket = request.query.get("ticket")
     if ticket and request.method == "GET":
         return parse_url_ticket(ticket, _bot_token(), request.path)
     return None
+
+
+def _current_sid(request: web.Request) -> str | None:
+    """Номер сеанса владельца из токена запроса (None — токен без номера)."""
+    auth = request.headers.get("Authorization", "")
+    if not auth.startswith("Bearer "):
+        return None
+    return parse_token_sid(auth[7:], _bot_token())[1]
 
 
 def _admin_ids() -> set[int]:
@@ -2800,8 +2821,13 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             user = await _mb.find_user_by_init_data(pool, init_data, validate_init_data)
         if not user:
             return _err("Подпись Telegram не подтвердилась — откройте приложение заново", 401)
+        # Журнал входов владельца и номер сеанса в токене (services/owner_sessions):
+        # завершённый сеанс отбивается, о входе с нового устройства — тревога.
+        from services import owner_sessions as _os
+        sid = await _os.open_session(pool, user["user_id"], "mirror" if _mid else "telegram",
+                                     _os.request_meta(request))
         # Сессия ВСЕГДА на основном токене: её проверяет _get_uid по основному.
-        token = make_token(user["user_id"], bot_token)
+        token = make_token(user["user_id"], bot_token, sid=sid)
         # Признак админа — чтобы мини-апп не пробовал админские ручки вслепую:
         # раньше каждый вход обычного пользователя начинался с 403 на
         # /admin/stats (лишний запрос и шум в журнале). Доступ решают сами
@@ -2916,7 +2942,11 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         if not await device_pairing.device_active(pool, fp):
             return _err("Устройство отозвано — свяжите заново", 401)
         await device_pairing.touch_device(pool, fp)
-        return _json_resp({"token": make_token(uid, bot_token),
+        from services import owner_sessions as _os
+        pairing_id = await device_pairing.pairing_id_by_fp(pool, fp)
+        sid = await _os.open_session(pool, uid, "device", _os.request_meta(request),
+                                     pairing_id=pairing_id)
+        return _json_resp({"token": make_token(uid, bot_token, sid=sid),
                            "user": {"user_id": uid}})
 
     async def devices_list(request: web.Request) -> web.Response:
@@ -2950,7 +2980,52 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             return _err("Неверный идентификатор устройства")
         from services import device_pairing
         ok = await device_pairing.revoke_device(pool, uid, pairing_id)
+        from services import owner_sessions as _os
+        await _os.revoke_by_pairing(pool, uid, pairing_id)
         return _json_resp({"ok": ok})
+
+    async def owner_sessions_list(request: web.Request) -> web.Response:
+        """Входы владельца в Infragram: устройство, адрес, когда, этот ли сеанс."""
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        from services import owner_sessions as _os
+        cur = _current_sid(request)
+        # Потолок назван здесь: экран показывает последние 50 входов и
+        # говорит об этом сам (как список связанных браузеров).
+        rows = await _os.list_sessions(pool, uid, limit=50)
+        return _json_resp({"limit": 50, "sessions": [
+            {"id": r["id"], "kind": r["kind"], "kind_ru": _os.KIND_RU.get(r["kind"], r["kind"]),
+             "label": r["device_label"] or "Неизвестное устройство",
+             "ip": r["ip"] or "", "country": r["country"] or "",
+             "created_at": r["created_at"].isoformat() if r["created_at"] else None,
+             "last_seen_at": r["last_seen_at"].isoformat() if r["last_seen_at"] else None,
+             "revoked": r["revoked_at"] is not None,
+             "current": bool(cur) and r["sid"] == cur}
+            for r in rows], "tracked": bool(cur)})
+
+    async def owner_sessions_revoke(request: web.Request) -> web.Response:
+        """Завершить вход владельца: один ({id}) или все, кроме этого ({others: true})."""
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            body = await request.json()
+        except Exception:
+            body = {}
+        from services import owner_sessions as _os
+        cur = _current_sid(request)
+        if body.get("others"):
+            if not cur:
+                return _err("Этот вход ещё не записан — обновите приложение и повторите", 400)
+            n = await _os.revoke(pool, uid, all_except_sid=cur)
+        else:
+            try:
+                sess_id = int(body.get("id"))
+            except (TypeError, ValueError):
+                return _err("Неверный идентификатор входа", 400)
+            n = await _os.revoke(pool, uid, session_id=sess_id)
+        return _json_resp({"ok": True, "revoked": n})
 
     async def factory_name_preview(request: web.Request) -> web.Response:
         """Предпросмотр генерируемых имён и @юзернеймов ДО создания ресурсов.
@@ -9947,6 +10022,8 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     app.router.add_post("/api/miniapp/pair/exchange", pair_exchange)
     app.router.add_get("/api/miniapp/devices", devices_list)
     app.router.add_post("/api/miniapp/devices/revoke", devices_revoke)
+    app.router.add_get("/api/miniapp/owner/sessions", owner_sessions_list)
+    app.router.add_post("/api/miniapp/owner/sessions/revoke", owner_sessions_revoke)
     app.router.add_post("/api/miniapp/factory/name_preview", factory_name_preview)
     # Bots
     app.router.add_post("/api/miniapp/bot_factory/create", bot_factory_create)

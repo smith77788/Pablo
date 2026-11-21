@@ -418,6 +418,9 @@ CACHE: dict[str, str] = {
 
 # Память — только кэш; истина лежит в БД и перечитывается.
 DB_BACKED: dict[str, str] = {
+    "services/owner_sessions.py:_REVOKED": (
+        "завершённые входы владельца: истина — owner_sessions.revoked_at, цикл "
+        "run_revocation_sync сверяет память с базой раз в 15 с во всех ролях"),
     "services/ecosystem_copilot.py:_snooze_until": "platform_settings, перечитывается циклом",
     "services/infra_copilot.py:_snooze_until": "platform_settings, перечитывается циклом",
     "services/flood_engine.py:_flood_state": "гидрируется из БД на старте операции",

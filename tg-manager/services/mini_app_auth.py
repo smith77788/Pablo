@@ -93,38 +93,57 @@ def validate_init_data(init_data: str, bot_token: str) -> Optional[dict]:
         return None
 
 
-def make_token(user_id: int, bot_token: str) -> str:
-    """Generate a 2-hour session token."""
+def make_token(user_id: int, bot_token: str, sid: str | None = None) -> str:
+    """Generate a 2-hour session token.
+
+    sid — номер сеанса владельца (services/owner_sessions): с ним токен
+    становится отзывным — завершённый сеанс отбивается на каждом запросе.
+    Формат `uid:ts:sid:sig`; без sid — прежний `uid:ts:sig`.
+    """
     if not signing_secret_ok(bot_token):
         # Выдать токен, подписанный общеизвестным ключом, хуже чем не выдать
         # ничего: он выглядит настоящим и открывает вход кому угодно.
         raise ValueError("нет ключа подписи: BOT_TOKEN не задан")
     ts = int(time.time())
-    payload = f"{user_id}:{ts}"
+    sid = str(sid or "").replace(":", "")
+    payload = f"{user_id}:{ts}:{sid}" if sid else f"{user_id}:{ts}"
     secret = hashlib.sha256(bot_token.encode()).digest()
     sig = hmac.new(secret, payload.encode(), hashlib.sha256).hexdigest()[:24]
     return f"{payload}:{sig}"
 
 
-def parse_token(token: str, bot_token: str, max_age: int = 7200) -> Optional[int]:
-    """Validate a session token, return user_id or None."""
+def parse_token_sid(token: str, bot_token: str,
+                    max_age: int = 7200) -> tuple[Optional[int], Optional[str]]:
+    """Проверить токен → (uid, sid). sid None — токен без номера сеанса."""
     if not signing_secret_ok(bot_token):
-        return None
+        return None, None
     try:
         parts = token.split(":")
-        if len(parts) != 3:
-            return None
-        uid, ts_s, sig = parts
+        if len(parts) == 3:
+            uid, ts_s, sig = parts
+            sid = None
+            payload = f"{uid}:{ts_s}"
+        elif len(parts) == 4:
+            uid, ts_s, sid, sig = parts
+            if not sid:
+                return None, None
+            payload = f"{uid}:{ts_s}:{sid}"
+        else:
+            return None, None
         if time.time() - int(ts_s) > max_age:
-            return None
-        payload = f"{uid}:{ts_s}"
+            return None, None
         secret = hashlib.sha256(bot_token.encode()).digest()
         expected = hmac.new(secret, payload.encode(), hashlib.sha256).hexdigest()[:24]
         if not hmac.compare_digest(expected, sig):
-            return None
-        return int(uid)
+            return None, None
+        return int(uid), sid
     except Exception:
-        return None
+        return None, None
+
+
+def parse_token(token: str, bot_token: str, max_age: int = 7200) -> Optional[int]:
+    """Validate a session token, return user_id or None."""
+    return parse_token_sid(token, bot_token, max_age)[0]
 
 
 # ── Пропуск для одной ссылки ────────────────────────────────────────────────
