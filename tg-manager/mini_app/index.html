@@ -31838,13 +31838,15 @@ async function loadCfRecent(keep) {
     const rows = CFR_ROWS;
     const cfTotal = totalOf(d, rows);
     if (!rows.length) { txt('cfRecent', empty('📢','Нет каналов','')); return; }
+    // Созданный канал открывается тапом: раньше строка была просто текстом,
+    // и к только что сделанному каналу шли через общий список каналов.
     txt('cfRecent', rows.map(r=>`
-      <div class="row">
+      <div class="row${r.channel_id?' tap':''}"${r.channel_id?` onclick="openChannel(${Number(r.channel_id)})" role="button" tabindex="0"`:''}>
         <div class="row-body">
           <div class="row-name">${esc(r.title)}</div>
           <div class="row-val">${r.username?'@'+esc(r.username):'—'} · ${esc(objRu(r.type||'channel'))}</div>
           <div class="row-val" style="color:var(--hint)">${ago(r.added_at||r.created_at)}</div>
-        </div>
+        </div>${r.channel_id?'<span class="chev">›</span>':''}
       </div>
     `).join('') + moreBtn(rows.length, cfTotal, 'loadCfRecentMore()'));
   } catch(e) { txt('cfRecent', errHtml(errRu(e), 'loadCfRecent()')); }
@@ -32712,10 +32714,20 @@ async function loadClonerTargets() {
         {label:'📢 К каналам', fn:"goTab('channels')"});
       return;
     }
-    el.innerHTML = chans.map(c=>{
+    // Поиск и «все/ни одного»: при десятках каналов отмечать по одному долго,
+    // а нужный приходилось выискивать прокруткой окошка в 220 точек.
+    const tools = chans.length > 1 ? `<div style="display:flex;gap:6px;align-items:center;margin-bottom:4px">
+        ${chans.length > 6 ? `<input type="search" id="clonerFind" placeholder="Найти канал" oninput="clonerFilter(this.value)" style="flex:1;min-width:0;background:var(--bg3);border:1px solid var(--border-input);border-radius:var(--radius);padding:7px 10px;font-size:14px;color:var(--text);outline:none">` : '<span style="flex:1"></span>'}
+        <span class="sec-btn" onclick="clonerMarkAll(true)" role="button" tabindex="0">Все</span>
+        <span class="sec-btn" onclick="clonerMarkAll(false)" role="button" tabindex="0">Снять</span>
+      </div>` : '';
+    el.innerHTML = tools + chans.map(c=>{
       const name = c.title || c.name || (c.username?'@'+c.username:('Канал '+c.channel_id));
-      return `<label class="chk-row" style="display:flex;align-items:center;gap:8px;padding:6px 0;cursor:pointer;font-size:13px;color:var(--text)">
-        <input type="checkbox" class="cloner-ch" value="${c.channel_id}" style="width:18px;height:18px">
+      // data-ref — то, как канал записан в операции (target_refs): по нему
+      // «Повторить» из истории узнаёт прежние каналы.
+      const ref = c.username ? '@'+c.username : String(c.channel_id);
+      return `<label class="chk-row" data-name="${esc(String(name).toLowerCase())}" style="display:flex;align-items:center;gap:8px;padding:6px 0;cursor:pointer;font-size:13px;color:var(--text)">
+        <input type="checkbox" class="cloner-ch" value="${c.channel_id}" data-ref="${esc(ref)}" style="width:18px;height:18px">
         <span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis">${esc(name)}</span>
       </label>`;
     }).join('')
@@ -32724,10 +32736,44 @@ async function loadClonerTargets() {
     el.innerHTML = errHtml(errRu(e), 'loadClonerTargets()');
   }
 }
+function clonerFilter(q) {
+  q = String(q||'').trim().toLowerCase();
+  document.querySelectorAll('#clonerTargets label.chk-row').forEach(l => {
+    l.style.display = (!q || (l.dataset.name||'').includes(q)) ? 'flex' : 'none';
+  });
+}
+// «Все» отмечает только видимые: с поиском — найденные, без поиска — все.
+function clonerMarkAll(on) {
+  document.querySelectorAll('#clonerTargets label.chk-row').forEach(l => {
+    const b = l.querySelector('.cloner-ch');
+    if (b && (!on || l.style.display !== 'none')) b.checked = on;
+  });
+}
+// Повторить запуск из истории: источник, число постов и те же каналы
+// подставляются в форму. Сама пересылка — по кнопке, с тем же вопросом.
+let CLONER_HIST = [];
+function clonerRepeat(id) {
+  const r = CLONER_HIST.find(x => Number(x.id) === Number(id)); if (!r) return;
+  let p = r.params||r.payload||{};
+  if (typeof p === 'string') { try { p = JSON.parse(p); } catch(_) { p = {}; } }
+  document.getElementById('clonerSrc').value = p.source || p.source_ref || '';
+  if (p.msg_count) document.getElementById('clonerCount').value = p.msg_count;
+  const want = new Set((p.target_refs||[]).map(String));
+  let hit = 0;
+  document.querySelectorAll('.cloner-ch').forEach(b => {
+    b.checked = want.has(b.dataset.ref) || want.has(String(b.value));
+    if (b.checked) hit++;
+  });
+  const miss = want.size - hit;
+  toast(miss > 0 ? `↺ Подставлено. ${miss} ${plural(miss,'канала','каналов','каналов')} из прошлого запуска уже нет в списке`
+                 : '↺ Подставлено — проверьте и нажмите «Клонировать»');
+  document.getElementById('clonerSrc').scrollIntoView({behavior:'smooth', block:'center'});
+}
 async function loadClonerHistory() {
   txt('clonerHistory', '<div class="spin-wrap"><div class="spin"></div></div>');
   try {
     const rows = await api('/api/miniapp/content_cloner/history');
+    CLONER_HIST = Array.isArray(rows) ? rows : [];
     if (!rows.length) { txt('clonerHistory', empty('📋','Клонирований ещё не было',
       'Здесь появятся запуски: источник, статус и отчёт по каждому каналу.')); return; }
     txt('clonerHistory', rows.map(r => {
@@ -32741,7 +32787,9 @@ async function loadClonerHistory() {
           <div class="li-body">
             <div class="li-name">Из ${esc(src)}${tgts?' в '+num(tgts)+' '+plural(tgts,'канал','канала','каналов'):''}</div>
             <div class="li-sub wrap"><span class="badge ${cls}">${lbl}</span> · ${ago(r.created_at)} · нажмите, чтобы увидеть отчёт</div>
-          </div><span class="chev">›</span>
+          </div>
+          <button class="btn btn-s" style="padding:5px 10px;font-size:12px;min-width:0;flex:0 0 auto" title="Подставить в форму ещё раз" onclick="event.stopPropagation();clonerRepeat(${Number(r.id)})">↺</button>
+          <span class="chev">›</span>
         </div>
       `;
     }).join(''));

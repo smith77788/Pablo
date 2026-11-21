@@ -41,13 +41,16 @@ async function openBotFactory() {
     { const _v=`${d.total||0} ботов · ${d.active||0} активных`;
       txt('m-botfactory-val',_v); txt('m-botfactory-val-2',_v); }
     const recent = d.recent||[];
+    // Созданный бот открывается тапом: строка была просто текстом, и к
+    // только что собранному боту шли через общий список ботов.
     txt('botFactoryRecent', recent.length ? recent.map(b=>`
-      <div class="row">
+      <div class="row tap" onclick="openBot(${Number(b.bot_id)})" role="button" tabindex="0">
         <div class="row-ico" style="background:var(--bg-green-16)">${b.is_active?'🟢':'🔴'}</div>
         <div class="row-body">
           <div class="row-name">@${esc(b.username||b.first_name||b.bot_id)}</div>
           <div class="row-val">${(b.added_at||b.created_at)?new Date(b.added_at||b.created_at).toLocaleDateString('ru-RU'):''}</div>
         </div>
+        <span class="chev">›</span>
       </div>
     `).join('') : empty('🤖','Нет ботов','Добавьте первый бот'));
   } catch(e) {

@@ -9313,7 +9313,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             return _err("Unauthorized", 401)
         try:
             rows = await pool.fetch(
-                "SELECT id, title, username, type, added_at FROM managed_channels "
+                "SELECT id, channel_id, title, username, type, added_at FROM managed_channels "
                 "WHERE owner_id=$1 ORDER BY added_at DESC, id DESC "
                 "LIMIT $2 OFFSET $3",
                 uid, _list_limit(request, 20, 1000), _list_offset(request),
