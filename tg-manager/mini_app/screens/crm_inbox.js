@@ -14,6 +14,9 @@ let _ibPeer = null;
 // s-inbox-pane (широкий экран). Поля ответа и ИИ ищутся ВНУТРИ него: в DOM
 // могут жить оба места сразу, и getElementById взял бы чужое.
 let _ibHost = null;
+// Поиск по списку: по имени, нику и последнему сообщению. Длинный список
+// разговоров иначе листался глазами.
+let _ibQuery = '';
 function _ibEl(id) {
   return (_ibHost && _ibHost.querySelector('#' + id)) || document.getElementById(id);
 }
@@ -86,6 +89,10 @@ async function openInbox(waiting) {
       '<div class="seg-opt' + (_ibWaiting ? '' : ' on') + '" role="button" tabindex="0" onclick="openInbox(false)">Все · ' + num(d.total || 0) + '</div>' +
       '<div class="seg-opt' + (_ibWaiting ? ' on' : '') + '" role="button" tabindex="0" onclick="openInbox(true)">⏳ Ждут ответа · ' + num(d.waiting || 0) + '</div>' +
       '</div>';
+    if (_ibRows.length > 5) {
+      out += '<div style="margin:0 16px 8px"><input id="ibSearch" class="inp" type="search" ' +
+        'placeholder="🔍 Имя, ник или текст" value="' + esc(_ibQuery) + '" oninput="inboxFilter(this.value)" style="width:100%"></div>';
+    }
     if (!_ibRows.length) {
       out += empty('📥', _ibWaiting ? 'Все ответили' : 'Входящих пока нет',
         'Сюда собираются ответы людей: на аккаунты с включённым слушателем, в Хранилище бизнес-аккаунта, в релей бота и ботам-продавцам.',
@@ -116,6 +123,7 @@ async function openInbox(waiting) {
         '<div style="padding:40px 16px;text-align:center;color:var(--hint);font-size:13px">Выберите разговор слева</div>' +
       '</div></div>';
     body.innerHTML = out;
+    if (_ibQuery) inboxFilter(_ibQuery);
     // На широком экране сразу открыт первый разговор: пустая правая половина
     // ничего не сообщает, а первый в списке — тот, кто ждёт дольше всех.
     if (_ibSplit()) openInboxThread(0);
@@ -179,7 +187,8 @@ async function openInboxThread(i) {
     if (canRelay) {
       out += '<div style="padding:0 16px 8px">' +
         '<div class="preset-row" id="ibQuick"></div>' +
-        '<textarea id="ibReplyText" class="input-bc" rows="3" maxlength="4000" placeholder="Ответ через бота…" style="width:100%"></textarea>' +
+        '<textarea id="ibReplyText" class="input-bc" rows="3" maxlength="4000" placeholder="Ответ через бота…" style="width:100%" ' +
+          'oninput="_ibKeepDraft()">' + esc(loadDraft(_ibDraftKey(t))) + '</textarea>' +
         '<button class="btn" style="margin-top:6px;width:100%" onclick="sendInboxReply()">Отправить через бота</button>' +
         '</div>';
     }
@@ -232,6 +241,7 @@ async function inboxAiDraft() {
     const ta = _ibEl('ibReplyText');
     if (ta) {
       ta.value = d.draft;
+      _ibKeepDraft();
       box.innerHTML = _ibAiIntent(d.intent) + _ibAiBasis(d) + '<div style="font-size:12px;color:var(--hint);padding:6px 0">Черновик в поле ответа — проверьте и отправьте сами.</div>';
     } else {
       box.innerHTML = _ibAiIntent(d.intent) + _ibAiBasis(d) +
@@ -295,7 +305,41 @@ function inboxUseTpl(k) {
   const ta = _ibEl('ibReplyText');
   if (!t || !ta) return;
   ta.value = _ibFill(t.template && t.template.text);
+  _ibKeepDraft();
   ta.focus();
+}
+
+// Черновик ответа живёт у каждого разговора свой: переход к соседнему
+// разговору или выход из экрана больше не стирает недописанный ответ.
+function _ibDraftKey(t) { return 'inbox_' + Number((t || {}).peer_user_id || 0); }
+function _ibKeepDraft() {
+  const ta = _ibEl('ibReplyText');
+  if (ta && _ibPeer) saveDraft(_ibDraftKey(_ibPeer), ta.value);
+}
+
+function inboxFilter(q) {
+  _ibQuery = String(q || '');
+  const needle = _ibQuery.trim().toLowerCase();
+  let shown = 0;
+  document.querySelectorAll('#s-inbox .ib-row').forEach(function (r) {
+    const t = _ibRows[Number(r.dataset.i)] || {};
+    const hay = [t.name, t.username ? '@' + t.username : '', t.last_text].join(' ').toLowerCase();
+    const ok = !needle || hay.indexOf(needle) >= 0;
+    r.style.display = ok ? '' : 'none';
+    if (ok) shown++;
+  });
+  let note = document.getElementById('ibSearchNone');
+  if (!note) {
+    const list = document.querySelector('#s-inbox .ib-list .lst');
+    if (!list) return shown;
+    note = document.createElement('div');
+    note.id = 'ibSearchNone';
+    note.style.cssText = 'padding:16px;text-align:center;color:var(--hint);font-size:13px';
+    note.textContent = 'Ничего не найдено';
+    list.appendChild(note);
+  }
+  note.style.display = shown ? 'none' : '';
+  return shown;
 }
 async function inboxPickTpl() {
   const id = await askChoice('📝 Быстрый ответ', (_ibTpl || []).map(function (t) {
@@ -328,6 +372,7 @@ async function sendInboxReply() {
     await api('/api/miniapp/inbox/' + t.peer_user_id + '/reply', {
       method: 'POST', body: JSON.stringify({text: text, bot_id: relay.bot_id || 0})});
     toast('✅ Отправлено');
+    clearDraft(_ibDraftKey(t));
     const i = _ibRows.indexOf(t);
     if (i >= 0) openInboxThread(i);
   } catch (e) {
