@@ -1108,7 +1108,12 @@ def setup_routes(app: web.Application, pool) -> None:
             out = []
             for s in res.get("sessions") or []:
                 h = int(s.get("hash") or 0)
-                out.append({**s, "trusted": h in trusted})
+                # Отпечаток сеанса — int64, а JSON-число в браузере — double:
+                # всё, что больше 2^53, приходит в экран округлённым. Экран
+                # отправлял назад ДРУГОЙ отпечаток, «это я» ложилось на сеанс,
+                # которого нет, и после перезагрузки списка ничего не менялось;
+                # «завершить» так же промахивалось. Отдаём строкой.
+                out.append({**s, "hash": str(h), "trusted": h in trusted})
             return _json_resp({"ok": True, "sessions": out,
                                "own_created": own_created,
                                # Можно ли сейчас закрывать чужие сеансы (сутки прошли).
