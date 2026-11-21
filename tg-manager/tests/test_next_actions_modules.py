@@ -5,9 +5,11 @@
 о сломанном артефакте (папка без ссылки), о нарисованной, но не развёрнутой
 связке и о том, что архив Хранилища тихо перестал пополняться.
 
-Отдельно здесь стережётся сдержанность: «подключите Хранилище» всем подряд не
-показываем — это требует Telegram Business и превращается в вечный баннер,
-который нельзя убрать (кнопка «отложить» прячет подсказку лишь на сутки).
+Раньше здесь стереглась обратная сдержанность: «подключите Хранилище» не
+показывали никому, кто его не подключал (требовало Premium). 21.11.2026 владелец
+решил сделать Хранилище одной из главных фишек и показывать подсказку всем
+одинаково — подключать бота к личным чатам теперь можно и без Premium. Чтобы
+она не стала баннером, «отложить» прячет её на трое суток.
 """
 from __future__ import annotations
 
@@ -111,7 +113,7 @@ def test_channel_without_bots_is_not_offered_a_network():
 def test_disabled_vault_connection_is_loud():
     """Тихая потеря данных: архив не пополняется, а экран об этом не говорил."""
     a = _one(_base(vault_conn_off=1), "vault_reconnect")
-    assert a["priority"] >= 70 and a["fn"] == "openVault"
+    assert a["priority"] >= 70 and a["fn"] == "openVaultConnect"
 
 
 def test_working_connection_alongside_a_disabled_one_is_not_an_alarm():
@@ -131,11 +133,64 @@ def test_vault_with_rules_is_left_alone():
     assert "setup_intent_rules" not in _ids(_base(vault_conn=1, vault_rules=3))
 
 
-def test_vault_is_never_advertised_to_someone_who_has_not_connected_it():
-    """Хранилище требует Telegram Business — вечный баннер «подключите» стал бы
-    несмываемым: «отложить» прячет подсказку лишь на сутки."""
-    ids = _ids(_base(vault_conn=0, vault_conn_off=0))
-    assert not [i for i in ids if i.startswith("vault_") or i == "setup_intent_rules"]
+def test_vault_is_offered_to_someone_who_never_connected_it():
+    """Главная фишка: пока Хранилище не подключали, копайлот его предлагает и
+    ведёт прямо в окно подключения."""
+    a = _one(_base(vault_conn=0, vault_conn_off=0), "connect_vault")
+    assert a["fn"] == "openVaultConnect" and a["priority"] >= 70
+    assert "удалит" in a["reason"]
+    # Не баннер: «отложить» прячет на трое суток, а не на сутки.
+    assert a["snooze_hours"] == 72
+
+
+def test_vault_offer_goes_away_once_connected_or_disabled():
+    assert "connect_vault" not in _ids(_base(vault_conn=1, vault_conn_off=0))
+    # Отключённое подключение — своя, более точная подсказка «переподключить».
+    ids = _ids(_base(vault_conn=0, vault_conn_off=1))
+    assert "connect_vault" not in ids and "vault_reconnect" in ids
+
+
+def test_vault_offer_is_not_shown_when_the_state_is_unknown():
+    """Счётчик не прочитался (None) — не утверждаем, что не подключено."""
+    assert "connect_vault" not in _ids(_base(vault_conn=None, vault_conn_off=None))
+
+
+def test_failed_vault_read_stays_unknown_not_zero():
+    """Сбой чтения business_connections не превращается в «не подключено»:
+    иначе подсказка звала бы подключить того, у кого Хранилище работает."""
+    import asyncio
+
+    from services import next_actions
+
+    class _Pool:
+        async def fetchval(self, sql, *a):
+            if "business_connections" in sql:
+                raise RuntimeError("connection reset")
+            return 0
+
+        async def fetch(self, sql, *a):
+            return []
+
+        async def fetchrow(self, sql, *a):
+            return None
+
+    st = asyncio.run(next_actions._gather_state(_Pool(), 7))
+    assert st["vault_conn"] is None and st["vault_conn_off"] is None
+    assert "connect_vault" not in [a["id"] for a in build_suggestions(st)]
+
+
+def test_vault_offer_snooze_lasts_three_days():
+    from datetime import datetime, timedelta, timezone
+
+    from services.next_actions import rank_with_feedback
+    now = datetime(2026, 11, 21, tzinfo=timezone.utc)
+    items = build_suggestions(_base(vault_conn=0, vault_conn_off=0))
+    hidden = rank_with_feedback(items, {"connect_vault": {
+        "snoozed": 1, "last_snoozed": now - timedelta(hours=48)}}, now)
+    back = rank_with_feedback(items, {"connect_vault": {
+        "snoozed": 1, "last_snoozed": now - timedelta(hours=73)}}, now)
+    assert "connect_vault" not in [a["id"] for a in hidden]
+    assert "connect_vault" in [a["id"] for a in back]
 
 
 # ── Общие контракты движка ─────────────────────────────────────────────────
