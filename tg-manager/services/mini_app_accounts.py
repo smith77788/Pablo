@@ -51,7 +51,8 @@ def setup_routes(app: web.Application, pool) -> None:
         _body_wants_platform_scope, _csv_resp, _err, _geo_code, _get_uid,
         _json_resp, _obus, _proxy_display_host, _safe_count, _safe_fetch,
         _safe_fetchrow, _safe_fetchval, _text, _wants_platform_scope, log,
-        normalize_phone, read_upload, read_upload_text,
+        alert_owner_drain, normalize_phone, read_upload, read_upload_text,
+        require_owner_pin,
     )
     from services.security import validate_string
 
@@ -1313,7 +1314,13 @@ def setup_routes(app: web.Application, pool) -> None:
             acc_id = int(request.match_info["acc_id"])
         except (KeyError, ValueError):
             return _err("Неверный идентификатор аккаунта", 400)
+        # Опасное действие: код Infragram (если стоит) + сигнал владельцу.
+        gate = await require_owner_pin(request, pool, uid)
+        if gate is not None:
+            return gate
         try:
+            phone = await _safe_fetchval(pool,
+                "SELECT phone FROM tg_accounts WHERE id=$1 AND owner_id=$2", acc_id, uid)
             res = await pool.execute(
                 "DELETE FROM tg_accounts WHERE id=$1 AND owner_id=$2", acc_id, uid)
             if str(res).endswith(" 0"):
@@ -1322,6 +1329,7 @@ def setup_routes(app: web.Application, pool) -> None:
 
             await record_manual_action(
                 pool, uid, "account_delete", target=str(acc_id))
+            alert_owner_drain(pool, uid, "account_delete", phone or f"#{acc_id}")
             return _json_resp({"ok": True})
         except Exception:
             log.exception("account_delete uid=%d acc=%d", uid, acc_id)
@@ -1374,8 +1382,13 @@ def setup_routes(app: web.Application, pool) -> None:
         elif act == "export_session":
             # СИНХРОННО (раньше фантомный op → r.session никогда не приходил).
             # Владелец экспортирует СВОЮ сессию (owner-scoped), расшифровываем.
+            # Опасное действие: код Infragram (если стоит) + сигнал владельцу.
+            gate = await require_owner_pin(request, pool, uid)
+            if gate is not None:
+                return gate
             row = await _safe_fetchrow(pool,
-                "SELECT session_str FROM tg_accounts WHERE id=$1 AND owner_id=$2", acc_id, uid)
+                "SELECT session_str, phone FROM tg_accounts WHERE id=$1 AND owner_id=$2",
+                acc_id, uid)
             if not row or not row["session_str"]:
                 return _err("Сессия недоступна", 404)
             try:
@@ -1383,6 +1396,7 @@ def setup_routes(app: web.Application, pool) -> None:
                 sess = decrypt_token(row["session_str"])
             except Exception:
                 sess = row["session_str"]
+            alert_owner_drain(pool, uid, "export_session", row.get("phone") or f"#{acc_id}")
             return _json_resp({"ok": True, "session": sess})
         elif act == "reauth":
             # Переавторизация требует ОДНОРАЗОВЫЙ КОД из Telegram (вводится вручную) —

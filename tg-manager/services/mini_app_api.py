@@ -1478,6 +1478,36 @@ def _current_sid(request: web.Request) -> str | None:
     return parse_token_sid(auth[7:], _bot_token())[1]
 
 
+async def require_owner_pin(request: web.Request, pool, uid: int):
+    """Код Infragram перед опасным действием (services/owner_guard).
+
+    → None, если пускать (кода нет или сеанс подтверждён); иначе готовый
+    ответ 403 с `need_pin`, по которому мини-апп спросит код и повторит.
+    Сигнал владельцу об уже случившемся действии шлёт сам обработчик после
+    успеха (owner_guard.alert_drain), а не эта калитка.
+    """
+    from services import owner_guard
+    g = await owner_guard.guard_dangerous(pool, uid, _current_sid(request))
+    if g.get("allowed"):
+        return None
+    body = {"error": "Нужен код Infragram", "need_pin": True}
+    lu = g.get("locked_until")
+    if lu is not None:
+        body["error"] = "Слишком много попыток — попробуйте позже"
+        body["locked"] = True
+    return _json_resp(body, status=403)
+
+
+def alert_owner_drain(pool, uid: int, kind: str, detail: str | None = None) -> None:
+    """Фоновый сигнал владельцу об опасном действии (для всех, не только с кодом)."""
+    try:
+        from services import owner_guard
+        from services.bg_tasks import spawn
+        spawn(owner_guard.alert_drain(pool, int(uid), kind, detail), name="owner_drain")
+    except Exception:
+        log.debug("alert_owner_drain uid=%s kind=%s", uid, kind, exc_info=True)
+
+
 def _admin_ids() -> set[int]:
     raw = os.getenv("ADMIN_IDS", "")
     return {int(x.strip()) for x in raw.split(",") if x.strip().isdigit()}
@@ -3055,6 +3085,71 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             return _err(res.get("error") or "Не удалось", 400)
         return _json_resp({"ok": True, "phrase": res.get("phrase") or ""})
 
+    async def owner_guard_state(request: web.Request) -> web.Response:
+        """Стоит ли код Infragram и не заперт ли ввод (для экрана «Мои входы»)."""
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        from services import owner_guard
+        st = await owner_guard.get_state(pool, uid)
+        return _json_resp({"has_pin": bool(st.get("has_pin")),
+                           "locked": owner_guard.is_locked(st.get("locked_until"))})
+
+    async def owner_guard_set(request: web.Request) -> web.Response:
+        """Поставить или сменить код. Смена требует текущий код ({current})."""
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            body = await request.json()
+        except Exception:
+            body = {}
+        from services import owner_guard
+        res = await owner_guard.set_pin(pool, uid, body.get("pin"),
+                                        current_pin=body.get("current"))
+        if not res.get("ok"):
+            return _err(res.get("error") or "Не удалось", 400)
+        # Код поставлен — текущий сеанс сразу подтверждён, чтобы не спрашивать
+        # его же через секунду на первом опасном действии.
+        await owner_guard.verify_and_confirm(pool, uid, _current_sid(request), body.get("pin"))
+        return _json_resp({"ok": True})
+
+    async def owner_guard_remove(request: web.Request) -> web.Response:
+        """Снять код — нужен текущий код ({current})."""
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            body = await request.json()
+        except Exception:
+            body = {}
+        from services import owner_guard
+        res = await owner_guard.remove_pin(pool, uid, body.get("current") or "")
+        if not res.get("ok"):
+            return _err(res.get("error") or "Не удалось", 400)
+        return _json_resp({"ok": True})
+
+    async def owner_guard_verify(request: web.Request) -> web.Response:
+        """Подтвердить код для опасного действия: открывает окно этому сеансу."""
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            body = await request.json()
+        except Exception:
+            body = {}
+        from services import owner_guard
+        res = await owner_guard.verify_and_confirm(pool, uid, _current_sid(request),
+                                                   body.get("pin") or "")
+        if not res.get("ok"):
+            out = {"error": res.get("error") or "Код неверный"}
+            if res.get("locked_until") is not None:
+                out["locked"] = True
+            if "attempts_left" in res:
+                out["attempts_left"] = res["attempts_left"]
+            return _json_resp(out, status=400)
+        return _json_resp({"ok": True})
+
     async def factory_name_preview(request: web.Request) -> web.Response:
         """Предпросмотр генерируемых имён и @юзернеймов ДО создания ресурсов.
         Чистый расчёт (name_variator), без БД и без Telegram — чтобы владелец
@@ -3388,6 +3483,11 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         uid = _get_uid(request)
         if not uid:
             return _err("Unauthorized", 401)
+        # Опасное действие (показ всех паролей 2FA): код Infragram, если стоит,
+        # и сигнал владельцу в любом случае.
+        gate = await require_owner_pin(request, pool, uid)
+        if gate is not None:
+            return gate
         try:
             rows = await pool.fetch(
                 "SELECT id, phone, first_name, username, twofa_enc FROM tg_accounts "
@@ -3410,6 +3510,8 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         } for r in rows]
         # Факт показа — в журнал (без самих паролей): кто и сколько открыл.
         log.info("profile_setter_twofa reveal uid=%d accounts=%d", uid, len(items))
+        if items:
+            alert_owner_drain(pool, uid, "reveal_twofa", f"паролей показано: {len(items)}")
         return _json_resp({"items": items})
 
     # ── Account Cleaner ────────────────────────────────────────────────────────
@@ -7305,6 +7407,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         action_filter = (request.rel_url.query.get("action") or "").strip()
         if action_filter not in ("", "warn", "cool", "pause", "resume"):
             action_filter = ""
+        from services import owner_guard as _owner_guard
         try:
             from services import account_shield as _sh
             cfg_obj = await _sh.get_shield_config(pool, uid)
@@ -7444,8 +7547,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 }
                 for r in history
             ],
-            # Подсказка задать секретное слово (есть аккаунты, слова ещё нет):
-            # экран «Защита» покажет карточку-подсказку (services/owner_safeword).
+            # Подсказки задать защиту: есть аккаунты, а кода Infragram или
+            # секретного слова ещё нет (owner_guard / owner_safeword).
+            "pin_suggested": await _owner_guard.pin_suggested(pool, uid),
             "safeword_suggested": await _owner_safeword.suggested(pool, uid),
         })
 
@@ -10084,6 +10188,10 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     app.router.add_post("/api/miniapp/owner/sessions/revoke", owner_sessions_revoke)
     app.router.add_get("/api/miniapp/owner/safeword", owner_safeword_get)
     app.router.add_post("/api/miniapp/owner/safeword", owner_safeword_set)
+    app.router.add_get("/api/miniapp/owner/guard", owner_guard_state)
+    app.router.add_post("/api/miniapp/owner/guard/set", owner_guard_set)
+    app.router.add_post("/api/miniapp/owner/guard/remove", owner_guard_remove)
+    app.router.add_post("/api/miniapp/owner/guard/verify", owner_guard_verify)
     app.router.add_post("/api/miniapp/factory/name_preview", factory_name_preview)
     # Bots
     app.router.add_post("/api/miniapp/bot_factory/create", bot_factory_create)

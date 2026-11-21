@@ -7590,6 +7590,17 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
       <button class="btn btn-s" style="flex:1 1 auto" onclick="openPhysics()">⚛️ Риск по аккаунтам</button>
     </div>
     <div id="shieldCoverage"></div>
+    <div id="shieldPinNudge" style="display:none;padding:0 16px 4px">
+      <div class="card" style="padding:12px 14px;border:1px solid var(--accent)">
+        <div style="font-weight:600;font-size:14px">🔑 Поставьте код Infragram</div>
+        <div style="font-size:13px;color:var(--hint);line-height:1.5;margin:6px 0 10px">
+          Вход подтверждает только Telegram. Код спросят перед сливом данных —
+          экспортом сессии, показом паролей 2FA, удалением, — даже если кто-то
+          открыл ваш Telegram.
+        </div>
+        <button class="btn btn-p" style="width:100%" onclick="openDevices()">Поставить код</button>
+      </div>
+    </div>
     <div id="shieldSafewordNudge" style="display:none;padding:0 16px 4px">
       <div class="card" style="padding:12px 14px;border:1px solid var(--accent)">
         <div style="font-weight:600;font-size:14px">🛟 Задайте секретное слово</div>
@@ -9988,6 +9999,24 @@ async function _apiRaw(path, opts={}) {
       const error = new Error('Сессия истекла, перезапустите приложение');
       error.status = r.status;
       throw error;
+    }
+  }
+  // Код Infragram перед опасным действием (services/owner_guard): сервер
+  // отбивает 403 с need_pin. Как и авто-релог на 401, спрашиваем код здесь —
+  // один раз — и повторяем запрос, чтобы каждая опасная ручка получила это
+  // даром, без правки своих вызовов. Отмена ввода = обычный отказ.
+  if (r.status === 403 && !_isForm && !opts._pinTried) {
+    let _pj = null;
+    try { _pj = await r.clone().json(); } catch(_) {}
+    if (_pj && _pj.need_pin) {
+      const ok = await askOwnerPin(!!_pj.locked);
+      if (!ok) {
+        const e = new Error('Нужен код Infragram'); e.need_pin = true; e.cancelled = true; throw e;
+      }
+      opts._pinTried = true;
+      try {
+        r = await fetchT(path, { ...opts, headers: _hdr() }, _ms);
+      } catch(e) { throw new Error((e && e.message) || 'Нет соединения с сервером'); }
     }
   }
   // Сервер перезапускается после деплоя: пока идёт старт, порт держит
@@ -22831,6 +22860,90 @@ function ownSessHtml(s) {
   return html;
 }
 
+// ── Код Infragram: вторая стена перед сливом данных (services/owner_guard) ──
+// Блок на экране «Мои входы»: поставить/сменить/снять код. Когда код стоит,
+// опасные действия (экспорт сессии, показ паролей 2FA, удаление) спрашивают
+// его — это делает сам api() на ответе need_pin, см. askOwnerPin ниже.
+function ownGuardHtml(g) {
+  g = g || {};
+  if (g.has_pin) {
+    return `<div class="card" style="margin-bottom:14px;padding:14px 16px">
+      <div style="font-weight:600;font-size:14px">🔑 Код Infragram включён</div>
+      <div style="font-size:13px;color:var(--hint);line-height:1.5;margin:6px 0 10px">
+        Код спрашивается перед сливом данных: экспортом сессии, показом паролей 2FA,
+        удалением. ${g.locked ? '<b style="color:var(--red)">Ввод временно заблокирован после ошибок.</b>' : ''}
+      </div>
+      <div style="display:flex;gap:8px">
+        <button class="btn btn-s" style="flex:1" onclick="ownGuardChange()">Сменить код</button>
+        <button class="btn btn-d" style="flex:1" onclick="ownGuardRemove()">Снять код</button>
+      </div></div>`;
+  }
+  return `<div class="card" style="margin-bottom:14px;padding:14px 16px">
+    <div style="font-weight:600;font-size:14px">🔑 Код Infragram выключен</div>
+    <div style="font-size:13px;color:var(--hint);line-height:1.5;margin:6px 0 10px">
+      Вход подтверждает только Telegram. Код — ваша вторая стена: его спросят перед
+      сливом данных, даже если кто-то открыл ваш Telegram. По желанию.
+    </div>
+    <button class="btn btn-p" style="width:100%" onclick="ownGuardSet()">Поставить код</button></div>`;
+}
+
+async function ownGuardSet() {
+  const pin = await askPrompt('Новый код Infragram', {type:'number', placeholder:'4–8 цифр'});
+  if (pin == null) return;
+  const pin2 = await askPrompt('Повторите код', {type:'number', placeholder:'ещё раз'});
+  if (pin2 == null) return;
+  if (String(pin).trim() !== String(pin2).trim()) { toast('⚠️ Коды не совпали'); return; }
+  try {
+    await api('/api/miniapp/owner/guard/set', {method:'POST', body:JSON.stringify({pin:String(pin).trim()})});
+    toast('🔑 Код поставлен'); openDevices();
+  } catch(e) { toast('⚠️ '+errRu(e,'Не удалось')); }
+}
+
+async function ownGuardChange() {
+  const cur = await askPrompt('Текущий код', {type:'number'});
+  if (cur == null) return;
+  const pin = await askPrompt('Новый код', {type:'number', placeholder:'4–8 цифр'});
+  if (pin == null) return;
+  try {
+    await api('/api/miniapp/owner/guard/set', {method:'POST',
+      body:JSON.stringify({current:String(cur).trim(), pin:String(pin).trim()})});
+    toast('🔑 Код сменён'); openDevices();
+  } catch(e) { toast('⚠️ '+errRu(e,'Не удалось')); }
+}
+
+async function ownGuardRemove() {
+  if (!await askConfirm('Снять код Infragram? Опасные действия перестанут спрашивать код.')) return;
+  const cur = await askPrompt('Текущий код', {type:'number'});
+  if (cur == null) return;
+  try {
+    await api('/api/miniapp/owner/guard/remove', {method:'POST',
+      body:JSON.stringify({current:String(cur).trim()})});
+    toast('Код снят'); openDevices();
+  } catch(e) { toast('⚠️ '+errRu(e,'Не удалось')); }
+}
+
+// Спросить код перед опасным действием и подтвердить его на сервере. Возвращает
+// true, когда сеанс подтверждён (api() повторит исходный запрос). Крутится,
+// пока код не верен или владелец не отменит.
+async function askOwnerPin(locked) {
+  if (locked) { toast('⚠️ Слишком много попыток — попробуйте позже'); return false; }
+  for (;;) {
+    const pin = await askPrompt('🔑 Код Infragram', {type:'number', placeholder:'введите код'});
+    if (pin == null) return false;
+    try {
+      // Прямой fetch, не api(): иначе ответ need_pin этой же ручки зациклил бы.
+      const r = await fetchT('/api/miniapp/owner/guard/verify', {
+        method:'POST', headers:{'Authorization':'Bearer '+TK,'Content-Type':'application/json'},
+        body: JSON.stringify({pin:String(pin).trim()}),
+      });
+      if (r.ok) return true;
+      let j = {}; try { j = await r.json(); } catch(_) {}
+      if (j.locked) { toast('⚠️ Слишком много попыток — попробуйте позже'); return false; }
+      toast('⚠️ ' + (j.error || 'Код неверный') + (j.attempts_left != null ? ` (осталось попыток: ${j.attempts_left})` : ''));
+    } catch(e) { toast('⚠️ Не удалось проверить код'); return false; }
+  }
+}
+
 async function ownSessRevoke(id) {
   if (!await askConfirm('Завершить этот вход? Устройство потеряет доступ к Infragram.\n\nЕсли вход был через Telegram, а устройство не ваше, — кто-то открыл ваш Telegram: завершите чужие сеансы и там (Настройки → Устройства).')) return;
   try {
@@ -22901,13 +23014,14 @@ async function openDevices() {
   push('s-devices');
   txt('devBody', '<div class="spin-wrap"><div class="spin"></div></div>');
   try {
-    const [d, s, w] = await Promise.all([
+    const [d, s, g, w] = await Promise.all([
       api('/api/miniapp/devices'),
       api('/api/miniapp/owner/sessions').catch(() => ({sessions: []})),
+      api('/api/miniapp/owner/guard').catch(() => ({has_pin: false})),
       api('/api/miniapp/owner/safeword').catch(() => ({phrase: ''})),
     ]);
     const rows = d.devices || [];
-    let html = `<div style="padding:12px 16px">` + ownSafewordHtml(w) + ownSessHtml(s) + `
+    let html = `<div style="padding:12px 16px">` + ownGuardHtml(g) + ownSafewordHtml(w) + ownSessHtml(s) + `
       <div class="sec" style="margin-top:14px">Связанные браузеры</div>
       <div style="font-size:13px;color:var(--hint);line-height:1.5;margin-bottom:10px">
         Это браузеры, которым вы разрешили вход по коду из бота. Внутри Telegram
@@ -29088,7 +29202,9 @@ async function openShield() {
             'Заводит второй свой сеанс без SMS: если основная сессия умрёт, флот поднимет аккаунт сам',
             "shieldToggle('guard_reserve')"));
 
-    // Подсказка задать секретное слово (есть аккаунты, слова нет).
+    // Подсказки защиты: код Infragram и секретное слово (есть аккаунты, нет их).
+    const _pn = document.getElementById('shieldPinNudge');
+    if (_pn) _pn.style.display = d.pin_suggested ? '' : 'none';
     const _sw = document.getElementById('shieldSafewordNudge');
     if (_sw) _sw.style.display = d.safeword_suggested ? '' : 'none';
     // Сигналы атаки: аккаунты, которым нужно действие сейчас, и журнал.
