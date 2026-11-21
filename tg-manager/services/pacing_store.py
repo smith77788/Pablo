@@ -34,6 +34,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import time
 
 from services.logger import log_exc_swallow
 
@@ -42,13 +43,60 @@ log = logging.getLogger(__name__)
 _SYNC_INTERVAL_S = 5.0
 
 
+# Сколько обмен может не проходить подряд, прежде чем это тревога владельцу.
+# Одиночный сбой ничего не теряет: исходы и состояния возвращаются в очередь и
+# уходят следующим кругом через 5 секунд. Тревожно другое — когда база не
+# отвечает так долго, что накопленное может не дожить до неё (рестарт процесса).
+# Раньше тревога «обмен темпом флота с базой не удался» приходила на каждый
+# блип и пугала владельца потерей, которой не было.
+_STALL_ALERT_S = 60.0
+
+# Состояние эпизода сбоев: когда (monotonic) обмен перестал проходить, и
+# сообщили ли уже об этом эпизоде.
+_failing_since: "float | None" = None
+_stall_reported = False
+_cycle_failed = False
+
+
 def _metric(name: str, value: float = 1.0) -> None:
+    global _cycle_failed
+    if name == "infragram_pacing_sync_errors_total":
+        _cycle_failed = True
     try:
         from services import metrics as _m
 
         _m.inc(name, None, float(value))
     except Exception:
         pass
+
+
+def _close_cycle(now: float) -> None:
+    """Подвести итог круга обмена: эпизод сбоев начался, длится или кончился.
+
+    Счётчик `infragram_pacing_sync_stalled_total` растёт ОДИН раз на эпизод,
+    когда обмен не проходит дольше `_STALL_ALERT_S` подряд, — именно он идёт в
+    тревогу владельцу. Сырые `..._sync_errors_total` остаются для графика.
+    """
+    global _failing_since, _stall_reported, _cycle_failed
+    failed, _cycle_failed = _cycle_failed, False
+    if not failed:
+        if _failing_since is not None and _stall_reported:
+            log.warning("pacing_store: обмен темпом с базой восстановился")
+        _failing_since, _stall_reported = None, False
+        return
+    if _failing_since is None:
+        _failing_since = now
+        return
+    if not _stall_reported and now - _failing_since >= _STALL_ALERT_S:
+        _stall_reported = True
+        log.error("pacing_store: обмен темпом с базой не проходит %.0f с подряд",
+                  now - _failing_since)
+        try:
+            from services import metrics as _m
+
+            _m.inc("infragram_pacing_sync_stalled_total", None, 1.0)
+        except Exception:
+            pass
 
 
 async def flush_events(pool, worker_id: str = "") -> int:
@@ -272,13 +320,25 @@ async def flush_bans(pool) -> int:
 
 async def sync_once(pool, worker_id: str = "") -> None:
     """Один обмен: сначала запись (чтобы окно включало свои исходы), потом чтение."""
-    await flush_events(pool, worker_id)
-    await flush_account_states(pool)
-    await flush_flood_floor(pool)
-    await flush_direct_actions(pool)
-    await flush_peer_floods(pool)
-    await flush_bans(pool)
-    await pull_window(pool)
+    global _cycle_failed
+    _cycle_failed = False
+    try:
+        await flush_events(pool, worker_id)
+        await flush_account_states(pool)
+        await flush_flood_floor(pool)
+        await flush_direct_actions(pool)
+        await flush_peer_floods(pool)
+        await flush_bans(pool)
+        await pull_window(pool)
+    except asyncio.CancelledError:
+        raise
+    except Exception:
+        # flush_direct_actions пропускает сбой записи бюджета наружу — для
+        # эпизода это такой же сбой обмена.
+        _cycle_failed = True
+        _close_cycle(time.monotonic())
+        raise
+    _close_cycle(time.monotonic())
 
 
 async def run_sync_loop(pool, worker_id: str = "") -> None:

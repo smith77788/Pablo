@@ -11,7 +11,7 @@
     Живой человек так не делает — он держит одно подключение и совмещает
     несколько дел, и именно это Telegram видит как нормальное поведение.
 
-ЧТО ДЕЛАЕТ. Под флагом `FLEET_SHARED_SESSIONS=1` (по умолчанию ВЫКЛ) клиент,
+ЧТО ДЕЛАЕТ. Когда режим включён (по умолчанию — да, см. ВКЛЮЧЕНИЕ) клиент,
 который отдаёт `account_manager._make_client` / `connect_client`, — это
 лёгкий держатель (`SharedClient`). Его `connect()` берёт ОБЩЕЕ подключение
 аккаунта (создаёт его при первом обращении штатным `connect_client`, со всеми
@@ -29,8 +29,8 @@
 (вступить, пригласить, отправить...). Нижний порог флуд-паузы
 (`_wrap_client_flood_floor`) работает как раньше — он стоит на самом клиенте.
 
-ВКЛЮЧЕНИЕ. Либо окружение `FLEET_SHARED_SESSIONS=1` (для всех), либо режим в
-базе (`platform_settings.fleet_shared_sessions`: off | all | owners:1,2) —
+ВКЛЮЧЕНИЕ. По умолчанию ВКЛЮЧЕНО для всех. Окружение `FLEET_SHARED_SESSIONS`
+(1/0) перекрывает всё; без него решает режим в базе (`platform_settings.fleet_shared_sessions`: off | all | owners:1,2) —
 его ставит админ командой /fleet_parallel без деплоя, в том числе на одного
 владельца для канарейки.
 
@@ -71,7 +71,11 @@ _forced: "bool | None" = None
 # сходятся за полминуты.
 SETTING_KEY = "fleet_shared_sessions"
 REFRESH_S = 30.0
-_db_mode: str = "off"
+# ПО УМОЛЧАНИЮ ВКЛЮЧЕНО (решение владельца 21.11.2026): нет записи в базе —
+# операции делят аккаунты. Выключает только явное "off" (/fleet_parallel off)
+# или окружение FLEET_SHARED_SESSIONS=0.
+DEFAULT_MODE = "all"
+_db_mode: str = DEFAULT_MODE
 _db_owners: frozenset = frozenset()
 _db_read_at: float = 0.0
 
@@ -83,8 +87,11 @@ _current_owner: "contextvars.ContextVar[int | None]" = contextvars.ContextVar(
 
 
 def parse_mode(raw: "str | None") -> "tuple[str, frozenset]":
-    """Разбор значения настройки. Непонятное значение — выключено."""
+    """Разбор значения настройки. Нет значения — режим по умолчанию (вкл);
+    непонятное значение — выключено (осторожнее при опечатке админа)."""
     v = str(raw or "").strip().lower()
+    if not v:
+        return parse_mode(DEFAULT_MODE) if DEFAULT_MODE else ("off", frozenset())
     if v in ("all", "on", "1", "true"):
         return "all", frozenset()
     if v.startswith("owners:"):
@@ -113,8 +120,9 @@ def set_mode(raw: "str | None") -> None:
 def current_mode() -> "tuple[str, frozenset]":
     if _forced is not None:
         return ("all" if _forced else "off"), frozenset()
-    if _env_on():
-        return "all", frozenset()
+    env = _env_value()
+    if env is not None:
+        return ("all" if env else "off"), frozenset()
     return _db_mode, _db_owners
 
 
@@ -147,9 +155,15 @@ async def save_mode(pool, raw: str) -> "tuple[str, frozenset]":
     return mode, owners
 
 
-def _env_on() -> bool:
-    return str(os.getenv("FLEET_SHARED_SESSIONS", "")).strip().lower() in (
-        "1", "true", "yes", "on")
+def _env_value() -> "bool | None":
+    """FLEET_SHARED_SESSIONS: 1 — включить всем, 0 — выключить всем (аварийный
+    рубильник поверх базы), пусто — решает настройка в базе."""
+    v = str(os.getenv("FLEET_SHARED_SESSIONS", "")).strip().lower()
+    if v in ("1", "true", "yes", "on"):
+        return True
+    if v in ("0", "false", "no", "off"):
+        return False
+    return None
 
 
 def enabled(owner_id: "int | None" = None) -> bool:

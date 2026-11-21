@@ -172,11 +172,26 @@ def _counters_in_code() -> set[str]:
     return found
 
 
+# Сырые счётчики, о которых владельцу сообщает НЕ каждый сбой, а эпизод:
+# одиночный сбой здесь ничего не теряет и правило не нарушает, тревожно только
+# долгое состояние. Значение — счётчик эпизода, и он обязан быть в таблице
+# тревог (проверяется ниже), иначе исключение превратилось бы в дыру.
+# Скриншот 21.11.2026: «Защита не записалась» на два блипа обмена темпом и три
+# блипа аренды — без единой потерянной записи.
+_SURFACED_AS_EPISODE = {
+    "infragram_pacing_sync_errors_total": "infragram_pacing_sync_stalled_total",
+    "infragram_executor_lease_errors_total": "infragram_executor_lease_lost_total",
+}
+
+
 def test_every_protective_failure_counter_is_surfaced():
     """Иначе новая защита снова сломается молча."""
     declared = _declared_counters()
     assert declared, "список видов сбоя пуст — сообщать больше не о чем"
-    missing = sorted(_counters_in_code() - declared)
+    for raw, episode in _SURFACED_AS_EPISODE.items():
+        assert episode in declared, (
+            f"{raw} исключён ради {episode}, а тот владельцу не показывается")
+    missing = sorted(_counters_in_code() - declared - set(_SURFACED_AS_EPISODE))
     assert not missing, (
         "эти счётчики сбоя защитной записи никому не показываются — добавьте их "
         "в _PROTECTIVE_FAILURE_COUNTERS словами владельца:\n  " + "\n  ".join(missing))

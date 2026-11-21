@@ -1133,11 +1133,19 @@ async def get_bots(pool: asyncpg.Pool, added_by: int) -> list[dict]:
 
 
 async def get_bot(
-    pool: asyncpg.Pool, bot_id: int, added_by: int, *, owner_only: bool = False
+    pool: asyncpg.Pool, bot_id: int, added_by: int, *, owner_only: bool = False,
+    include_inactive: bool = False,
 ) -> dict | None:
+    """Бот, доступный пользователю. По умолчанию — только работающий.
+
+    ``include_inactive=True`` находит и снятого из работы, но не удалённого
+    бота. Нужен отключению: бот с отозванным токеном система снимает из
+    работы сама (is_active=FALSE), и кнопка «🗑 Отключить бота» из
+    уведомления о нём отвечала «Бот не найден» — убрать его было нечем.
+    """
     row = await pool.fetchrow(
         """SELECT * FROM managed_bots
-           WHERE bot_id=$1 AND is_active=TRUE AND deleted_at IS NULL
+           WHERE bot_id=$1 AND (is_active=TRUE OR $4::boolean) AND deleted_at IS NULL
               AND (NOT $3::boolean OR added_by=$2)
               AND (added_by=$2
                    OR bot_id IN (
@@ -1155,6 +1163,7 @@ async def get_bot(
         bot_id,
         added_by,
         owner_only,
+        include_inactive,
     )
     if row is None:
         return None
@@ -5479,6 +5488,10 @@ _NOTIFY_CACHE_MAX = 10000  # prevent unbounded memory growth
 # единственный отчёт, который владелец получает о работе, сделанной его
 # аккаунтами; одна попытка «как получится» для такого отчёта мало.
 _NOTIFY_RETRY_DELAYS = (1.0, 4.0)
+# Дольше этого на месте не ждём: дальше сообщение уходит в очередь доставки
+# (services/notify_outbox.py) с тем сроком, который назвал Telegram. Раньше
+# ожидание резалось до 30 с, и повтор раньше срока Telegram отбивал снова.
+_NOTIFY_INLINE_WAIT_MAX_S = 30.0
 # Отказы, которые повторять бессмысленно: владелец не нажал /start, заблокировал
 # бота, удалил аккаунт. Повтор тут только жжёт лимиты Telegram.
 _NOTIFY_PERMANENT_MARKS = (
@@ -5620,6 +5633,7 @@ async def notify_if_enabled(
     Для таких событий передавайте уникальный ключ (например, id нового юзера).
     """
     key = (user_id, pref, dedup_key)
+    _outbox_delay = 0.0
     try:
         # Rate-limit check (in-memory, process-scoped)
         _cleanup_notify_cooldown()
@@ -5689,6 +5703,12 @@ async def notify_if_enabled(
                     _wait = float(_wait) if _wait else _NOTIFY_RETRY_DELAYS[_attempt]
                 except (TypeError, ValueError):
                     _wait = _NOTIFY_RETRY_DELAYS[_attempt]
+                if _wait > _NOTIFY_INLINE_WAIT_MAX_S:
+                    # Ждать здесь дольше нельзя (вызывающий — исполнитель
+                    # операции), а повтор раньше срока Telegram отобьёт снова.
+                    # Отдаём очереди с ЕГО сроком (ниже, в except).
+                    _outbox_delay = _wait
+                    break
                 log.warning(
                     "notify_if_enabled: попытка %d не удалась user=%s pref=%s "
                     "(%s), повтор через %.0fс",
@@ -5717,6 +5737,25 @@ async def notify_if_enabled(
         # ровно симптом из прода.
         _is_content = _notify_failure_is_content_error(exc)
         _worth_retrying = not _is_content and not _notify_failure_is_permanent(exc)
+        # Временный сбой — отдаём сообщение надёжной очереди: она повторяет
+        # его до суток (services/notify_outbox.py). Раньше здесь всё и
+        # кончалось: три попытки за пять секунд, и единственный отчёт об
+        # операции пропадал навсегда («не доехал до владельца — 21 раз»).
+        # Легло в очередь — для вызывающего это доставлено (True): отметку
+        # анти-повтора снимать нельзя, иначе отчёт пришёл бы дважды.
+        if _worth_retrying and bot is not None:
+            try:
+                from services import notify_outbox as _outbox
+
+                if await _outbox.enqueue(
+                        pool, user_id, pref, text, reply_markup,
+                        error=str(exc), delay_s=_outbox_delay):
+                    log.warning(
+                        "notify_if_enabled: доставка отложена в очередь user=%s "
+                        "pref=%s: %s", user_id, pref, str(exc)[:200])
+                    return True
+            except Exception:
+                log_exc_swallow(log, "notify_if_enabled: очередь доставки")
         try:
             from services import metrics as _m
 

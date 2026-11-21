@@ -483,7 +483,8 @@ async def cmd_fleet_parallel(message: Message, pool: asyncpg.Pool) -> None:
         head = ("✅ Включено для владельцев: "
                 + ", ".join(f"<code>{o}</code>" for o in sorted(owners)) + ".")
     else:
-        head = "⏸ Выключено: операции на одном аккаунте идут по очереди, как раньше."
+        head = ("⏸ Выключено: операции на одном аккаунте идут по очереди, как раньше. "
+                "Включить снова: <code>/fleet_parallel all</code>.")
     lines = [
         "🔀 <b>Параллельные операции на одном аккаунте</b>",
         "",
