@@ -284,8 +284,15 @@ async def cb_select(
 async def cb_delete(
     callback: CallbackQuery, callback_data: BotCb, pool: asyncpg.Pool
 ) -> None:
-
-    row = await db.get_bot(pool, callback_data.bot_id, callback.from_user.id)
+    # Ищем по внутреннему id записи, включая снятого из работы бота: кнопка
+    # «🗑 Отключить бота» приходит в уведомлении об отозванном токене, а такого
+    # бота система уже сняла из работы сама. Telegram здесь не спрашиваем —
+    # бот там недоступен. Удалять может только владелец (как и delete_bot),
+    # поэтому и подтверждение показываем только ему.
+    row = await db.get_bot(
+        pool, callback_data.bot_id, callback.from_user.id,
+        owner_only=True, include_inactive=True,
+    )
     if not row:
         await callback.answer("Бот не найден.", show_alert=True)
         return
