@@ -469,8 +469,17 @@ function dkOpenDeal(id) {
     (facts ? '<div style="margin:0 0 12px">' + facts + '</div>' : '') +
     '<div style="font-size:12px;font-weight:600;color:var(--hint);margin:0 0 6px">Перевести на стадию</div>' +
     stages +
+    '<button class="btn btn-s" style="width:100%;margin-top:6px" onclick="dkEditDeal(' + id + ')">✏️ Изменить</button>' +
     '<button class="btn btn-d" style="width:100%;margin-top:6px" onclick="dkDeleteDeal(' + id + ', this)">🗑 Удалить сделку</button>';
   document.getElementById('mo-dk-card').classList.add('show');
+}
+
+// Правка простой сделки: та же форма, что у создания, с её значениями.
+function dkEditDeal(id) {
+  const f = _dkFindDeal(parseInt(id, 10));
+  if (!f) return;
+  closeModal('mo-dk-card');
+  openDealModal(f.deal);
 }
 
 // Перенос простой сделки — та же дверь, что у бота и коннекторов
