@@ -8102,6 +8102,15 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
     </div>
     <div class="sec" style="margin-top:16px">Мои данные</div>
     <div class="card" style="padding:12px 16px;display:flex;flex-direction:column;gap:8px">
+      <!-- Формы запоминают последние значения и черновики на этом устройстве;
+           сбросить их можно было только очисткой данных Telegram. -->
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:8px">
+        <div style="min-width:0">
+          <div style="font-size:14px">🧹 Запомненные значения форм</div>
+          <div id="set-fp-status" style="font-size:12px;color:var(--hint);margin-top:2px"></div>
+        </div>
+        <button class="btn btn-s" onclick="resetFormMemory()" style="padding:6px 12px;font-size:12px;flex:0 0 auto">Сбросить</button>
+      </div>
       <button class="btn btn-s" onclick="exportMyData()">⬇️ Выгрузить мои данные (архив)</button>
       <button class="btn btn-r" onclick="deleteMyData()">🗑 Удалить все мои данные</button>
       <div style="font-size:11px;color:var(--hint)">В архив не попадают строки сессий, токены и прокси. Удаление стирает аккаунты, ботов, каналы, контакты и историю; платежи и подписки остаются для учёта.</div>
@@ -12511,6 +12520,31 @@ function saveDraft(key, text) {
 }
 function loadDraft(key) { try { return localStorage.getItem('infragram_draft_' + key) || ''; } catch(_) { return ''; } }
 function clearDraft(key) { try { localStorage.removeItem('infragram_draft_' + key); } catch(_) {} }
+// Сколько форм помнят значения и сколько черновиков лежит на устройстве.
+function formMemoryCounts() {
+  let drafts = 0;
+  try { for (let i = 0; i < localStorage.length; i++) { if ((localStorage.key(i) || '').startsWith('infragram_draft_')) drafts++; } } catch(_) {}
+  return { forms: Object.keys(_fpAll()).length, drafts };
+}
+function renderFormMemoryStatus() {
+  const c = formMemoryCounts();
+  txt('set-fp-status', (c.forms || c.drafts)
+    ? `Форм: ${c.forms}, черновиков: ${c.drafts}. Сброс вернёт значения по умолчанию.`
+    : 'Пусто: формы откроются со значениями по умолчанию.');
+}
+async function resetFormMemory() {
+  const c = formMemoryCounts();
+  if (!c.forms && !c.drafts) { toast('Сбрасывать нечего'); return; }
+  if (!await askConfirm(`Сбросить запомненные значения ${c.forms} форм и ${c.drafts} черновиков на этом устройстве? Данные на сервере не меняются.`)) return;
+  try {
+    localStorage.removeItem(_FP_KEY);
+    const keys = [];
+    for (let i = 0; i < localStorage.length; i++) { const k = localStorage.key(i) || ''; if (k.startsWith('infragram_draft_')) keys.push(k); }
+    keys.forEach(k => localStorage.removeItem(k));
+  } catch(_) {}
+  renderFormMemoryStatus();
+  toast('✅ Формы откроются со значениями по умолчанию');
+}
 
 function renderCards(d) {
   // KPI scroll row
@@ -34877,6 +34911,7 @@ async function openSettings() {
   try { loadHomeScreenStatus(); } catch(_) {}
   try { renderFullscreenRow(); } catch(_) {}
   try { loadMirror(); } catch(_) {}
+  try { renderFormMemoryStatus(); } catch(_) {}
   document.getElementById('m-settings-val').textContent = '⚙️';
   try {
     // Источник правды — бэкенд (notification_settings + get_proxy_policy). Раньше
