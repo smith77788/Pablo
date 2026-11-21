@@ -7149,6 +7149,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
     <div class="hdr-meta"><button class="btn btn-p" style="padding:7px 14px;font-size:13px" onclick="openGhostModal()">+ Создать</button></div>
   </div>
   <div class="sub-sb">
+    <div id="ghostBulk" style="display:none;gap:8px;padding:8px 16px 0"></div>
     <div class="lst" id="ghostList"><div class="spin-wrap"><div class="spin"></div></div></div>
   </div>
 </div>
@@ -7177,6 +7178,10 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
       </div>
     </div>
     <div class="field"><label>Действий в день</label><input id="gc-cap" type="number" min="1" max="50" value="8" class="inp"></div>
+    <label class="chk-row" style="display:flex;gap:8px;align-items:flex-start;cursor:pointer;margin-bottom:12px">
+      <input type="checkbox" id="gc-all" onchange="ghostAllToggled()" style="margin-top:3px">
+      <span>На все рабочие аккаунты без призрака<br><span style="font-size:12px;color:var(--hint)">С этими настройками. У кого профиль уже есть, тех не трогаем.</span></span>
+    </label>
     <div class="field-err" id="gc-err"></div>
     <div style="display:flex;gap:8px">
       <button class="btn btn-d" onclick="closeModal('mo-ghost')" style="flex:1 1 auto">Отмена</button>
@@ -26082,6 +26087,7 @@ async function openGhost() {
   try {
     const d = await api('/api/miniapp/ghost');
     const profiles = d.profiles||[];
+    _ghostBulkRender(profiles);
     txt('m-ghost-val',`${profiles.filter(p=>p.enabled).length} активных · ${profiles.length} ${plural(profiles.length,'профиль','профиля','профилей')}`);
     if (!profiles.length) { txt('ghostList', empty('👻','Призрачных профилей нет',
       'Призрак сам заходит в Telegram за аккаунт: читает диалоги, обновляет «в сети», изредка ставит реакции. Аккаунт выглядит живым и меньше похож на брошенный.',
@@ -26289,8 +26295,34 @@ function accPickerSearchBox(anchorId, reload) {
   anchor.parentNode.insertBefore(inp, anchor);
 }
 
+// Пауза и запуск всех профилей разом: остановить присутствие флота (например,
+// на волну банов) раньше можно было только «Выкл» на каждой строке.
+function _ghostBulkRender(profiles) {
+  const box = document.getElementById('ghostBulk'); if (!box) return;
+  const on = profiles.filter(p=>p.enabled).length, off = profiles.length - on;
+  if (profiles.length < 2) { box.style.display = 'none'; return; }
+  box.style.display = 'flex';
+  txt('ghostBulk', (on ? `<button class="btn btn-s" style="flex:1;font-size:13px" onclick="ghostBulkToggle(false)">⏸ Выключить всех (${on})</button>` : '')
+    + (off ? `<button class="btn btn-s" style="flex:1;font-size:13px" onclick="ghostBulkToggle(true)">▶️ Включить всех (${off})</button>` : ''));
+}
+async function ghostBulkToggle(enabled) {
+  if (!enabled && !await askConfirm('Выключить призрака на всех аккаунтах? Настройки сохранятся, включить можно так же одной кнопкой.')) return;
+  try {
+    const r = await api('/api/miniapp/ghost/bulk_toggle', {method:'PUT', body:JSON.stringify({enabled})});
+    toast((enabled ? '▶️ Включено: ' : '⏸ Выключено: ') + num(r.changed||0));
+    openGhost();
+  } catch(e) { toast('⚠️ '+errRu(e,'Ошибка')); }
+}
+function ghostAllToggled() {
+  const all = document.getElementById('gc-all').checked;
+  document.getElementById('gc-account').disabled = all;
+}
 async function openGhostModal() {
   accPickerSearchBox('gc-account', _ghostLoadAccs);
+  const all = document.getElementById('gc-all');
+  if (all) { all.checked = false; ghostAllToggled(); }
+  // Форма помнит последние настройки: профили обычно ставят одинаковые.
+  applyFormPrefs('ghost', {personality:'gc-personality', start:'gc-start', end:'gc-end', cap:'gc-cap'});
   showModal('mo-ghost');
   _ghostLoadAccs('');
 }
@@ -26316,13 +26348,22 @@ async function submitGhostCreate() {
   const active_hours_start = parseInt(document.getElementById('gc-start').value)||9;
   const active_hours_end = parseInt(document.getElementById('gc-end').value)||23;
   const daily_cap = parseInt(document.getElementById('gc-cap').value)||8;
-  if (!account_id) { errEl.textContent='Выберите аккаунт'; return; }
+  const toAll = !!(document.getElementById('gc-all')||{}).checked;
+  if (!toAll && !account_id) { errEl.textContent='Выберите аккаунт'; return; }
   try {
-    await api('/api/miniapp/ghost',{method:'POST',body:JSON.stringify({
-      account_id:parseInt(account_id), personality, active_hours_start, active_hours_end, daily_cap
-    })});
+    const fields = {personality, active_hours_start, active_hours_end, daily_cap};
+    let msg = '✅ Призрачный профиль создан';
+    if (toAll) {
+      const r = await api('/api/miniapp/ghost/bulk',{method:'POST',body:JSON.stringify(fields)});
+      msg = r.created ? `✅ Призрак добавлен на ${num(r.created)} ${plural(r.created,'аккаунт','аккаунта','аккаунтов')}`
+                      : 'У всех рабочих аккаунтов призрак уже есть';
+    } else {
+      await api('/api/miniapp/ghost',{method:'POST',body:JSON.stringify(
+        Object.assign({account_id:parseInt(account_id)}, fields))});
+    }
+    saveFormPrefs('ghost', {personality, start:active_hours_start, end:active_hours_end, cap:daily_cap});
     closeModal('mo-ghost');
-    toast('✅ Призрачный профиль создан');
+    toast(msg);
     openGhost();
   } catch(e) { errEl.textContent=errRu(e,'Ошибка'); }
 }
