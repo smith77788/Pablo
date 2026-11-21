@@ -69,7 +69,10 @@ def test_paid_status_is_actually_returned():
 
 
 def test_all_three_states_are_shown():
-    body = _js_func("openReferral")
+    # Список рисует refRenderList (её зовут и открытие экрана, и срезы, и
+    # «Показать ещё»), поэтому подписи состояний живут там.
+    assert "refRenderList()" in _js_func("openReferral")
+    body = _js_func("refRenderList")
     for word in ("Оплатил", "Активен", "Зарегистрирован"):
         assert word in body, f"состояние «{word}» не показывается"
 
