@@ -1718,7 +1718,8 @@ def _shared_handle(session_string: str, device: dict | None, *, low_risk: bool,
     `services/shared_sessions.py`.
     """
     from services import shared_sessions as _shared
-    if not session_string or not _shared.enabled():
+    _owner = (device or {}).get("owner_id")
+    if not session_string or not _shared.enabled(_owner):
         return None
     key = _session_key(session_string, device)
     if not key:
