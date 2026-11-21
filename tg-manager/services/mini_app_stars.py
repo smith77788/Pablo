@@ -39,14 +39,20 @@ from services.stars_optimizer import MIN_IMPRESSIONS_FOR_WINNER as _STARS_MIN_IM
 def setup_routes(app: web.Application, pool) -> None:
     """Зарегистрировать маршруты звёзд, подарков и продвижения."""
     from services.mini_app_api import (
-        _INTERNAL_ERROR, _err, _get_uid, _json_resp, _safe_fetch,
-        _safe_fetchrow, int_field, log,
+        _INTERNAL_ERROR, _err, _get_uid, _json_resp, _list_limit, _list_offset,
+        _safe_fetch, _safe_fetchrow, int_field, log,
     )
     from services.security import validate_string
 
     _GIFT_PAY = ("stars", "wallet", "auto")
 
     async def gift_inventory(request: web.Request) -> web.Response:
+        """Подарки флота: страницами, срез «можно передать» и по аккаунту.
+
+        Раньше отдавались последние 100 без смещения: у владельца с большим
+        флотом плитка писала «340 подарков», а 101-й нельзя было ни увидеть,
+        ни передать. Срезы нужны для передачи: искать передаваемые среди
+        непередаваемых листанием — главная трата времени на этом экране."""
         uid = _get_uid(request)
         if not uid:
             return _err("Unauthorized", 401)
@@ -56,20 +62,45 @@ def setup_routes(app: web.Application, pool) -> None:
             )
             if not table_exists:
                 return _json_resp({"total": 0, "transferable": 0, "items": [], "note": "Таблица подарков ещё не создана. Запустите сканирование через бота."})
+            where = "gi.owner_id=$1"
+            args: list = [uid]
+            if request.query.get("only") == "transferable":
+                where += " AND gi.is_transferable=TRUE"
+            try:
+                acc = int(request.query.get("account_id") or 0)
+            except (TypeError, ValueError):
+                acc = 0
+            if acc > 0:
+                args.append(acc)
+                where += f" AND gi.account_id=${len(args)}"
+            n = len(args)
+            limit, offset = _list_limit(request, 100, 500), _list_offset(request)
             items = await pool.fetch(
                 # Колонка называется last_seen_at; scanned_at — имя поля в
                 # ответе, поэтому переименование остаётся псевдонимом и фронт
                 # не трогаем.
-                """SELECT gi.id, gi.gift_type, gi.stars_cost, gi.is_transferable,
+                f"""SELECT gi.id, gi.gift_type, gi.stars_cost, gi.is_transferable,
                           gi.is_unique, gi.is_premium, gi.last_seen_at AS scanned_at,
                           gi.account_id, gi.gift_id,
                           ta.phone, ta.first_name
                    FROM gift_inventory gi
                    JOIN tg_accounts ta ON ta.id=gi.account_id
-                   WHERE gi.owner_id=$1
-                   ORDER BY gi.last_seen_at DESC LIMIT 100""",
-                uid,
+                   WHERE {where}
+                   ORDER BY gi.last_seen_at DESC NULLS LAST, gi.id DESC
+                   LIMIT ${n + 1} OFFSET ${n + 2}""",
+                *args, limit, offset,
             )
+            shown_total = await pool.fetchval(
+                f"SELECT COUNT(*) FROM gift_inventory gi WHERE {where}", *args)
+            # Для выбора аккаунта: сколько подарков на каждом, без потолка страницы.
+            accounts = await pool.fetch(
+                """SELECT gi.account_id, COALESCE(NULLIF(ta.first_name, ''), ta.phone) AS name,
+                          COUNT(*) AS n,
+                          COUNT(*) FILTER (WHERE gi.is_transferable) AS transferable
+                     FROM gift_inventory gi JOIN tg_accounts ta ON ta.id=gi.account_id
+                    WHERE gi.owner_id=$1
+                    GROUP BY gi.account_id, ta.first_name, ta.phone
+                    ORDER BY COUNT(*) DESC, gi.account_id""", uid)
             total = await pool.fetchval(
                 "SELECT COUNT(*) FROM gift_inventory WHERE owner_id=$1", uid
             )
@@ -78,6 +109,12 @@ def setup_routes(app: web.Application, pool) -> None:
             )
             return _json_resp({
                 "total": total, "transferable": transferable,
+                "shown_total": int(shown_total or 0),
+                "accounts": [{"account_id": a["account_id"], "name": a["name"] or "",
+                              "n": int(a["n"]), "transferable": int(a["transferable"])}
+                             for a in accounts],
+                "page": {"offset": offset, "limit": limit,
+                         "has_more": offset + len(items) < int(shown_total or 0)},
                 "items": [
                     {**dict(i), "scanned_at": i["scanned_at"].isoformat() if i.get("scanned_at") else None}
                     for i in items
