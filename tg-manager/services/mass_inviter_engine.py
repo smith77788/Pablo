@@ -665,8 +665,25 @@ async def invite_batch(
 
         _use_bulk = _BULK_DEFAULT if bulk is None else bool(bulk)
         if _use_bulk and len(user_refs) > 1:
+            # Канарейка (services/mass_rollout): крупный батч и сработавший
+            # предохранитель идут поштучно — как до флага, цели не теряются.
+            from services import mass_rollout as _rollout
+            from services import metrics as _metrics
+            if _rollout.bulk_breaker_open():
+                _use_bulk = False
+                _metrics.inc("infragram_invite_bulk_skipped_total", {"reason": "breaker"})
+            elif len(user_refs) > _rollout.bulk_max_batch():
+                _use_bulk = False
+                _metrics.inc("infragram_invite_bulk_skipped_total", {"reason": "batch_too_big"})
+        if _use_bulk and len(user_refs) > 1:
             _bulk = await _try_bulk_invite(client, group, user_refs, _note,
                                            on_attempt=on_attempt)
+            _rollout.record_bulk_batch(
+                "fallback" if _bulk is None
+                else "peer_flood" if _bulk.get("peer_flood")
+                else "flood_wait" if _bulk.get("flood_wait")
+                else "fatal" if _bulk.get("no_rights")
+                else "ok")
             if _bulk is not None:
                 ok += _bulk["ok"]
                 failed += _bulk["failed"]

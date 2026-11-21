@@ -4826,7 +4826,11 @@ async def _follower_round(
     """
     await _maintenance_step("fence_lost_ops", lambda: _fence_lost_ops(pool))
     try:
-        await _process_pending(pool, bot)
+        # Канарейка по объёму: не-лидер берёт не больше потолка из
+        # mass_rollout (по умолчанию 1; 0 — не брать новых, доиграть текущие).
+        from services import mass_rollout as _rollout
+        _cap = await _rollout.sharded_follower_cap(pool, _MAX_PARALLEL)
+        await _process_pending(pool, bot, slot_cap=_cap)
     except asyncio.CancelledError:
         raise
     except Exception as e:
@@ -5467,12 +5471,17 @@ async def _is_cancelled(pool: asyncpg.Pool, op_id: int) -> bool:
     return result
 
 
-async def _process_pending(pool: asyncpg.Pool, bot: Bot) -> None:
+async def _process_pending(pool: asyncpg.Pool, bot: Bot,
+                           slot_cap: int | None = None) -> None:
+    """Разобрать очередь. slot_cap — потолок операций процесса ниже
+    _MAX_PARALLEL (канарейка горизонтального исполнителя для не-лидера)."""
     if _shutting_down:
         return
     async with _active_lock:
         active_now = frozenset(_active_op_ids)
         available_slots = _MAX_PARALLEL - len(active_now)
+        if slot_cap is not None:
+            available_slots = min(available_slots, slot_cap - len(active_now))
 
     if available_slots <= 0:
         return
@@ -20723,6 +20732,12 @@ async def _exec_mass_invite(
     # переключать сразу всем. None = взять значение из окружения.
     _bulk_api = params.get("bulk_api")
     _bulk_api = None if _bulk_api is None else bool(_bulk_api)
+    # Канарейка пакетного пути (services/mass_rollout): выключатель сильнее
+    # явного флага, дальше — явный флаг, глобальный рубильник, список владельцев
+    # и доля операций. Решение одно на операцию — путь не скачет между батчами.
+    from services import mass_rollout as _rollout
+    _bulk_api, _bulk_reason = await _rollout.bulk_invite_decision(
+        pool, op_id, owner_id, _bulk_api)
     # Необязательный текст сообщения для метода «ссылка в ЛС» ({link} — плейсхолдер) —
     # используется и самим методом «link», и финальным фолбэком ниже.
     _link_msg = params.get("link_message") or None
@@ -22383,7 +22398,10 @@ async def _exec_mass_invite(
                 # (см. _premark_invite_targets).
                 return await inv.invite_batch(
                     acc["session_str"], dict(acc), group, batch, _pace_mult,
-                    bulk=_bulk_api, on_attempt=_premark_batch)
+                    # Выключатель канарейки — на каждом батче, а не только на
+                    # старте: откат доходит до идущей операции за полминуты.
+                    bulk=(_bulk_api and not await _rollout.bulk_killed(pool)),
+                    on_attempt=_premark_batch)
             except Exception as exc:  # не BaseException: отмену операции пропускаем наверх
                 return exc
 

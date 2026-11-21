@@ -45,6 +45,13 @@ _HELP = {
     "infragram_service_stalls_total": "Зависания фоновых сервисов (одно ожидание дольше порога)",
     "infragram_event_loop_stalls_total": "Замирания цикла событий дольше порога (весь процесс не отвечал)",
     "infragram_operations_total": "Операции по типу и исходу",
+    # Канарейка массовых возможностей (services/mass_rollout.py).
+    "infragram_invite_bulk_decisions_total": "Решения о пакетном инвайте на операцию: путь (bulk/single) и причина (kill, explicit, global, canary_owner, canary_pct, off)",
+    "infragram_invite_bulk_batches_total": "Пакетные батчи инвайта по исходу (ok, fallback, peer_flood, flood_wait, fatal)",
+    "infragram_invite_bulk_skipped_total": "Батчи, ушедшие поштучно вопреки решению о пакете (breaker, batch_too_big)",
+    "infragram_invite_bulk_breaker_trips_total": "Срабатывания предохранителя пакетного инвайта (пакет выключен в процессе на остывание)",
+    "infragram_invite_bulk_breaker_open": "Пакетный инвайт выключен предохранителем в этом процессе (1/0)",
+    "infragram_executor_follower_cap": "Потолок операций процесса без лидерства при горизонтальном исполнителе",
     # Исполнитель сценариев (services/workflow_runtime.py).
     "infragram_workflow_runs_finished_total": "Завершённые прогоны сценариев по исходу (completed, failed, expired…)",
     "infragram_workflow_steps_claimed_total": "Прогоны сценариев, взятые исполнителем на шаг",
