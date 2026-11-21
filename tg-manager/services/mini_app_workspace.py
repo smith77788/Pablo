@@ -190,7 +190,7 @@ def setup_routes(app: web.Application, pool) -> None:
         if not uid:
             return _err("Unauthorized", 401)
         rows = await _safe_fetch(pool,
-            """SELECT id, title, chat_count, status, invite_link, error,
+            """SELECT id, title, chat_count, chat_ids, status, invite_link, error,
                       instance_id, join_count, created_at
                  FROM chatlist_folders WHERE owner_id=$1
                 ORDER BY created_at DESC, id DESC
@@ -200,6 +200,8 @@ def setup_routes(app: web.Application, pool) -> None:
         for r in (rows or []):
             d = dict(r)
             d["created_at"] = d["created_at"].isoformat() if d.get("created_at") else None
+            # Состав нужен экрану для «Собрать заново»: та же подборка с правкой.
+            d["chat_ids"] = [int(x) for x in (d.get("chat_ids") or [])]
             out.append(d)
         total = await _safe_count(pool,
             "SELECT COUNT(*) FROM chatlist_folders WHERE owner_id=$1", uid)

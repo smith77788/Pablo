@@ -5080,6 +5080,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
   </div>
   <div class="filter-chips mod-tabs" data-module="templates" data-tab="texts" role="tablist" aria-label="Вкладки модуля «Шаблоны»"></div>
   <div class="sub-sb">
+    <input id="tplSearch" placeholder="🔍 Поиск по названию и тексту" oninput="_tplSearchDebounced()" style="margin-bottom:8px" aria-label="Поиск шаблонов">
     <div class="lst" id="tplList"><div class="spin-wrap"><div class="spin"></div></div></div>
   </div>
 </div>
@@ -8168,7 +8169,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
       <label>Текст сообщения</label>
       <div class="preset-row" id="bcastPresetRow"></div>
       <textarea id="bcastText" rows="5" maxlength="4096" placeholder="Введите текст…"></textarea>
-      <div class="field-note"><span id="bcastLen">0</span>/4096 · <span id="bcastRecip">0 получателей</span></div>
+      <div class="field-note"><span id="bcastLen">0</span>/4096 · <span id="bcastRecip">0 получателей</span> · <a href="#" onclick="pickTplInto('bcastText','bcastLen');return false" style="color:var(--accent)">📝 Из шаблона</a> · <a href="#" onclick="saveTextAsTpl('bcastText');return false" style="color:var(--accent)">💾 В шаблоны</a></div>
     </div>
     <div class="field">
       <label>Кому отправить</label>
@@ -8388,7 +8389,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 <div class="mbg" id="tplMbg" onclick="if(event.target===this)closeTplModal()">
   <div class="modal">
     <div class="modal-x" onclick="closeTplModal()" role="button" tabindex="0" aria-label="Закрыть">✕</div>
-    <div class="modal-title">📝 Новый шаблон</div>
+    <div class="modal-title" id="tplModalTitle">📝 Новый шаблон</div>
     <div class="field">
       <label>Название шаблона</label>
       <input type="text" id="tplName" maxlength="80" placeholder="Напр: Приветствие нового подписчика">
@@ -8396,7 +8397,9 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
     <div class="field">
       <label>Текст шаблона</label>
       <textarea id="tplText" rows="6" maxlength="4096" placeholder="Поддерживается HTML: &lt;b&gt;жирный&lt;/b&gt;, &lt;i&gt;курсив&lt;/i&gt;…"></textarea>
-      <div class="field-note"><span id="tplLen">0</span>/4096</div>
+      <div class="field-note"><span id="tplLen">0</span>/4096 · варианты {Привет|Здравствуйте}, подстановки {name}</div>
+      <div id="tplPreview" style="display:none;font-size:12px;color:var(--hint);background:var(--bg2);border-radius:8px;padding:8px;margin-top:6px;white-space:pre-wrap"></div>
+      <span class="chip" style="margin-top:6px" onclick="previewTpl()">🎲 Как увидит получатель</span>
     </div>
     <div class="field-err" id="tplErr"></div>
     <button class="btn btn-p" data-main id="tplBtn" onclick="saveTpl()" style="width:100%">💾 Сохранить</button>
@@ -14807,12 +14810,55 @@ function renderBcasts(items) {
         <div class="bc-num" style="color:var(--red)">${num(b.failed_count||0)}</div>
         <div class="bc-cell" style="display:flex;align-items:center;gap:4px">
           <span class="badge ${bc}">${bl}</span>
+          <span class="icon-btn sm" role="button" tabindex="0" aria-label="Повторить с правками" title="Повторить с правками" onclick="dupBcast(${b.id})">⧉</span>
           ${(['done','failed','partial'].includes(b.status) && (b.failed_count||0)>0)
             ? `<span class="icon-btn sm accent" role="button" tabindex="0" aria-label="Отправить недоставленным" title="Отправить недоставленным" onclick="resendBcast(${b.id})">↻</span>` : ''}
         </div>
       </div>`;
     }).join('');
   renderBcastMore();
+}
+// «Повторить с правками»: та же рассылка тем же ботом — текст и кнопки
+// подставляются в форму, дальше человек правит и отправляет как обычно.
+function dupBcast(id) {
+  const b = BCAST_ROWS.find(x => x.id === id); if (!b) return;
+  openBcastPick();
+  const sel = document.getElementById('bcastBot');
+  if (sel && [...sel.options].some(o => o.value === String(b.bot_id))) sel.value = String(b.bot_id);
+  const ta = document.getElementById('bcastText');
+  ta.value = b.message_text || '';
+  txt('bcastLen', String(ta.value.length));
+  let btns = b.buttons;
+  if (typeof btns === 'string') { try { btns = JSON.parse(btns); } catch(_) { btns = null; } }
+  const bb = document.getElementById('bcastButtons');
+  if (bb && Array.isArray(btns)) bb.value = btns.map(x => (x.text||'')+' | '+(x.url||'')).join('\n');
+  updateBcastRecip();
+}
+// Шаблон в любое поле текста — без ухода с формы (модальное окно не теряется).
+async function pickTplInto(taId, lenId) {
+  let rows = [];
+  try { rows = (await api('/api/miniapp/templates?limit=100')).templates || []; }
+  catch(e) { toast('⚠️ '+errRu(e,'Не удалось загрузить шаблоны')); return; }
+  if (!rows.length) { toast('Шаблонов пока нет — сохраните текст кнопкой «💾 В шаблоны»'); return; }
+  const id = await askChoice('📝 Вставить шаблон', rows.map(t => ({
+    value: t.id, label: t.name || 'Шаблон',
+    sub: String(t.template?.text || '').slice(0, 80)})));
+  const t = rows.find(x => x.id === id); if (!t) return;
+  const ta = document.getElementById(taId); if (!ta) return;
+  ta.value = t.template?.text || '';
+  ta.dispatchEvent(new Event('input', {bubbles:true}));
+  if (lenId) txt(lenId, String(ta.value.length));
+  toast('📝 Шаблон «'+(t.name||'')+'» вставлен');
+}
+async function saveTextAsTpl(taId) {
+  const text = (document.getElementById(taId)?.value || '').trim();
+  if (!text) { toast('Сначала введите текст'); return; }
+  const name = (await askPrompt('Название шаблона', {value: text.slice(0, 40)}) || '').trim();
+  if (!name) return;
+  try {
+    await api('/api/miniapp/template', {method:'POST', body: JSON.stringify({name, text})});
+    toast('💾 Шаблон «'+name+'» сохранён');
+  } catch(e) { toast('⚠️ '+errRu(e,'Не удалось сохранить')); }
 }
 async function resendBcast(id) {
   if (!await askConfirm('Отправить рассылку повторно только тем, кто её НЕ получил?')) return;
@@ -16743,30 +16789,71 @@ function openTemplates(target) {
   loadTemplates();
 }
 
-async function loadTemplates() {
+// Шаблоны страницами и с поиском: раньше показывались последние 30 без
+// продолжения. Правка и копия — в той же форме (TPL_EDIT_ID).
+let TPL_ROWS = [], TPL_EDIT_ID = null, _TPL_T = null;
+function _tplSearchDebounced() { if (_TPL_T) clearTimeout(_TPL_T); _TPL_T = setTimeout(() => loadTemplates(), 350); }
+async function loadTemplates(more) {
   try {
-    const d = await api('/api/miniapp/templates');
-    const items = d.templates||[];
+    const q = ((document.getElementById('tplSearch')||{}).value||'').trim();
+    const off = more ? TPL_ROWS.length : 0;
+    const d = await api('/api/miniapp/templates?limit=30&offset='+off+(q?'&q='+encodeURIComponent(q):''));
+    const page = d.templates||[];
+    TPL_ROWS = off ? TPL_ROWS.concat(page) : page;
+    const items = TPL_ROWS;
     const tplTotal = (d.total!=null?d.total:items.length);
-    txt('m-tpl-cnt', tplTotal ? tplTotal+' шаблонов' : '');
-    if (!items.length) { txt('tplList', empty('📝','Нет шаблонов','Сохраните текст со спинтаксом — и вставляйте в публикатор/рассылку в один тап',{label:'➕ Создать шаблон',fn:'openTplModal()'})); return; }
+    if (!q) txt('m-tpl-cnt', tplTotal ? tplTotal+' шаблонов' : '');
+    if (!items.length) {
+      txt('tplList', q ? empty('🔍','Ничего не найдено','Измените запрос')
+        : empty('📝','Нет шаблонов','Сохраните текст со спинтаксом — и вставляйте в публикатор/рассылку в один тап', {label:'➕ Создать шаблон', fn:'openTplModal()'}));
+      return;
+    }
     txt('tplList', items.map(t=>{
       const txt2 = (t.template?.text || '').substring(0, 60);
       return `<div class="li">
         <div class="ava ava-green">📝</div>
-        <div class="li-body">
+        <div class="li-body" onclick="openTplEdit(${t.id})" style="cursor:pointer">
           <div class="li-name">${esc(t.name||'Шаблон')}</div>
           <div class="li-sub">${esc(txt2)}${txt2.length===60?'…':''}</div>
         </div>
         <div class="li-right">
-          <span class="icon-btn sm accent" role="button" tabindex="0" aria-label="Применить шаблон" onclick="useTpl(${t.id},'${escJs(t.name||'')}','${escJs(t.template?.text||'')}')">📤</span>
+          <span class="icon-btn sm accent" role="button" tabindex="0" aria-label="Применить шаблон" onclick="useTplById(${t.id})">📤</span>
+          <span class="icon-btn sm" role="button" tabindex="0" aria-label="Изменить шаблон" title="Изменить" onclick="openTplEdit(${t.id})">✏️</span>
+          <span class="icon-btn sm" role="button" tabindex="0" aria-label="Копия шаблона" title="Сделать копию" onclick="openTplEdit(${t.id}, true)">⧉</span>
           <span class="icon-btn sm danger" role="button" tabindex="0" aria-label="Удалить шаблон" onclick="deleteTpl(${t.id}, this)">🗑</span>
         </div>
       </div>`;
-    }).join(''));
+    }).join('') + moreBtn(items.length, tplTotal, 'loadTemplates(1)'));
   } catch(e) {
     txt('tplList', errHtml(errRu(e),'loadTemplates()'));
   }
+}
+function useTplById(id) {
+  const t = TPL_ROWS.find(x => x.id===id); if (!t) return;
+  useTpl(t.id, t.name||'', t.template?.text||'');
+}
+function openTplEdit(id, copy) {
+  const t = TPL_ROWS.find(x => x.id===id); if (!t) return;
+  openTplModal();
+  TPL_EDIT_ID = copy ? null : id;
+  document.getElementById('tplName').value = (t.name||'') + (copy ? ' (копия)' : '');
+  document.getElementById('tplText').value = t.template?.text || '';
+  document.getElementById('tplLen').textContent = (t.template?.text||'').length;
+  txt('tplModalTitle', copy ? '⧉ Копия шаблона' : '✏️ Изменить шаблон');
+}
+// Тот же разбор, что у предпросмотра рассылки: подстановки, затем варианты.
+function previewTpl() {
+  const raw = document.getElementById('tplText').value;
+  const el = document.getElementById('tplPreview');
+  if (!raw.trim()) { el.style.display='none'; return; }
+  let t = raw.replace(/\{name\}/g, 'Иван').replace(/\{first_name\}/g, 'Иван')
+    .replace(/\{last_name\}/g, 'Петров').replace(/\{username\}/g, '@ivan');
+  let guard = 0;
+  while (t.indexOf('{')>=0 && t.indexOf('}')>=0 && guard++ < 50) {
+    t = t.replace(/\{([^{}]+)\}/g, (m,g)=>{ const p=g.split('|'); return p[Math.floor(Math.random()*p.length)]; });
+  }
+  el.textContent = '🎲 ' + t + '\n(имя — пример; нажмите ещё раз для другого варианта)';
+  el.style.display = 'block';
 }
 
 function useTpl(id, name, text) {
@@ -16793,6 +16880,9 @@ async function deleteTpl(id, _el) {
 }
 
 function openTplModal() {
+  TPL_EDIT_ID = null;
+  txt('tplModalTitle', '📝 Новый шаблон');
+  const pv = document.getElementById('tplPreview'); if (pv) pv.style.display='none';
   document.getElementById('tplName').value='';
   document.getElementById('tplText').value='';
   document.getElementById('tplLen').textContent='0';
@@ -16818,7 +16908,8 @@ async function saveTpl() {
   const btn = document.getElementById('tplBtn');
   btn.disabled=true; btn.textContent='⏳ Сохранение...';
   try {
-    await api('/api/miniapp/template', {method:'POST', body: JSON.stringify({name, text})});
+    if (TPL_EDIT_ID) await api('/api/miniapp/template/'+TPL_EDIT_ID, {method:'PUT', body: JSON.stringify({name, text})});
+    else await api('/api/miniapp/template', {method:'POST', body: JSON.stringify({name, text})});
     closeTplModal();
     tg.HapticFeedback?.notificationOccurred('success');
     toast('✅ Шаблон сохранён');
@@ -27465,7 +27556,11 @@ async function openFolders(keep) {
           <div class="row-name">${esc(f.title)} · ${f.chat_count||0} ${plural(f.chat_count||0,'чат','чата','чатов')}${f.join_count?' · добавили '+f.join_count:''}</div>
           <div class="row-val" style="word-break:break-all">${esc(String(line).substring(0,90))}</div>
         </div>
-        <div class="row-right"><button class="icon-btn sm danger" onclick="deleteFolder(${f.id}, this)" aria-label="Удалить" title="Удалить">🗑</button></div>
+        <div class="row-right" style="display:flex;gap:4px">
+          ${st==='ready'&&f.invite_link?`<button class="icon-btn sm" onclick="shareFolder(${f.id})" aria-label="Поделиться" title="Поделиться ссылкой">📤</button>`:''}
+          <button class="icon-btn sm" onclick="recomposeFolder(${f.id})" aria-label="Собрать заново" title="${st==='failed'?'Повторить':'Собрать заново с правкой состава'}">${st==='failed'?'🔁':'📋'}</button>
+          <button class="icon-btn sm danger" onclick="deleteFolder(${f.id}, this)" aria-label="Удалить" title="Удалить">🗑</button>
+        </div>
       </div>`;
     }).join('') + moreBtn(fs.length, foldersTotal, 'openFoldersMore()'));
   } catch(e) { txt('foldersList', empty('⚠️','Ошибка',errRu(e), {label:'↺ Повторить',fn:retryCall('openFolders', keep)})); }
@@ -27475,10 +27570,23 @@ async function deleteFolder(id, _el){
   try{ await api('/api/miniapp/chatlist_folders/'+id,{method:'DELETE'}); toast('🗑 Удалено'); openFolders(); }
   catch(e){ toast('⚠️ '+errRu(e,'Ошибка').substring(0,80)); }
 }
-async function openFolderCompose(){
+// Ссылка папки — в окно «Поделиться» Telegram.
+function shareFolder(id){
+  const f=(FOLDERS_ROWS||[]).find(x=>x.id===id); if(!f||!f.invite_link) return;
+  const u='https://t.me/share/url?url='+encodeURIComponent(f.invite_link)+'&text='+encodeURIComponent(f.title||'');
+  try { tg.openTelegramLink(u); } catch(_) { copyText(f.invite_link); }
+}
+// Папку в Telegram после экспорта не перестроить, поэтому правка состава —
+// новая папка с тем же набором, отмеченным заранее (и повтор неудавшейся).
+function recomposeFolder(id){
+  const f=(FOLDERS_ROWS||[]).find(x=>x.id===id); if(!f) return;
+  openFolderCompose({title:f.title, ids:f.chat_ids||[]});
+}
+async function openFolderCompose(preset){
   push('s-foldercompose');
-  FC_SEL = new Set();
-  document.getElementById('fcTitle').value='';
+  preset = (preset && preset.ids) ? preset : null;
+  FC_SEL = new Set(preset ? preset.ids.map(Number) : []);
+  document.getElementById('fcTitle').value = preset ? (preset.title||'') : '';
   document.getElementById('fdErr').textContent='';
   txt('fcChannels','<div class="spin-wrap"><div class="spin"></div></div>');
   try {
@@ -27491,7 +27599,7 @@ async function openFolderCompose(){
       return `<label class="row" style="cursor:pointer">
         <div class="row-body"><div class="row-name">${esc(c.title||('#'+cid))}</div>
           ${c.username?`<div class="row-val">@${esc(c.username)}</div>`:''}</div>
-        <div class="row-right"><input type="checkbox" value="${cid}" onchange="fcToggle(${cid},this.checked)"></div>
+        <div class="row-right"><input type="checkbox" value="${cid}" ${FC_SEL.has(Number(cid))?'checked':''} onchange="fcToggle(${cid},this.checked)"></div>
       </label>`;
     }).join(''));
   } catch(e){ txt('fcChannels', empty('⚠️','Ошибка',errRu(e), {label:'↺ Повторить',fn:retryCall('openFolderCompose')})); }
