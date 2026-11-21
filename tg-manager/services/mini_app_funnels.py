@@ -155,6 +155,55 @@ def setup_routes(app: web.Application, pool) -> None:
             "completed_total": completed_total,
         })
 
+    async def copy_funnel(request: web.Request) -> web.Response:
+        """Скопировать воронку со всеми шагами в другого (или того же) бота.
+
+        Одинаковую цепочку на нескольких ботах собирали руками: шаг за шагом,
+        с задержками, на каждом боте заново. Копия создаётся ВЫКЛЮЧЕННОЙ —
+        иначе новая воронка начала бы писать людям раньше, чем владелец её
+        посмотрел (на другом боте другая аудитория и, возможно, другой тон).
+        """
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            funnel_id = int(request.match_info["funnel_id"])
+            body = await request.json()
+            bot_id = int((body or {}).get("bot_id"))
+        except Exception:
+            return _err("Неверный запрос", 400)
+        try:
+            async with pool.acquire() as conn:
+                async with conn.transaction():
+                    src = await conn.fetchrow(
+                        """SELECT f.name, f.trigger_type, f.keyword
+                             FROM funnels f JOIN managed_bots mb ON mb.bot_id=f.bot_id
+                            WHERE f.id=$1 AND mb.added_by=$2 AND mb.deleted_at IS NULL""",
+                        funnel_id, uid)
+                    if not src:
+                        return _err("Воронка не найдена", 404)
+                    row = await conn.fetchrow(
+                        """INSERT INTO funnels(bot_id, name, trigger_type, keyword, is_active)
+                           SELECT $1, $2, $3, $4, $6 FROM managed_bots
+                            WHERE bot_id=$1 AND added_by=$5 AND deleted_at IS NULL
+                           FOR SHARE RETURNING id""",
+                        bot_id, (src["name"] + " · копия")[:200], src["trigger_type"],
+                        src["keyword"], uid, False)
+                    if not row:
+                        return _err("Бот не найден", 404)
+                    n = await conn.fetchval(
+                        """WITH c AS (
+                             INSERT INTO funnel_steps(funnel_id, step_order, message_text, delay_minutes)
+                             SELECT $1, step_order, message_text, delay_minutes
+                               FROM funnel_steps WHERE funnel_id=$2
+                             RETURNING 1)
+                           SELECT count(*) FROM c""",
+                        row["id"], funnel_id)
+            return _json_resp({"ok": True, "funnel_id": row["id"], "steps": int(n or 0)})
+        except Exception:
+            log.exception("copy_funnel funnel=%d uid=%d", funnel_id, uid)
+            return _err("Не удалось скопировать воронку", 500)
+
     async def add_funnel_step(request: web.Request) -> web.Response:
         """Добавить шаг в воронку (multi-step drip). funnel_steps умел delay_minutes и
         порядок, но эндпоинта добавления шага не было — воронка застревала на шаге 1."""
@@ -759,6 +808,7 @@ def setup_routes(app: web.Application, pool) -> None:
     app.router.add_get("/api/miniapp/funnel/{funnel_id}/steps", funnel_steps)
     app.router.add_get("/api/miniapp/funnel/{funnel_id}/people", funnel_people)
     app.router.add_post("/api/miniapp/funnel/{funnel_id}/step", add_funnel_step)
+    app.router.add_post("/api/miniapp/funnel/{funnel_id}/copy", copy_funnel)
     app.router.add_delete("/api/miniapp/funnel/step/{step_id}", delete_funnel_step)
     app.router.add_patch("/api/miniapp/funnel/step/{step_id}", update_funnel_step)
     app.router.add_get("/api/miniapp/auto_funnels", auto_funnels_list)

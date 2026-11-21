@@ -16184,7 +16184,29 @@ function buildFunnelDetail(d) {
     <div class="sec" style="margin-top:8px">🔀 Цепочка сообщений</div>
     ${stepsHtml}
     ${addStepForm}
+    <div style="margin:12px 16px 0"><button class="btn btn-s" style="width:100%" onclick="copyFunnelToBot()">📋 Копировать воронку в бота…</button></div>
     <div style="height:16px"></div>`;
+}
+// Одинаковую цепочку на нескольких ботах собирали руками, шаг за шагом.
+// Копия приходит ВЫКЛЮЧЕННОЙ: на другом боте другая аудитория, и писать людям
+// она начнёт только после того, как владелец её посмотрит и включит.
+async function copyFunnelToBot() {
+  if (!CUR_FUNNEL_ID) return;
+  let bots = [];
+  try { const d = await api('/api/miniapp/bots'); bots = d.bots || d || []; }
+  catch(e) { toast('⚠️ ' + errRu(e, 'Боты не загрузились')); return; }
+  if (!bots.length) { toast('Нет ботов, куда копировать'); return; }
+  const botId = await askChoice('В какого бота скопировать воронку?', bots.map(b => ({
+    value: b.bot_id, label: '@' + (b.username || b.first_name || b.bot_id),
+    sub: String(b.bot_id) === String(CUR_BOT?.id) ? 'этот же бот' : ''})));
+  if (botId == null) return;
+  try {
+    const r = await api('/api/miniapp/funnel/' + Number(CUR_FUNNEL_ID) + '/copy',
+      {method:'POST', body: JSON.stringify({bot_id: Number(botId)})});
+    toast(`📋 Скопировано шагов: ${num(r.steps||0)}. Копия выключена — проверьте и включите`);
+    back();
+    openFunnelDetail(r.funnel_id, 'Копия воронки');
+  } catch(e) { toast('⚠️ ' + errRu(e, 'Не удалось скопировать')); }
 }
 async function addFunnelStep() {
   if (!CUR_FUNNEL_ID) return;
