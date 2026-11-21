@@ -4825,7 +4825,10 @@ async def _check_all_sessions(pool: "asyncpg.Pool", bot=None) -> None:
             extra_cols=("a.session_conflict_at, a.foreign_session_hashes, "
                         "a.trusted_session_hashes, a.username, "
                         "(a.twofa_enc IS NOT NULL) AS twofa_saved, a.reserve_auth_hash, "
-                        "(a.reserve_session_enc IS NOT NULL) AS has_reserve"),
+                        "(a.reserve_session_enc IS NOT NULL) AS has_reserve, "
+                        # Сигналы атаки (services/account_alarm, v378).
+                        "a.twofa_on, a.twofa_enc, a.service_seen_msg_id, "
+                        "a.login_code_read_at, a.twofa_mismatch_at, a.recovery_email_fp"),
         )
     )
     if not accounts:
@@ -4869,7 +4872,15 @@ async def _check_all_sessions(pool: "asyncpg.Pool", bot=None) -> None:
             _cfg = _guard_cfg.get(_owner)
             _guarded: dict = {}
 
-            async def _on_alive(client, profile, _acc=dict(acc), _cfg=_cfg, _out=_guarded):
+            _alarm_found: dict = {}
+
+            async def _on_alive(client, profile, _acc=dict(acc), _cfg=_cfg, _out=_guarded,
+                                _alarm_out=_alarm_found):
+                # Сигналы атаки — ДО того, как из списка уберут наш запасной
+                # сеанс: время его входа гасит «чужой» код, которым он вошёл.
+                from services import account_alarm as _alarm
+                _alarm_out.update(await _alarm.inspect(
+                    client, _acc, profile, _cfg, list(profile.get("authorizations") or [])))
                 _sw.drop_own_reserve(profile, _acc)
                 if _cfg is not None and (_cfg.guard_sessions or _cfg.guard_twofa
                                          or _cfg.guard_reserve):
@@ -4889,6 +4900,9 @@ async def _check_all_sessions(pool: "asyncpg.Pool", bot=None) -> None:
                                  unsettled=_guarded.get("unsettled"),
                                  twofa_on=_prof.get("twofa_on"),
                                  own_created=int(_prof.get("own_session_created") or 0))
+            if _alarm_found:
+                from services import account_alarm as _alarm
+                await _alarm.record(pool, dict(acc), _alarm_found, bot=bot)
             if _guarded.get("closed") or _guarded.get("twofa") or _guarded.get("reserve"):
                 _guard_rows.setdefault(_owner, []).append((_sw.acc_label(dict(acc)), _guarded))
             old_status = acc["acc_status"] or "active"

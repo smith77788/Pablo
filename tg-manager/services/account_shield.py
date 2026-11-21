@@ -120,10 +120,15 @@ class ShieldConfig:
     preset: str = "balanced"
     exempt_account_ids: list = field(default_factory=list)
     # Автозащита (v346, services/session_watch.guard): закрывать новые чужие
-    # сеансы и ставить свой пароль 2FA аккаунтам без него. Выключено, пока
-    # владелец не включит: оба действия меняют аккаунт.
+    # сеансы и ставить свой пароль 2FA аккаунтам без него. Закрытие сеансов
+    # выключено, пока владелец не включит: оно может закрыть его собственный
+    # телефон. Пароль 2FA и отмена чужого сброса пароля (v378,
+    # services/account_alarm) включены по умолчанию — решение владельца
+    # продукта 21.11.2026: они ничего не ломают, а без них аккаунт уводится
+    # одним кодом или неделей ожидания сброса.
     guard_sessions: bool = False
-    guard_twofa: bool = False
+    guard_twofa: bool = True
+    guard_reset: bool = True
     # Запасной ключ (v347): второй наш сеанс, на котором флот поднимает
     # аккаунт, когда основной умер.
     guard_reserve: bool = False
@@ -143,6 +148,7 @@ class ShieldConfig:
             "exempt_account_ids": list(self.exempt_account_ids),
             "guard_sessions": self.guard_sessions,
             "guard_twofa": self.guard_twofa,
+            "guard_reset": self.guard_reset,
             "guard_reserve": self.guard_reserve,
         }
 
@@ -203,7 +209,8 @@ async def get_shield_config(pool: asyncpg.Pool, owner_id: int) -> ShieldConfig:
                 response_mode=mode,
                 exempt_account_ids=sorted({int(x) for x in (_row_get(row, "exempt_account_ids", []) or [])}),
                 guard_sessions=bool(_row_get(row, "guard_sessions", False)),
-                guard_twofa=bool(_row_get(row, "guard_twofa", False)),
+                guard_twofa=bool(_row_get(row, "guard_twofa", True)),
+                guard_reset=bool(_row_get(row, "guard_reset", True)),
                 guard_reserve=bool(_row_get(row, "guard_reserve", False)),
             )
             cfg.preset = _detect_preset(cfg)
@@ -227,6 +234,7 @@ _SHIELD_FIELDS = {
     "exempt_account_ids": "ids",
     "guard_sessions": None,
     "guard_twofa": None,
+    "guard_reset": None,
     "guard_reserve": None,
 }
 _INT_FIELDS = ("cool_duration_hours", "cool_hours")

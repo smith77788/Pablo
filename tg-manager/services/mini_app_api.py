@@ -7123,7 +7123,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 return _err("Охлаждение — от 1 до 48 часов")
             fields["cool_hours"] = hours
         for key in ("auto_pause", "notify_admin", "guard_sessions", "guard_twofa",
-                    "guard_reserve"):
+                    "guard_reset", "guard_reserve"):
             if key in data and data[key] is not None:
                 fields[key] = bool(data[key])
         if data.get("response_mode") is not None:
@@ -7275,6 +7275,23 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         except Exception:
             log.exception("shield_summary uid=%d", uid)
             return _err(_INTERNAL_ERROR, 500)
+        # Сигналы атаки (services/account_alarm): журнал и аккаунты, которым
+        # нужно действие владельца прямо сейчас. Сбой — пустые списки, а не
+        # 500 всего экрана: щит важнее журнала.
+        from services import account_alarm as _alarm
+        sec_events = await _alarm.recent_events(pool, uid, limit=20)
+        try:
+            attention = await pool.fetch(
+                """SELECT id, first_name, username, phone, twofa_reset_until,
+                          twofa_mismatch_at
+                   FROM tg_accounts
+                   WHERE owner_id=$1 AND (twofa_reset_until > NOW()
+                                          OR twofa_mismatch_at IS NOT NULL)
+                   ORDER BY id LIMIT 50""",
+                uid)
+        except Exception as exc:
+            log.warning("shield_summary uid=%d: внимание по аккаунтам: %s", uid, exc)
+            attention = []
 
         def _nm(r):
             return r["first_name"] or (("@" + r["username"]) if r.get("username") else "") or r["phone"] or ""
@@ -7302,6 +7319,15 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 for r in held
             ],
             "exempt": [{"account_id": r["id"], "name": _nm(r)} for r in exempt],
+            "security_events": sec_events,
+            "attention": [
+                {
+                    "account_id": r["id"], "name": _nm(r),
+                    "reset_until": r["twofa_reset_until"].isoformat() if r["twofa_reset_until"] else None,
+                    "password_changed": r["twofa_mismatch_at"] is not None,
+                }
+                for r in attention
+            ],
             "history_total": history_total or 0,
             "history": [
                 {

@@ -850,3 +850,14 @@ class DealMsgCb(CallbackData, prefix="dmsg"):
     b: int = 0       # bot_id, через которого написал клиент
     u: int = 0       # Telegram-id клиента
     s: str = ""      # стадия (для st)
+
+
+class AccSecCb(CallbackData, prefix="asec"):
+    """Кнопки под тревогой безопасности аккаунта (services/account_alarm).
+
+    action: decline — отменить сброс пароля 2FA; twofa — поставить пароль 2FA;
+    close — закрыть чужие сеансы (кроме «это я» и запасного ключа).
+    """
+
+    action: str
+    account_id: int = 0

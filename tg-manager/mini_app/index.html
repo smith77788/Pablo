@@ -7590,6 +7590,14 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
       <button class="btn btn-s" style="flex:1 1 auto" onclick="openPhysics()">⚛️ Риск по аккаунтам</button>
     </div>
     <div id="shieldCoverage"></div>
+    <div id="shieldAttentionWrap" style="display:none">
+      <div class="sec" style="margin-top:8px;color:var(--red)">Нужно действие сейчас</div>
+      <div class="lst" id="shieldAttention"></div>
+    </div>
+    <div id="shieldSecEventsWrap" style="display:none">
+      <div class="sec" style="margin-top:8px">Тревоги безопасности</div>
+      <div class="lst" id="shieldSecEvents"></div>
+    </div>
     <div class="sec">Профиль защиты</div>
     <div class="filter-chips" id="shieldPresets" style="padding:4px 16px 8px;flex-wrap:wrap"></div>
     <div class="sec">Настройки</div>
@@ -14024,6 +14032,11 @@ function buildAccDetail(d) {
   const sec = d.security;
   const securityHtml = !sec ? '' : (() => {
     const rows = [];
+    // Сигналы атаки — первыми: они требуют действия сейчас.
+    if (sec.reset_until)
+      rows.push(['🚨','var(--red)','Кто-то сбрасывает пароль 2FA',`Сброс сработает ${new Date(sec.reset_until).toLocaleString('ru-RU')}. Нажмите, чтобы отменить`, `accSecAction(${a.id},'decline_reset')`]);
+    if (sec.password_changed)
+      rows.push(['🚨','var(--red)','Пароль 2FA сменили не через Infragram','Сохранённый пароль больше не подходит. Нажмите, чтобы закрыть чужие сеансы, пока наш сеанс жив', `accSecAction(${a.id},'close_foreign')`]);
     // 2FA
     if (sec.has_2fa && sec.twofa_saved)
       rows.push(['🔑','var(--green)','2FA включён','Пароль сохранён у нас — аккаунт можно восстановить']);
@@ -28890,9 +28903,35 @@ async function openShield() {
       + row('🔐 Автозащита: пароль 2FA', cfg.guard_twofa?'✅ Вкл':'❌ Выкл',
             'Ставит аккаунтам без пароля свой случайный пароль 2FA и хранит его в «Профили → Пароли 2FA»',
             "shieldToggle('guard_twofa')")
+      + row('🛡 Автозащита: отмена сброса пароля', cfg.guard_reset!==false?'✅ Вкл':'❌ Выкл',
+            'Если кто-то запросит сброс пароля 2FA, щит сам отменит его и предупредит вас',
+            "shieldToggle('guard_reset')")
       + row('🗝 Автозащита: запасной ключ', cfg.guard_reserve?'✅ Вкл':'❌ Выкл',
             'Заводит второй свой сеанс без SMS: если основная сессия умрёт, флот поднимет аккаунт сам',
             "shieldToggle('guard_reserve')"));
+
+    // Сигналы атаки: аккаунты, которым нужно действие сейчас, и журнал.
+    const att = d.attention||[];
+    document.getElementById('shieldAttentionWrap').style.display = att.length ? '' : 'none';
+    txt('shieldAttention', att.map(x => `
+      <div class="row">
+        <div class="row-ico" style="background:var(--bg2)">🚨</div>
+        <div class="row-body" onclick="openAccount(${Number(x.account_id)})" role="button" tabindex="0">
+          <div class="row-name">${esc(x.name||'Аккаунт')}</div>
+          <div class="row-val" style="color:var(--red)">${x.reset_until?('Сбрасывают пароль 2FA — сработает '+new Date(x.reset_until).toLocaleString('ru-RU')):'Пароль 2FA сменили не через Infragram'}</div>
+        </div>
+        <button class="btn btn-o" style="font-size:12px;padding:6px 10px" onclick="accSecAction(${Number(x.account_id)}, '${x.reset_until?'decline_reset':'close_foreign'}', this)">${x.reset_until?'🛡 Отменить сброс':'🚪 Закрыть чужих'}</button>
+      </div>`).join(''));
+    const sev = d.security_events||[];
+    document.getElementById('shieldSecEventsWrap').style.display = sev.length ? '' : 'none';
+    txt('shieldSecEvents', sev.map(e => `
+      <div class="row" ${e.account_id?`onclick="openAccount(${Number(e.account_id)})" role="button" tabindex="0"`:''}>
+        <div class="row-ico" style="background:var(--bg2)">${e.critical?'🚨':'⚠️'}</div>
+        <div class="row-body">
+          <div class="row-name">${esc(e.account||'Аккаунт')} · ${esc(e.text||'')}</div>
+          <div class="row-val" style="color:var(--hint)">${e.at?ago(e.at):''}</div>
+        </div>
+      </div>`).join(''));
 
     const heldRows = d.held||[];
     document.getElementById('shieldHeldWrap').style.display = heldRows.length ? '' : 'none';

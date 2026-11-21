@@ -158,7 +158,8 @@ def test_unknown_session_age_is_treated_as_fresh():
 
 def test_policy_off_and_exempt_accounts_are_untouched(remember):
     prof = {"authorizations": _foreign(22), "own_session_created": OLD, "twofa_on": False}
-    for cfg in (_cfg(), _cfg(guard_sessions=True, guard_twofa=True, exempt_account_ids=[5])):
+    for cfg in (_cfg(guard_twofa=False),
+                _cfg(guard_sessions=True, guard_twofa=True, exempt_account_ids=[5])):
         client = _Client()
         out = asyncio.run(sw.guard(_Pool(), client, _acc(), dict(prof), cfg, {}))
         assert client.closed == [] and client.twofa == [] and not out["closed"]
@@ -337,8 +338,11 @@ def test_guard_switches_reach_the_screen_and_the_bot():
     assert '"guard_sessions", "guard_twofa"' in _src("services/mini_app_api.py")
     bot = _src("bot/handlers/account_shield_hub.py")
     assert "toggle_gs" in bot and "toggle_g2" in bot
-    assert _cfg().guard_sessions is False and _cfg().guard_twofa is False, (
-        "автозащита меняет аккаунты — включает её владелец, а не мы")
+    assert _cfg().guard_sessions is False, (
+        "закрытие сеансов может закрыть телефон владельца — включает его владелец, а не мы")
+    # Пароль 2FA и отмена чужого сброса пароля — по умолчанию у всех: решение
+    # владельца продукта 21.11.2026 (schema_v378, services/account_alarm).
+    assert _cfg().guard_twofa is True and _cfg().guard_reset is True
 
 
 # ── Живая база ───────────────────────────────────────────────────────────────
@@ -389,7 +393,7 @@ def pool():
 
 def test_live_policy_round_trip(pool):
     _run(pool.execute("DELETE FROM shield_configs WHERE owner_id=$1", OWNER))
-    assert _run(ash.get_shield_config(pool, OWNER)).guard_twofa is False
+    assert _run(ash.get_shield_config(pool, OWNER)).guard_twofa is True
     cfg = _run(ash.save_shield_config(pool, OWNER, guard_sessions=True, guard_twofa=True))
     assert cfg.guard_sessions and cfg.guard_twofa
     cfg = _run(ash.save_shield_config(pool, OWNER, guard_twofa=False))
