@@ -105,6 +105,8 @@ def deal_payload(row, main_currency: str) -> dict:
         "value": float(r.get("value") or 0),
         "currency": (r.get("currency") or main_currency or "RUB").upper(),
         "notes": (r.get("notes") or "")[:200],
+        # Доска режет текст; правка по обрезанному стёрла бы хвост.
+        "cut": len(r.get("contact") or "") > 120 or len(r.get("notes") or "") > 200,
         "updated_at": _iso(r.get("updated_at")),
     }
 

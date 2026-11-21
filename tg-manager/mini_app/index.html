@@ -8741,7 +8741,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 <div class="mbg" id="dealMbg" onclick="if(event.target===this)closeDealModal()">
   <div class="modal">
     <div class="modal-x" onclick="closeDealModal()" role="button" tabindex="0" aria-label="Закрыть">✕</div>
-    <div class="modal-title">💼 Новая сделка</div>
+    <div class="modal-title" id="dealModalTitle">💼 Новая сделка</div>
     <div class="field"><label>Название</label><input type="text" id="dealTitle" maxlength="200" placeholder="Напр: Продажа подписки"></div>
     <div class="field"><label>Контакт</label><input type="text" id="dealContact" maxlength="200" placeholder="@username или имя"></div>
     <div class="field">
@@ -29884,13 +29884,23 @@ function showParserRunAudience(id) {
 // Своего экрана у простых сделок больше нет: их показывает общая доска сделок
 // (screens/deals_board.js) вместе с воронкой контактов. Окно создания осталось
 // здесь, его зовёт кнопка «➕ Сделка» доски.
-function openDealModal() {
-  ['dealTitle','dealContact','dealNotes'].forEach(id=>{ const el=document.getElementById(id); if(el) el.value=''; });
-  const dv=document.getElementById('dealValue'); if(dv) dv.value='0';
-  const ds=document.getElementById('dealStage'); if(ds) ds.value='lead';
+// deal — правка существующей сделки (с доски); без него — новая.
+let _DEAL_EDIT_ID = 0, _DEAL_EDIT_ORIG = null;
+function openDealModal(deal) {
+  _DEAL_EDIT_ID = deal && deal.deal_id ? Number(deal.deal_id) : 0;
+  _DEAL_EDIT_ORIG = deal || null;
+  const setv=(id,v)=>{ const el=document.getElementById(id); if(el) el.value=v; };
+  setv('dealTitle', deal ? (deal.title||'') : '');
+  setv('dealContact', deal ? (deal.contact||'') : '');
+  setv('dealNotes', deal ? (deal.notes||'') : '');
+  setv('dealValue', deal ? String(Number(deal.value)||0) : '0');
+  const ds=document.getElementById('dealStage');
+  if(ds) { ds.value=deal ? (deal.stage||'lead') : 'lead'; ds.disabled=!!deal; }
   // Валюта по умолчанию — основная валюта владельца (её знает доска).
   const dc=document.getElementById('dealCurrency');
-  if(dc) dc.value=(typeof _DK!=='undefined' && _DK && _DK.currency) || dc.value || 'RUB';
+  if(dc) dc.value=(deal && deal.currency) || (typeof _DK!=='undefined' && _DK && _DK.currency) || dc.value || 'RUB';
+  const dt=document.getElementById('dealModalTitle'); if(dt) dt.textContent=deal ? '✏️ Изменить сделку' : '💼 Новая сделка';
+  const sb=document.getElementById('dealSaveBtn'); if(sb) sb.textContent=deal ? '💾 Сохранить' : '➕ Создать';
   const de=document.getElementById('dealErr'); if(de) de.textContent='';
   const dm=document.getElementById('dealMbg'); if(dm) dm.classList.add('show');
 }
@@ -29901,21 +29911,36 @@ async function saveDeal() {
   errEl.textContent='';
   if (!title) { errEl.textContent='Введите название'; return; }
   const btn = document.getElementById('dealSaveBtn');
-  btn.disabled=true; btn.textContent='Создаю…';
+  const editId = _DEAL_EDIT_ID;
+  btn.disabled=true; btn.textContent=editId ? 'Сохраняю…' : 'Создаю…';
+  const body = {
+    title,
+    contact: document.getElementById('dealContact').value.trim(),
+    stage: document.getElementById('dealStage').value,
+    value: parseFloat(document.getElementById('dealValue').value)||0,
+    currency: document.getElementById('dealCurrency').value,
+    notes: document.getElementById('dealNotes').value.trim(),
+  };
+  // Доска отдаёт контакт и заметки обрезанными: нетронутые не отправляем,
+  // иначе сохранение стёрло бы их хвост.
+  const orig = _DEAL_EDIT_ORIG;
+  if (editId && orig && orig.cut) {
+    if (body.contact === (orig.contact || '')) delete body.contact;
+    if (body.notes === (orig.notes || '')) delete body.notes;
+  }
   try {
-    const r = await api('/api/miniapp/crm/deal', {method:'POST', body:JSON.stringify({
-      title,
-      contact: document.getElementById('dealContact').value.trim(),
-      stage: document.getElementById('dealStage').value,
-      value: parseFloat(document.getElementById('dealValue').value)||0,
-      currency: document.getElementById('dealCurrency').value,
-      notes: document.getElementById('dealNotes').value.trim(),
-    })});
-    closeDealModal();
-    toast(`✅ Сделка #${r.deal_id} создана`);
+    if (editId) {
+      await api('/api/miniapp/crm/deal/' + editId, {method:'PUT', body:JSON.stringify(body)});
+      closeDealModal();
+      toast('✅ Сделка сохранена');
+    } else {
+      const r = await api('/api/miniapp/crm/deal', {method:'POST', body:JSON.stringify(body)});
+      closeDealModal();
+      toast(`✅ Сделка #${r.deal_id} создана`);
+    }
     if (typeof loadDealsBoard === 'function') loadDealsBoard();
   } catch(e) { errEl.textContent=errRu(e,'Ошибка'); }
-  finally { btn.disabled=false; btn.textContent='➕ Создать'; }
+  finally { btn.disabled=false; btn.textContent=editId ? '💾 Сохранить' : '➕ Создать'; }
 }
 // ── Workspaces ──────────────────────────────────────────
 async function openWorkspaces() {
