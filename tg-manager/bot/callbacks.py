@@ -852,6 +852,13 @@ class DealMsgCb(CallbackData, prefix="dmsg"):
     s: str = ""      # стадия (для st)
 
 
+class OwnSessCb(CallbackData, prefix="osess"):
+    """Кнопка под тревогой о входе владельца (services/owner_sessions)."""
+
+    action: str
+    session_id: int = 0
+
+
 class AccSecCb(CallbackData, prefix="asec"):
     """Кнопки под тревогой безопасности аккаунта (services/account_alarm).
 

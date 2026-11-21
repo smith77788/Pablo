@@ -1326,6 +1326,12 @@ async def main() -> None:
         _spawn(
             _web_resilient("account_transport_map", run_transport_refresh_loop, pool))
 
+        # Завершённые входы владельца (services/owner_sessions) — во ВСЕХ ролях:
+        # запросы мини-аппа обслуживает web, и список отозванных сеансов нужен
+        # именно там, иначе завершение работало бы только в одном процессе.
+        from services.owner_sessions import run_revocation_sync
+        _spawn(_web_resilient("owner_session_revocations", run_revocation_sync, pool))
+
         # Страж «одной реплики» (ось №3): лимиты флуда живут в памяти процесса, и
         # вторая реплика молча разгоняет темп по флоту → риск бана. Guard бьёт
         # хартбит и громко предупреждает, если реплик больше одной. Во всех ролях.

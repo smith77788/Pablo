@@ -193,3 +193,15 @@ async def revoke_device(pool, owner_id: int, pairing_id: int) -> bool:
         return bool(row)
     except Exception:
         return False
+
+
+async def pairing_id_by_fp(pool, token_fp: str) -> int | None:
+    """id связки по отпечатку токена — чтобы сеанс владельца знал свой ключ
+    (services/owner_sessions: завершение сеанса отзывает и ключ)."""
+    try:
+        return await pool.fetchval(
+            "SELECT id FROM device_pairings WHERE token_fp=$1 AND revoked_at IS NULL "
+            "ORDER BY id DESC LIMIT 1", token_fp)
+    except Exception:
+        log.debug("device_pairing: pairing_id_by_fp failed", exc_info=True)
+        return None

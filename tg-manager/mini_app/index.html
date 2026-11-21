@@ -4939,7 +4939,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 
 <!-- ══════════════════════ СВЯЗАННЫЕ УСТРОЙСТВА ══════════════════════ -->
 <div class="screen" id="s-devices">
-  <div class="hdr"><div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div><div class="hdr-title">💻 Связанные устройства</div></div>
+  <div class="hdr"><div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div><div class="hdr-title">🔐 Мои входы</div></div>
   <div class="sub-sb" id="devBody"><div class="spin-wrap"><div class="spin"></div></div></div>
 </div>
 
@@ -8062,7 +8062,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
         <div style="font-size:11px;color:var(--hint);margin-top:6px">Когда прокси не отвечает три проверки подряд, аккаунты с него сами переезжают на свободные живые прокси, сначала той же страны. Двух аккаунтов на один прокси автомат не ставит. Если свободных прокси нет, придёт сообщение.</div>
       </div>
       <div style="display:flex;align-items:center;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--sep)">
-        <span style="font-size:14px">💻 Связанные устройства</span>
+        <span style="font-size:14px">🔐 Мои входы и устройства</span>
         <button class="btn btn-s" onclick="openDevices()" style="padding:6px 12px;font-size:12px">Показать</button>
       </div>
       <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;padding:8px 0;border-bottom:1px solid var(--sep)">
@@ -22784,13 +22784,74 @@ async function resolveConflict(id, resolution, value) {
 // Вне Telegram вход в мини-апп идёт по коду связывания из бота, и браузер
 // запоминается надолго. Посмотреть, что связано, и отозвать лишнее было
 // нечем: маршруты есть, экрана не было.
+// Входы владельца (services/owner_sessions): кто вошёл в Infragram, с какого
+// устройства и откуда. Чужой вход завершается здесь же; о входе с нового
+// устройства приходит сообщение в бот.
+function ownSessHtml(s) {
+  const list = (s && s.sessions) || [];
+  const live = list.filter(x => !x.revoked);
+  const others = live.filter(x => !x.current);
+  let html = `<div class="sec" style="margin-top:4px">Входы в Infragram</div>
+    <div style="font-size:13px;color:var(--hint);line-height:1.5;padding:0 2px 8px">
+      Каждое устройство, с которого открывали Infragram. Если видите незнакомое — завершите его.
+      О входе с нового устройства приходит сообщение в бот.
+    </div>`;
+  if (!list.length) return html + empty('🔐','Входов пока нет','Они появятся после следующего открытия приложения');
+  html += '<div class="lst">';
+  list.forEach(x => {
+    const where = [x.country, x.ip].filter(Boolean).join(' · ');
+    const when = x.revoked ? 'завершён' : (x.current ? 'это устройство' : (x.last_seen_at ? 'был ' + ago(x.last_seen_at) : ''));
+    html += `<div class="li">
+      <div class="ava" style="background:${x.revoked?'var(--sep)':(x.current?'var(--bg-green-16)':'rgba(96,165,250,.15)')}">${x.revoked?'🚫':(x.current?'🟢':'📱')}</div>
+      <div class="li-body">
+        <div class="li-name">${esc(x.label)}${x.current?' <span class="badge b-gr">это вы</span>':''}</div>
+        <div class="li-sub">${esc(x.kind_ru)}${where?' · '+esc(where):''}</div>
+        <div class="li-sub">${esc(when)}${x.created_at?' · вход '+ago(x.created_at):''}</div>
+      </div>
+      ${(x.revoked||x.current) ? '' : `<div class="li-right"><button class="btn btn-d" style="font-size:11px" onclick="ownSessRevoke(${Number(x.id)})">Завершить</button></div>`}
+    </div>`;
+  });
+  html += '</div>';
+  if (list.length >= Number(s.limit||50)) {
+    html += `<div style="font-size:12px;color:var(--hint);padding:8px 2px">Показаны последние ${Number(s.limit||50)} входов.</div>`;
+  }
+  if (others.length) {
+    html += `<div class="actions" style="padding:10px 0 4px"><button class="btn btn-o" style="width:100%" onclick="ownSessRevokeOthers()">🚪 Завершить все входы, кроме этого (${others.length})</button></div>`;
+  }
+  return html;
+}
+
+async function ownSessRevoke(id) {
+  if (!await askConfirm('Завершить этот вход? Устройство потеряет доступ к Infragram.\n\nЕсли вход был через Telegram, а устройство не ваше, — кто-то открыл ваш Telegram: завершите чужие сеансы и там (Настройки → Устройства).')) return;
+  try {
+    await api('/api/miniapp/owner/sessions/revoke', {method:'POST', body:JSON.stringify({id})});
+    tg.HapticFeedback?.notificationOccurred('success');
+    toast('🚪 Вход завершён');
+    openDevices();
+  } catch(e) { toast('⚠️ '+errRu(e,'Не удалось завершить вход')); }
+}
+
+async function ownSessRevokeOthers() {
+  if (!await askConfirm('Завершить все входы в Infragram, кроме этого устройства?')) return;
+  try {
+    const r = await api('/api/miniapp/owner/sessions/revoke', {method:'POST', body:JSON.stringify({others:true})});
+    tg.HapticFeedback?.notificationOccurred('success');
+    toast('🚪 Завершено входов: ' + Number(r.revoked||0));
+    openDevices();
+  } catch(e) { toast('⚠️ '+errRu(e,'Не удалось завершить входы')); }
+}
+
 async function openDevices() {
   push('s-devices');
   txt('devBody', '<div class="spin-wrap"><div class="spin"></div></div>');
   try {
-    const d = await api('/api/miniapp/devices');
+    const [d, s] = await Promise.all([
+      api('/api/miniapp/devices'),
+      api('/api/miniapp/owner/sessions').catch(() => ({sessions: []})),
+    ]);
     const rows = d.devices || [];
-    let html = `<div style="padding:12px 16px">
+    let html = `<div style="padding:12px 16px">` + ownSessHtml(s) + `
+      <div class="sec" style="margin-top:14px">Связанные браузеры</div>
       <div style="font-size:13px;color:var(--hint);line-height:1.5;margin-bottom:10px">
         Это браузеры, которым вы разрешили вход по коду из бота. Внутри Telegram
         связывание не нужно, поэтому здесь его и не видно. Отзыв действует сразу:
