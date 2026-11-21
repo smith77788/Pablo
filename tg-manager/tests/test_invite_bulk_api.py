@@ -232,7 +232,8 @@ def test_operation_can_override_the_global_flag():
     i = worker.index("async def _exec_mass_invite")
     seg = worker[i:worker.index("\nasync def _exec_", i + 1)]
     assert 'params.get("bulk_api")' in seg
-    assert "bulk=_bulk_api" in seg, "флаг операции не доходит до движка"
+    # Флаг доходит до движка через выключатель канарейки (mass_rollout).
+    assert "bulk=(_bulk_api" in seg, "флаг операции не доходит до движка"
 
 
 def test_absent_flag_means_environment_decides():
