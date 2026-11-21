@@ -1708,9 +1708,42 @@ def generate_device_fingerprint(
     }
 
 
+def _shared_handle(session_string: str, device: dict | None, *, low_risk: bool,
+                   action_type: str, retry_auth_dup: bool, _no_pool: bool = False):
+    """Держатель ОБЩЕГО подключения аккаунта (FLEET_SHARED_SESSIONS=1).
+
+    None — делить нечего (нет сессии), вызывающий идёт старым путём. Первое
+    подключение строит штатный `connect_client` со всеми фолбэками; дальше
+    все держатели этой сессии в процессе идут через него. Подробности —
+    `services/shared_sessions.py`.
+    """
+    from services import shared_sessions as _shared
+    if not session_string or not _shared.enabled():
+        return None
+    key = _session_key(session_string, device)
+    if not key:
+        return None
+    acc_id = None
+    try:
+        acc_id = int((device or {}).get("id") or 0) or None
+    except (TypeError, ValueError):
+        acc_id = None
+
+    async def _connect():
+        return await connect_client(session_string, device, action_type,
+                                    low_risk=low_risk, retry_auth_dup=retry_auth_dup,
+                                    _no_share=True)
+
+    def _detached():
+        return _make_client(session_string, device, low_risk=low_risk,
+                            _no_pool=_no_pool, _no_share=True)
+
+    return _shared.SharedClient(key, acc_id, _connect, _detached)
+
+
 def _make_client(session_string: str = "", device: dict | None = None, low_risk: bool = False,
                  _no_pool: bool = False, _force_direct: bool = False,
-                 _mutex_managed: bool = False):
+                 _mutex_managed: bool = False, _no_share: bool = False):
     """Создать TelegramClient с правильным fingerprint и транспортом.
 
     _no_pool=True — НЕ брать прокси из free-pool для безпроксёвого аккаунта, а идти
@@ -1736,6 +1769,15 @@ def _make_client(session_string: str = "", device: dict | None = None, low_risk:
     Всегда используется обфускация (ConnectionTcpObfuscated или CF relay поверх неё),
     никогда ConnectionTcpFull — он легко детектится как Telethon/MTProto.
     """
+    # Общее подключение аккаунта (под флагом): вместо нового коннекта на каждое
+    # действие — держатель общего. connect_client (_mutex_managed) и сам
+    # держатель (_no_share) строят настоящий клиент ниже.
+    if not _mutex_managed and not _no_share and not _force_direct:
+        _h = _shared_handle(session_string, device, low_risk=low_risk,
+                            action_type="op", retry_auth_dup=False, _no_pool=_no_pool)
+        if _h is not None:
+            return _h
+
     from telethon import TelegramClient
     from telethon.sessions import StringSession
     from telethon.network.connection.tcpobfuscated import ConnectionTcpObfuscated
@@ -1995,7 +2037,7 @@ async def mark_online(client, *, timeout: float = 10.0) -> bool:
 
 async def connect_client(session_string: str = "", device: dict | None = None,
                          action_type: str = "op", low_risk: bool = False,
-                         retry_auth_dup: bool = True):
+                         retry_auth_dup: bool = True, _no_share: bool = False):
     """Построить и подключить клиента с ФОЛБЭКОМ на прямое подключение.
 
     Корень жалобы «аккаунты без прокси не стартуют»: у безпроксёвого аккаунта
@@ -2018,6 +2060,18 @@ async def connect_client(session_string: str = "", device: dict | None = None,
 
     Возвращает подключённого клиента или пробрасывает исходную ошибку."""
     from telethon.errors import AuthKeyDuplicatedError
+
+    # Общее подключение аккаунта (FLEET_SHARED_SESSIONS=1): несколько операций
+    # на одном аккаунте идут через ОДНО живое подключение, а не ждут друг друга
+    # на мьютексе сессии. Первое подключение строит этот же путь (_no_share).
+    if not _no_share:
+        _h = _shared_handle(session_string, device, low_risk=low_risk,
+                            action_type=action_type, retry_auth_dup=retry_auth_dup)
+        if _h is not None:
+            await _h.connect()
+            if retry_auth_dup:
+                await mark_online(_h)
+            return _h
 
     # Пре-проверки/диагностика (readiness, membership) вызывают с
     # retry_auth_dup=False: они НЕ захватывают аккаунт, поэтому ретраить конфликт

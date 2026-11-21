@@ -237,6 +237,15 @@ PROCESS_LOCAL: dict[str, str] = {
         "делить между процессами нечего"),
     "services/op_worker.py:_accounts_in_use": "быстрый локальный фильтр; арбитр — аренда в БД",
     "services/op_worker.py:_operation_account_locks": "то же, привязка операция→аккаунты",
+    "services/op_worker.py:_op_shares": (
+        "сколько операций ЭТОГО процесса делят аккаунт; аренда в БД одна на "
+        "процесс, поэтому счётчик по смыслу локален"),
+    "services/op_worker.py:_current_op": (
+        "ContextVar: какая операция идёт в задаче — живёт в пределах задачи"),
+    "services/shared_sessions.py:_entries": (
+        "живые подключения Telethon этого процесса — сокеты не делятся между процессами"),
+    "services/shared_sessions.py:_forced": (
+        "переключатель флага для тестов; в проде флаг читается из окружения"),
     "services/op_worker.py:_db_pool": "пул asyncpg привязан к циклу событий",
     "services/op_worker.py:_shutting_down": (
         "ЭТОТ процесс получил SIGTERM и сворачивается (op_worker.shutdown). "

@@ -217,6 +217,18 @@ _HELP = {
     "infragram_op_owner_sem_defers_total":
         "Операции, возвращённые в очередь: место на владельца не освободилось",
     "infragram_op_stalls_total": "Операции, о застревании которых предупредили владельца",
+    "infragram_op_shared_account_joins_total": (
+        "Аккаунты, которые операция взяла поверх уже идущей на них операции "
+        "(совместная работа, FLEET_SHARED_SESSIONS)"),
+    "infragram_shared_session_acquires_total": (
+        "Взятия общего подключения аккаунта: connected — новое подключение, "
+        "reused — уже открытое"),
+    "infragram_shared_session_closes_total": (
+        "Закрытия общего подключения аккаунта по причине: idle, dead, dropped, poisoned"),
+    "infragram_shared_session_paced_total": (
+        "Запросы, задержанные общим темпом аккаунта, пока его делят несколько дел"),
+    "infragram_shared_session_detached_total": (
+        "Держатели общего подключения, ушедшие в отдельный клиент (обращение до connect)"),
     "infragram_session_deaths_total": "Смерти сессий (auth key убит)",
     "infragram_account_identity_completed_total": (
         "Клиент аккаунта собран по неполному словарю: id, устройство или прокси "
