@@ -5773,7 +5773,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                    FROM platform_referrals r
                    JOIN platform_users u ON u.user_id=r.referred_id
                    WHERE r.referrer_id=$1{st_cond}
-                   ORDER BY r.created_at DESC, r.referred_id DESC LIMIT $2 OFFSET $3""",
+                   ORDER BY r.created_at DESC, r.id DESC LIMIT $2 OFFSET $3""",
                 uid, lim, off,
             )
             shown_total = await pool.fetchval(
