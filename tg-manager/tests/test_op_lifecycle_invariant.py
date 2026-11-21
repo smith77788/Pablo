@@ -55,9 +55,16 @@ def test_claim_registers_accounts_per_op():
     """Аккаунты, взятые исполнителем, регистрируются под op_id — иначе finally
     их не освободит."""
     ow = _read("services/op_worker.py")
-    seg = ow[ow.index("async def _claim_available_accounts"):
-             ow.index("async def _claim_available_accounts") + 2400]
+    start = ow.index("async def _claim_available_accounts")
+    end = ow.index("\n# Как часто долгий исполнитель", start)
+    seg = ow[start:end]
     assert "_operation_account_locks.setdefault(op_id" in seg
+    # Режим совместной работы (FLEET_SHARED_SESSIONS) регистрирует аккаунты
+    # под op_id в _claim_shared — та же дверь освобождения в finally.
+    assert "_claim_shared(op_id" in seg
+    sh = ow[ow.index("async def _claim_shared"):]
+    sh = sh[:sh.index("\nasync def ", 10)]
+    assert "_operation_account_locks.setdefault(op_id" in sh
 
 
 def test_stale_reset_on_startup_exists():
