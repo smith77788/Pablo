@@ -287,6 +287,9 @@ def setup_routes(app: web.Application, pool) -> None:
                 }, total_items=1, label=label)
             return _json_resp({
                 "ok": True, "op_id": op_id, "plan_id": plan_id, "label": label,
+                # Та же форма, что у пакетного ответа (_warmup_create_many):
+                # экран читает итог одинаково для одного и для многих.
+                "started": 1, "account_ids": [account_id], "refused": [],
                 "profile_type": profile_type, "niche": niche,
                 "custom_channels": len(custom_channels),
                 "daily_actions": plan["daily_actions"] if plan else daily_actions,

@@ -26589,7 +26589,7 @@ async function warmupBulk(action) {
   if (!await askConfirm((action==='pause'?'Поставить на паузу':'Возобновить')+` планов прогрева: ${ids.length}?`)) return;
   let ok = 0, fail = 0, firstErr = '';
   for (const id of ids) {
-    try { await api(`/api/miniapp/warmup/${id}/${action}`, {method:'POST'}); ok++; }
+    try { await api(action==='pause' ? `/api/miniapp/warmup/${id}/pause` : `/api/miniapp/warmup/${id}/resume`, {method:'POST'}); ok++; }
     catch(e) { fail++; if (!firstErr) firstErr = errRu(e,'Ошибка'); }
   }
   toast((action==='pause'?'⏸ На паузе: ':'▶ Возобновлено: ')+ok + (fail?` · не вышло ${fail}: ${firstErr}`.substring(0,160):''));

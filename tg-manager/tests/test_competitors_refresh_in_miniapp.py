@@ -58,7 +58,9 @@ def test_bot_and_miniapp_share_one_refresh():
     bot = _read("bot", "handlers", "competitors.py")
     assert "competitor_watch.refresh(" in bot
     assert "tgme_page_extra" not in bot, "разбор страницы остался копией в боте"
-    api = _read("services", "mini_app_api.py")
+    from tests.miniapp_source import api_source
+
+    api = api_source()
     assert '"/api/miniapp/competitors/refresh"' in api
     assert "competitor_watch.refresh(" in api
 
