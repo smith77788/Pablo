@@ -19,7 +19,7 @@ def setup_routes(app: web.Application, pool) -> None:
     from services import owner_data
     from services.mini_app_api import (
         _INTERNAL_ERROR, _content_disposition, _err, _get_uid, _json_resp,
-        bad_body_response, log,
+        alert_owner_drain, bad_body_response, log, require_owner_pin,
     )
 
     async def my_data_export(request: web.Request) -> web.Response:
@@ -46,6 +46,10 @@ def setup_routes(app: web.Application, pool) -> None:
             return bad if bad is not None else _err("Не удалось разобрать запрос", 400)
         if str((data or {}).get("confirm") or "").strip() != CONFIRM_WORD:
             return _err(f"Чтобы удалить данные, введите слово {CONFIRM_WORD}", 400)
+        # Опасное действие: код Infragram (если стоит) + сигнал владельцу.
+        gate = await require_owner_pin(request, pool, uid)
+        if gate is not None:
+            return gate
         try:
             res = await owner_data.delete_owner_data(pool, uid)
         except owner_data.OwnerDataDeleteError as exc:
@@ -56,6 +60,7 @@ def setup_routes(app: web.Application, pool) -> None:
             log.exception("my_data_delete uid=%s", uid)
             return _err("Удалить не получилось, ничего не изменено.", 500)
         rows = sum((res.get("deleted") or {}).values())
+        alert_owner_drain(pool, uid, "data_delete", f"строк удалено: {int(rows)}")
         return _json_resp({"ok": True, "deleted_rows": int(rows)})
 
     app.router.add_get("/api/miniapp/my_data/export", my_data_export)
