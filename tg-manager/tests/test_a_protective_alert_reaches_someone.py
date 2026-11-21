@@ -77,7 +77,13 @@ def grown(monkeypatch):
     from database import db
     from services import op_worker
 
-    name = next(iter(op_worker._PROTECTIVE_FAILURE_COUNTERS))
+    # Именно защитная ЗАПИСЬ, а не первая строка таблицы: сбои доступности
+    # базы и доставки идут под своим заголовком («База не отвечала»,
+    # «Сообщение не доставлено»), а тест проверяет заголовок защиты.
+    name = next(
+        n for n in op_worker._PROTECTIVE_FAILURE_COUNTERS
+        if n not in op_worker._AVAILABILITY_FAILURE_COUNTERS
+        and n not in op_worker._DELIVERY_FAILURE_COUNTERS)
     op_worker._reliability_metric(name, where="тест")
 
     async def _dedup_ok(pool, uid, key, ttl):
