@@ -5904,6 +5904,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
     <div style="font-size:13px;color:var(--hint);line-height:1.5;padding:8px 0 4px">
       Поставьте цель каналу или боту — план покажет, успеваете ли вы, сколько нужно в день и чем расти из того, что у вас уже есть.
     </div>
+    <div class="filter-chips" id="growthHubDays"></div>
     <div id="growthHubTotals" style="display:flex;gap:8px;padding:6px 16px 4px;flex-wrap:wrap"></div>
     <!-- Цели роста (screens/growth_plan.js). Раньше здесь был калькулятор,
          который делил число по вшитым долям и ничего не сохранял. -->
@@ -20232,14 +20233,33 @@ async function runDiag() {
 
 // ── Мотор роста (единый хаб) ─────────────────────────────
 const _GROWTH_TOOL_FN = {boost:'openBoost', growth_agent:'openGrowth', self_promo:'openSelfPromo'};
-async function openGrowthHub() {
+// Итоги хаба считались всегда за 30 дней, а прирост каналов подписывался
+// «за период», не называя его. Теперь период виден и выбирается (7/30/90 —
+// потолок ручки 90), а выбор помнится между открытиями.
+let GROWTH_DAYS = 30;
+function growthHubDaysRender() {
+  txt('growthHubDays', [7,30,90].map(n =>
+    `<div class="chip${n===GROWTH_DAYS?' on':''}" onclick="growthHubSetDays(${n})">${n} дней</div>`).join(''));
+}
+function growthHubSetDays(n) {
+  GROWTH_DAYS = n;
+  saveFormPrefs('growthhub', {days: n});
+  growthHubLoad();
+}
+function openGrowthHub() {
   push('s-growthhub');
   gpLoad();
+  const saved = Number(loadFormPrefs('growthhub').days);
+  if ([7,30,90].includes(saved)) GROWTH_DAYS = saved;
+  growthHubLoad();
+}
+async function growthHubLoad() {
+  growthHubDaysRender();
   txt('growthHubTools','<div class="spin-wrap"><div class="spin"></div></div>');
   txt('growthHubChannels','');
   txt('growthHubTotals','');
   try {
-    const d = await api('/api/miniapp/growth/overview?days=30');
+    const d = await api('/api/miniapp/growth/overview?days=' + GROWTH_DAYS);
     const t = (d.summary&&d.summary.totals)||{};
     txt('growthHubTotals', `
       <div class="kpi-chip"><div class="kpi-chip-val">${num(t.ops||0)}</div><div class="kpi-chip-lbl">операций</div></div>
@@ -20264,12 +20284,12 @@ async function openGrowthHub() {
           : c.delta<0?`<span style="color:var(--red)">${num(c.delta)}</span>`:'0');
       return `<div class="row tap" onclick="openChannel(${c.channel_id})">
         <div class="row-ico" style="background:var(--bg-blue-16)">📡</div>
-        <div class="row-body"><div class="row-name">${nm}</div><div class="row-val">${num(c.current)} участников · ${dl} за период</div></div>
+        <div class="row-body"><div class="row-name">${nm}</div><div class="row-val">${num(c.current)} участников · ${dl} за ${GROWTH_DAYS} дн.</div></div>
         <span class="chev">›</span>
       </div>`;
     }).join('') : empty('📡','Нет каналов','Создайте канал в фабрике — прирост появится здесь'));
   } catch(e) {
-    txt('growthHubTools', empty('⚠️','Ошибка',errRu(e)||'Не удалось загрузить', {label:'↺ Повторить',fn:retryCall('openGrowthHub')}));
+    txt('growthHubTools', empty('⚠️','Ошибка',errRu(e)||'Не удалось загрузить', {label:'↺ Повторить',fn:retryCall('growthHubLoad')}));
   }
 }
 // ── Growth Agent ─────────────────────────────────────────
@@ -22756,9 +22776,21 @@ const DASH_METRICS = {
                src:'снимки здоровья аккаунтов'},
 };
 
+// Метрика и период графика помнятся: владелец смотрит обычно одно и то же,
+// а экран каждый раз открывался на «Операции · 30 дней».
 function openDashboard() {
   push('s-dashboard');
+  const p = loadFormPrefs('dash');
+  if (DASH_METRICS[p.metric]) DASH_METRIC = p.metric;
+  if ([7,30,90].includes(Number(p.days))) DASH_DAYS = Number(p.days);
+  _dashMarkChips();
   loadDashboard();
+}
+function _dashMarkChips() {
+  document.querySelectorAll('#dashMetricChips .chip').forEach(c =>
+    c.classList.toggle('on', (c.getAttribute('onclick')||'').includes("'"+DASH_METRIC+"'")));
+  document.querySelectorAll('#dashDayChips .chip').forEach(c =>
+    c.classList.toggle('on', (c.getAttribute('onclick')||'').includes('('+DASH_DAYS+',')));
 }
 
 async function loadDashboard() {
@@ -22803,12 +22835,14 @@ async function loadDashboard() {
 
 function dashSetMetric(m, el) {
   DASH_METRIC = m;
+  saveFormPrefs('dash', {metric: m});
   document.querySelectorAll('#dashMetricChips .chip').forEach(c=>c.classList.remove('on'));
   if (el) el.classList.add('on');
   loadDashboardSeries();
 }
 function dashSetDays(n, el) {
   DASH_DAYS = n;
+  saveFormPrefs('dash', {days: n});
   document.querySelectorAll('#dashDayChips .chip').forEach(c=>c.classList.remove('on'));
   if (el) el.classList.add('on');
   loadDashboardSeries();
@@ -25890,6 +25924,7 @@ async function openStarsExp(expId) {
     const v = d.verdict||{};
     const recs = d.recommendations||[];
     txt('sxTitle','⭐ '+(e.name||'Тест цены'));
+    _SX_CUR = e;
     const pct = x => (x*100).toFixed(1).replace('.',',')+'%';
     const arm = (price, imp, conv, rev, cr, isWin) => `
       <div class="li"><div class="li-body">
@@ -25936,6 +25971,7 @@ async function openStarsExp(expId) {
     h += `<div style="display:flex;flex-direction:column;gap:8px;padding:12px 0">
       <button class="btn ${e.status==='active'?'btn-s':'btn-p'}" onclick="toggleStarsExpHere(${expId})">${e.status==='active'?'⏸ Приостановить':'▶️ Запустить'}</button>
       ${e.status!=='completed'?`<button class="btn btn-s" onclick="evaluateStarsExp(${expId})">🏁 Подвести итог сейчас</button>`:''}
+      <button class="btn btn-s" onclick="repeatStarsExp()">🔁 Новый тест на основе этого</button>
       <button class="btn btn-d" onclick="deleteStarsExp(${expId}, this)">🗑 Удалить тест</button>
     </div></div>`;
     txt('sxBody', h);
@@ -25972,9 +26008,16 @@ async function deleteStarsExp(expId, el) {
   } catch(e) { toast('⚠️ '+errRu(e,'Ошибка')); }
 }
 
-async function openStarsExpModal() {
+// Форма теста помнит последнего бота и тип контента: тесты обычно ставят
+// подряд на одного бота. А «Новый тест на основе этого» с карточки заполняет
+// форму из теста: после победы проверяют победившую цену против следующей,
+// и раньше всё это (бот, тип, цены) приходилось набирать заново.
+let _SX_CUR = null;
+async function openStarsExpModal(prefill) {
   const el = document.getElementById('se-bot');
   el.innerHTML = '<option value="">Загрузка…</option>';
+  document.getElementById('se-err').textContent = '';
+  showModal('mo-starsexp');
   try {
     const d = await api('/api/miniapp/bots');
     const bots = d.bots || d || [];
@@ -25982,7 +26025,25 @@ async function openStarsExpModal() {
       ? bots.map(b=>`<option value="${b.bot_id}">@${esc(b.username||b.first_name)}</option>`).join('')
       : '<option value="">Нет ботов</option>';
   } catch(e) { el.innerHTML = '<option value="">Ошибка</option>'; }
-  showModal('mo-starsexp');
+  if (prefill) {
+    const set = (id, v) => { if (v != null && v !== '') document.getElementById(id).value = v; };
+    set('se-bot', prefill.bot_id); set('se-ctype', prefill.content_type);
+    set('se-name', prefill.name); set('se-pa', prefill.price_a); set('se-pb', prefill.price_b);
+  } else {
+    applyFormPrefs('starsexp', {bot_id:'se-bot', content_type:'se-ctype'});
+  }
+}
+// Победила цена — новый тест ставит её против следующей ступени (на треть
+// выше): так ищут потолок, не теряя найденного. Нет победителя — те же цены.
+function repeatStarsExp() {
+  const e = _SX_CUR; if (!e) return;
+  let pa = e.price_a, pb = e.price_b;
+  if (e.winner === 'a' || e.winner === 'b') {
+    pa = e.winner === 'a' ? e.price_a : e.price_b;
+    pb = Math.max(pa + 1, Math.round(pa * 4 / 3));
+  }
+  openStarsExpModal({bot_id: e.bot_id, content_type: e.content_type,
+    name: (e.name || 'Тест цены') + ' · повтор', price_a: pa, price_b: pb});
 }
 async function submitStarsExp() {
   const errEl = document.getElementById('se-err');
@@ -25999,6 +26060,7 @@ async function submitStarsExp() {
     await api('/api/miniapp/stars/experiment',{method:'POST',body:JSON.stringify({
       bot_id:parseInt(bot_id), name, content_type, price_a, price_b
     })});
+    saveFormPrefs('starsexp', {bot_id, content_type});
     closeModal('mo-starsexp');
     toast('✅ A/B тест создан');
     openStars();
