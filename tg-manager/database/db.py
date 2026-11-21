@@ -1133,11 +1133,19 @@ async def get_bots(pool: asyncpg.Pool, added_by: int) -> list[dict]:
 
 
 async def get_bot(
-    pool: asyncpg.Pool, bot_id: int, added_by: int, *, owner_only: bool = False
+    pool: asyncpg.Pool, bot_id: int, added_by: int, *, owner_only: bool = False,
+    include_inactive: bool = False,
 ) -> dict | None:
+    """Бот, доступный пользователю. По умолчанию — только работающий.
+
+    ``include_inactive=True`` находит и снятого из работы, но не удалённого
+    бота. Нужен отключению: бот с отозванным токеном система снимает из
+    работы сама (is_active=FALSE), и кнопка «🗑 Отключить бота» из
+    уведомления о нём отвечала «Бот не найден» — убрать его было нечем.
+    """
     row = await pool.fetchrow(
         """SELECT * FROM managed_bots
-           WHERE bot_id=$1 AND is_active=TRUE AND deleted_at IS NULL
+           WHERE bot_id=$1 AND (is_active=TRUE OR $4::boolean) AND deleted_at IS NULL
               AND (NOT $3::boolean OR added_by=$2)
               AND (added_by=$2
                    OR bot_id IN (
@@ -1155,6 +1163,7 @@ async def get_bot(
         bot_id,
         added_by,
         owner_only,
+        include_inactive,
     )
     if row is None:
         return None
