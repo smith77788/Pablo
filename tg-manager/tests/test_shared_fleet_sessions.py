@@ -200,11 +200,22 @@ def test_classify():
     assert ss.classify(["PingRequest"]) == "exempt"
 
 
-def test_flag_off_by_default(monkeypatch):
+def test_on_by_default(monkeypatch):
+    """Решение владельца: режим включён, пока его явно не выключили."""
     ss.force(None)
     monkeypatch.delenv("FLEET_SHARED_SESSIONS", raising=False)
-    assert ss.enabled() is False
-    assert ow.shared_ops_mode() is False
+    ss.set_mode(None)                      # в базе записи нет
+    assert ss.enabled() is True
+    assert ow.shared_ops_mode() is True
+    ss.set_mode("off")                     # /fleet_parallel off
+    assert ss.enabled() is False and ow.shared_ops_mode() is False
+
+
+def test_env_zero_is_emergency_off(monkeypatch):
+    ss.force(None)
+    ss.set_mode("all")
+    monkeypatch.setenv("FLEET_SHARED_SESSIONS", "0")
+    assert ss.enabled(1) is False
 
 
 def test_make_client_returns_shared_holder_under_flag():
@@ -326,7 +337,9 @@ def test_parse_mode():
     assert ss.parse_mode("owners:5, 7") == ("owners", frozenset({5, 7}))
     assert ss.parse_mode("owners:") == ("off", frozenset())
     assert ss.parse_mode("мусор") == ("off", frozenset())
-    assert ss.parse_mode(None) == ("off", frozenset())
+    assert ss.parse_mode(None) == ("all", frozenset()), "нет записи — включено"
+    assert ss.parse_mode("") == ("all", frozenset())
+    assert ss.parse_mode("off") == ("off", frozenset())
 
 
 @pytest.mark.asyncio
