@@ -71,6 +71,7 @@ async function loadInboxBadge() {
 function openInboxWaiting() { return openInbox(true); }
 
 async function openInbox(waiting) {
+  _ibTpl = null;   // шаблоны могли поменять на своём экране
   if (waiting !== undefined) _ibWaiting = !!waiting;
   _ibScreen('s-inbox', '📥 Входящие', 'openInbox()');
   push('s-inbox');
@@ -177,6 +178,7 @@ async function openInboxThread(i) {
       '</div><div id="ibAiOut" style="padding:0 16px"></div>';
     if (canRelay) {
       out += '<div style="padding:0 16px 8px">' +
+        '<div class="preset-row" id="ibQuick"></div>' +
         '<textarea id="ibReplyText" class="input-bc" rows="3" maxlength="4000" placeholder="Ответ через бота…" style="width:100%"></textarea>' +
         '<button class="btn" style="margin-top:6px;width:100%" onclick="sendInboxReply()">Отправить через бота</button>' +
         '</div>';
@@ -195,6 +197,7 @@ async function openInboxThread(i) {
         'и второе подключение к той же сессии Telegram оборвёт её — поэтому ответ аккаунтом идёт из самого Telegram.</div>';
     }
     body.innerHTML = out;
+    if (canRelay) _ibQuickReplies();
   } catch (e) {
     body.innerHTML = errHtml(errRu(e), 'openInboxThread(' + i + ')');
   }
@@ -253,6 +256,66 @@ async function inboxAiSummary() {
   } catch (e) {
     box.innerHTML = '<div style="font-size:12px;color:var(--hint);padding:6px 0">⚠️ ' + esc(errRu(e, 'Сводка не получилась')) + '</div>';
   }
+}
+
+// Быстрые ответы: те же шаблоны постов, что у рассылок, — одним касанием в
+// поле ответа. Подстановки ({name}, {username}) берутся из этого человека,
+// варианты {а|б} раскрываются: в личный ответ скобки уйти не должны.
+let _ibTpl = null;
+async function _ibQuickReplies() {
+  const box = _ibEl('ibQuick');
+  if (!box) return;
+  if (!_ibTpl) {
+    try { _ibTpl = (await api('/api/miniapp/templates?limit=100')).templates || []; }
+    catch (e) { _ibTpl = []; }
+  }
+  const head = _ibTpl.slice(0, 6);
+  box.innerHTML = head.map(function (t, k) {
+    return '<span class="preset-chip" role="button" tabindex="0" onclick="inboxUseTpl(' + k + ')">' + esc(t.name || 'Шаблон') + '</span>';
+  }).join('') +
+    (_ibTpl.length > head.length ? '<span class="preset-chip" role="button" tabindex="0" onclick="inboxPickTpl()">📝 Все шаблоны · ' + _ibTpl.length + '</span>' : '') +
+    '<span class="preset-chip" role="button" tabindex="0" onclick="inboxSaveTpl()">💾 В шаблоны</span>';
+}
+function _ibFill(text) {
+  const t = _ibPeer || {};
+  const first = String(t.name || '').split(' ')[0] || '';
+  let s = String(text || '')
+    .replace(/\{(name|first_name)\}/g, first)
+    .replace(/\{username\}/g, t.username ? '@' + t.username : first);
+  let guard = 0;
+  while (/\{[^{}]*\|[^{}]*\}/.test(s) && guard++ < 50) {
+    s = s.replace(/\{([^{}]*\|[^{}]*)\}/g, function (m, g) {
+      const p = g.split('|'); return p[Math.floor(Math.random() * p.length)];
+    });
+  }
+  return s;
+}
+function inboxUseTpl(k) {
+  const t = _ibTpl && _ibTpl[k];
+  const ta = _ibEl('ibReplyText');
+  if (!t || !ta) return;
+  ta.value = _ibFill(t.template && t.template.text);
+  ta.focus();
+}
+async function inboxPickTpl() {
+  const id = await askChoice('📝 Быстрый ответ', (_ibTpl || []).map(function (t) {
+    return {value: t.id, label: t.name || 'Шаблон', sub: String((t.template && t.template.text) || '').slice(0, 80)};
+  }));
+  const k = (_ibTpl || []).findIndex(function (t) { return t.id === id; });
+  if (k >= 0) inboxUseTpl(k);
+}
+async function inboxSaveTpl() {
+  const ta = _ibEl('ibReplyText');
+  const text = (ta && ta.value || '').trim();
+  if (!text) { toast('Сначала напишите ответ'); return; }
+  const name = ((await askPrompt('Название быстрого ответа', {value: text.slice(0, 40)})) || '').trim();
+  if (!name) return;
+  try {
+    await api('/api/miniapp/template', {method: 'POST', body: JSON.stringify({name: name, text: text})});
+    _ibTpl = null;
+    _ibQuickReplies();
+    toast('💾 Сохранено в шаблоны');
+  } catch (e) { toast('⚠️ ' + errRu(e, 'Не удалось сохранить')); }
 }
 
 async function sendInboxReply() {
