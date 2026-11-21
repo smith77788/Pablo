@@ -56,6 +56,11 @@ async def _fr(pool: asyncpg.Pool, q: str, *args):
         return []
 
 
+# Счётчики, у которых «не прочитали» нельзя приравнивать к нулю: по нулю
+# строится подсказка «подключите», а не «всё спокойно».
+_UNKNOWN_IS_NONE = frozenset({"vault_conn", "vault_conn_off"})
+
+
 async def _gather_state(pool: asyncpg.Pool, uid: int) -> dict:
     """Собирает состояние владельца одним параллельным раундом запросов."""
     q = {
@@ -224,7 +229,12 @@ async def _gather_state(pool: asyncpg.Pool, uid: int) -> dict:
     res = await asyncio.gather(*q.values(), return_exceptions=True)
     out: dict = {}
     for k, v in zip(keys, res):
-        if isinstance(v, Exception):
+        if k in _UNKNOWN_IS_NONE and (v is None or isinstance(v, Exception)):
+            # COUNT(*) не бывает NULL: None — это сбой чтения. Ноль здесь
+            # утверждал бы «Хранилище не подключено» и звал бы подключить того,
+            # у кого оно работает.
+            out[k] = None
+        elif isinstance(v, Exception):
             out[k] = 0 if k != "recent_ops" else []
         elif k == "recent_ops":
             out[k] = [dict(r) for r in (v or [])]
@@ -597,9 +607,7 @@ def build_suggestions(state: dict) -> list[dict]:
     # ── Папки, связки и Хранилище ─────────────────────────────────────────
     # Эти три модуля жили в копайлоте немыми: пользователь не узнавал ни о
     # сломанном артефакте (папка без ссылки), ни о неразвёрнутой связке, ни о
-    # том, что архив перестал пополняться. Подсказки только по РЕАЛЬНЫМ
-    # состояниям — «подключите Хранилище» всем подряд не показываем: это
-    # требует Telegram Business и превращается в вечный баннер.
+    # том, что архив перестал пополняться. Подсказки — по РЕАЛЬНЫМ состояниям.
 
     # 14. Папка без ссылки — экспорт не удался или завис. Артефакт есть, толку
     #     нет: раздавать нечего.
@@ -692,7 +700,7 @@ def build_suggestions(state: dict) -> list[dict]:
 
     # 19. Хранилище отключено — архив молча перестал пополняться. Тихая потеря
     #     данных: переписка удаляется у собеседника и не остаётся нигде.
-    if state.get("vault_conn_off", 0) > 0 and state.get("vault_conn", 0) == 0:
+    if (state.get("vault_conn_off") or 0) > 0 and state.get("vault_conn") == 0:
         s.append(
             {
                 "id": "vault_reconnect",
@@ -701,9 +709,33 @@ def build_suggestions(state: dict) -> list[dict]:
                 "title": "Хранилище отключено",
                 "reason": "Подключение бизнес-аккаунта выключено — архив не "
                 "пополняется, удалённые сообщения больше не сохраняются.",
-                "cta": "Открыть Хранилище",
+                "cta": "Переподключить",
                 "nav": None,
-                "fn": "openVault",
+                "fn": "openVaultConnect",
+            }
+        )
+
+    # 19б. Хранилище не подключали ни разу. Раньше эту подсказку не давали
+    #      никому («требует Premium, станет вечным баннером»), и главную фишку
+    #      продукта новичок находил разве что случайно. Теперь подключать бота
+    #      к личным чатам Telegram даёт и без Premium, и владелец решил
+    #      (21.11.2026) показывать её всем одинаково. Чтобы не стать баннером,
+    #      «отложить» прячет её на трое суток, а не на сутки; после подключения
+    #      она уходит сама.
+    if state.get("vault_conn") == 0 and state.get("vault_conn_off") == 0:
+        s.append(
+            {
+                "id": "connect_vault",
+                "priority": 72,
+                "icon": "🗄",
+                "title": "Подключите Хранилище диалогов",
+                "reason": "Бот сохранит все ваши личные переписки — даже если "
+                "собеседник удалит сообщение или весь диалог — и сообщит об этом. "
+                "Подключение занимает минуту.",
+                "cta": "Подключить",
+                "nav": None,
+                "fn": "openVaultConnect",
+                "snooze_hours": 72,
             }
         )
 
@@ -726,7 +758,7 @@ def build_suggestions(state: dict) -> list[dict]:
 
     # 21. Хранилище работает, но правил нет — архив копится, сигналы никто не
     #     ловит: модуль наполовину выключен.
-    if state.get("vault_conn", 0) > 0 and state.get("vault_rules", 0) == 0:
+    if (state.get("vault_conn") or 0) > 0 and state.get("vault_rules", 0) == 0:
         s.append(
             {
                 "id": "setup_intent_rules",

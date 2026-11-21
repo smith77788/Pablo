@@ -11351,6 +11351,7 @@ const _ONBOARD_ACT = {
   inbox:           'openInbox',
   contacts:        'openContacts',
   deals:           'openDeals',
+  vault_connect:   'openVaultConnect',
 };
 // Это первый экран нового владельца: кнопка, которая молча ничего не делает,
 // читается как «приложение сломано». Раньше и неизвестный шаг, и отсутствующая
@@ -11444,7 +11445,8 @@ async function loadOnboarding() {
   const rows = (d.steps||[]).map(s => {
     const mark = s.done ? '<span style="color:var(--green)">✓</span>'
       : (s.id===d.next_step ? '<span style="color:var(--accent)">◆</span>' : '<span style="color:var(--hint)">○</span>');
-    const opt = s.optional ? ' <span style="font-size:11px;color:var(--hint)">(необязательно)</span>' : '';
+    const opt = s.recommended ? ' <span style="font-size:11px;color:var(--accent);font-weight:600">★ рекомендуем</span>'
+      : (s.optional ? ' <span style="font-size:11px;color:var(--hint)">(необязательно)</span>' : '');
     const act = s.action || null;
     const prm = act && act.param != null ? Number(act.param) : NaN;
     const prmArg = Number.isInteger(prm) ? ',' + prm : '';
@@ -12133,6 +12135,8 @@ function runPulseAction(a) {
   // Онбординг из бота (/start новичка): к чеклисту и к подключению аккаунта.
   if (k==='onboarding') { goTab('home'); setTimeout(()=>{ const c=document.getElementById('onboardCard'); if (c) c.scrollIntoView({behavior:'smooth', block:'start'}); }, 300); return; }
   if (k==='accounts_add') return openAccImportModal();
+  // Подключение Хранилища диалогов: шаг онбординга, подсказка и кнопка в боте.
+  if (k==='vault_connect') return openVaultConnect();
   // «Открыть канбан» у сообщения клиента в боте и «ждут ответа» из уведомлений.
   if (k==='deals') return openDeals();
   if (k==='inbox') return openInbox(true);
@@ -37582,6 +37586,7 @@ function renderAudSegChart(segments) {
 <script src="screens/bot_mesh.js"></script>
 <script src="screens/crm_inbox.js"></script>
 <script src="screens/vault_dialogs.js"></script>
+<script src="screens/vault_connect.js"></script>
 <script src="screens/resource_actions.js"></script>
 <script src="screens/money_funnel.js"></script>
 <script src="screens/cohorts.js"></script>
