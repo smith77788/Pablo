@@ -28,6 +28,12 @@ router = Router(name="business_vault")
 async def cmd_vault(message: Message, pool: asyncpg.Pool) -> None:
     """Экран «Хранилище»: статус подключения, инструкция и кнопка открытия архива."""
     uid = message.from_user.id if message.from_user else None
+    await send_vault_screen(message, pool, uid)
+
+
+async def send_vault_screen(message: Message, pool: asyncpg.Pool, uid) -> None:
+    """Тот же экран для /vault и для кнопки «Подключить Хранилище» из /start
+    (VaultCb a=how): ``message`` — куда отвечать, ``uid`` — чьё хранилище."""
     conn = await vault.active_connection_for_owner(pool, uid) if uid else None
 
     from aiogram.utils.keyboard import InlineKeyboardBuilder
@@ -49,6 +55,13 @@ async def cmd_vault(message: Message, pool: asyncpg.Pool) -> None:
 
     me = await message.bot.get_me()
     handle = f"@{me.username}" if me and me.username else "этого бота"
+    if not conn and me and me.username:
+        # Имя бота — то, что человек вставляет в «Чат-боты»: копия в один тап
+        # вместо выделения текста пальцем.
+        from aiogram.types import CopyTextButton
+        kb.button(text=f"📋 Скопировать {handle}", copy_text=CopyTextButton(text=handle))
+        _has_btn = True
+    kb.adjust(1)
     if conn:
         head = ("✅ <b>Хранилище подключено.</b>\n\n"
                 "Бот сохраняет все сообщения в ваших личных чатах — даже удалённые. "
@@ -58,14 +71,19 @@ async def cmd_vault(message: Message, pool: asyncpg.Pool) -> None:
                      "право отвечать в настройках бизнес-аккаунта.")
     else:
         head = (
-            "🗄 <b>Хранилище переписки</b>\n\n"
+            "🗄 <b>Хранилище диалогов</b>\n\n"
             "Бот <b>автоматически сохраняет все сообщения</b>, которые вы отправляете и "
-            "получаете в своих чатах — чтобы вы могли вернуться к ним в любой момент, "
-            "<b>даже если диалог удалён</b>.\n\n"
+            "получаете в личных чатах:\n"
+            "• 🗑 удалённые сообщения остаются у вас — <b>даже если собеседник стёр "
+            "весь диалог</b>;\n"
+            "• ✏️ видно, что было написано до правки;\n"
+            "• 🔔 бот сообщит, когда кто-то удалит сообщение;\n"
+            "• 🔎 поиск по всей истории и ответ прямо из архива.\n\n"
             "Чтобы бот начал запись, подключите его в бизнес-аккаунте:\n"
             "1. Настройки Telegram → <b>Telegram для бизнеса</b>\n"
             "2. <b>Чат-боты</b>\n"
             f"3. Введите <b>{handle}</b> и разрешите доступ к чатам\n\n"
+            "Подключение займёт минуту.\n"
             "🔒 Все сообщения хранятся в зашифрованном виде.")
     await message.answer(head, parse_mode="HTML",
                          reply_markup=kb.as_markup() if _has_btn else None)
@@ -473,7 +491,10 @@ async def on_vault_cb(cq: CallbackQuery, callback_data: VaultCb, pool: asyncpg.P
     from services import vault_dialogs as vd
     a, c, f, p = callback_data.a, callback_data.c, callback_data.f, callback_data.p
     try:
-        if a == "list":
+        if a == "how":
+            # Кнопка «Подключить Хранилище» из /start: тот же экран, что /vault.
+            await send_vault_screen(cq.message, pool, uid)
+        elif a == "list":
             await state.clear()
             text, markup = await render_dialog_list(pool, uid, f, p)
             if markup is None:
