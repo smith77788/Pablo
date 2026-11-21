@@ -153,7 +153,7 @@ class SnoozeCb(CallbackData, prefix="snz"):
 class VaultCb(CallbackData, prefix="vlt"):
     """Хранилище в боте: список диалогов и карточка диалога.
 
-    a: list | open | msgs | reply | done | buy | pin | arch | mute | cancel
+    a: list | open | msgs | reply | done | buy | pin | arch | mute | cancel | how
     c — chat_id диалога (0 для списка); f — папка списка; p — страница.
     """
     a: str

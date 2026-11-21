@@ -8110,6 +8110,15 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
     </div>
     <div class="sec" style="margin-top:16px">Мои данные</div>
     <div class="card" style="padding:12px 16px;display:flex;flex-direction:column;gap:8px">
+      <!-- Формы запоминают последние значения и черновики на этом устройстве;
+           сбросить их можно было только очисткой данных Telegram. -->
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:8px">
+        <div style="min-width:0">
+          <div style="font-size:14px">🧹 Запомненные значения форм</div>
+          <div id="set-fp-status" style="font-size:12px;color:var(--hint);margin-top:2px"></div>
+        </div>
+        <button class="btn btn-s" onclick="resetFormMemory()" style="padding:6px 12px;font-size:12px;flex:0 0 auto">Сбросить</button>
+      </div>
       <button class="btn btn-s" onclick="exportMyData()">⬇️ Выгрузить мои данные (архив)</button>
       <button class="btn btn-r" onclick="deleteMyData()">🗑 Удалить все мои данные</button>
       <div style="font-size:11px;color:var(--hint)">В архив не попадают строки сессий, токены и прокси. Удаление стирает аккаунты, ботов, каналы, контакты и историю; платежи и подписки остаются для учёта.</div>
@@ -11350,6 +11359,7 @@ const _ONBOARD_ACT = {
   inbox:           'openInbox',
   contacts:        'openContacts',
   deals:           'openDeals',
+  vault_connect:   'openVaultConnect',
 };
 // Это первый экран нового владельца: кнопка, которая молча ничего не делает,
 // читается как «приложение сломано». Раньше и неизвестный шаг, и отсутствующая
@@ -11443,7 +11453,8 @@ async function loadOnboarding() {
   const rows = (d.steps||[]).map(s => {
     const mark = s.done ? '<span style="color:var(--green)">✓</span>'
       : (s.id===d.next_step ? '<span style="color:var(--accent)">◆</span>' : '<span style="color:var(--hint)">○</span>');
-    const opt = s.optional ? ' <span style="font-size:11px;color:var(--hint)">(необязательно)</span>' : '';
+    const opt = s.recommended ? ' <span style="font-size:11px;color:var(--accent);font-weight:600">★ рекомендуем</span>'
+      : (s.optional ? ' <span style="font-size:11px;color:var(--hint)">(необязательно)</span>' : '');
     const act = s.action || null;
     const prm = act && act.param != null ? Number(act.param) : NaN;
     const prmArg = Number.isInteger(prm) ? ',' + prm : '';
@@ -12132,6 +12143,8 @@ function runPulseAction(a) {
   // Онбординг из бота (/start новичка): к чеклисту и к подключению аккаунта.
   if (k==='onboarding') { goTab('home'); setTimeout(()=>{ const c=document.getElementById('onboardCard'); if (c) c.scrollIntoView({behavior:'smooth', block:'start'}); }, 300); return; }
   if (k==='accounts_add') return openAccImportModal();
+  // Подключение Хранилища диалогов: шаг онбординга, подсказка и кнопка в боте.
+  if (k==='vault_connect') return openVaultConnect();
   // «Открыть канбан» у сообщения клиента в боте и «ждут ответа» из уведомлений.
   if (k==='deals') return openDeals();
   if (k==='inbox') return openInbox(true);
@@ -12519,6 +12532,31 @@ function saveDraft(key, text) {
 }
 function loadDraft(key) { try { return localStorage.getItem('infragram_draft_' + key) || ''; } catch(_) { return ''; } }
 function clearDraft(key) { try { localStorage.removeItem('infragram_draft_' + key); } catch(_) {} }
+// Сколько форм помнят значения и сколько черновиков лежит на устройстве.
+function formMemoryCounts() {
+  let drafts = 0;
+  try { for (let i = 0; i < localStorage.length; i++) { if ((localStorage.key(i) || '').startsWith('infragram_draft_')) drafts++; } } catch(_) {}
+  return { forms: Object.keys(_fpAll()).length, drafts };
+}
+function renderFormMemoryStatus() {
+  const c = formMemoryCounts();
+  txt('set-fp-status', (c.forms || c.drafts)
+    ? `Форм: ${c.forms}, черновиков: ${c.drafts}. Сброс вернёт значения по умолчанию.`
+    : 'Пусто: формы откроются со значениями по умолчанию.');
+}
+async function resetFormMemory() {
+  const c = formMemoryCounts();
+  if (!c.forms && !c.drafts) { toast('Сбрасывать нечего'); return; }
+  if (!await askConfirm(`Сбросить запомненные значения ${c.forms} форм и ${c.drafts} черновиков на этом устройстве? Данные на сервере не меняются.`)) return;
+  try {
+    localStorage.removeItem(_FP_KEY);
+    const keys = [];
+    for (let i = 0; i < localStorage.length; i++) { const k = localStorage.key(i) || ''; if (k.startsWith('infragram_draft_')) keys.push(k); }
+    keys.forEach(k => localStorage.removeItem(k));
+  } catch(_) {}
+  renderFormMemoryStatus();
+  toast('✅ Формы откроются со значениями по умолчанию');
+}
 
 function renderCards(d) {
   // KPI scroll row
@@ -16197,7 +16235,29 @@ function buildFunnelDetail(d) {
     <div class="sec" style="margin-top:8px">🔀 Цепочка сообщений</div>
     ${stepsHtml}
     ${addStepForm}
+    <div style="margin:12px 16px 0"><button class="btn btn-s" style="width:100%" onclick="copyFunnelToBot()">📋 Копировать воронку в бота…</button></div>
     <div style="height:16px"></div>`;
+}
+// Одинаковую цепочку на нескольких ботах собирали руками, шаг за шагом.
+// Копия приходит ВЫКЛЮЧЕННОЙ: на другом боте другая аудитория, и писать людям
+// она начнёт только после того, как владелец её посмотрит и включит.
+async function copyFunnelToBot() {
+  if (!CUR_FUNNEL_ID) return;
+  let bots = [];
+  try { const d = await api('/api/miniapp/bots'); bots = d.bots || d || []; }
+  catch(e) { toast('⚠️ ' + errRu(e, 'Боты не загрузились')); return; }
+  if (!bots.length) { toast('Нет ботов, куда копировать'); return; }
+  const botId = await askChoice('В какого бота скопировать воронку?', bots.map(b => ({
+    value: b.bot_id, label: '@' + (b.username || b.first_name || b.bot_id),
+    sub: String(b.bot_id) === String(CUR_BOT?.id) ? 'этот же бот' : ''})));
+  if (botId == null) return;
+  try {
+    const r = await api('/api/miniapp/funnel/' + Number(CUR_FUNNEL_ID) + '/copy',
+      {method:'POST', body: JSON.stringify({bot_id: Number(botId)})});
+    toast(`📋 Скопировано шагов: ${num(r.steps||0)}. Копия выключена — проверьте и включите`);
+    back();
+    openFunnelDetail(r.funnel_id, 'Копия воронки');
+  } catch(e) { toast('⚠️ ' + errRu(e, 'Не удалось скопировать')); }
 }
 async function addFunnelStep() {
   if (!CUR_FUNNEL_ID) return;
@@ -34894,6 +34954,7 @@ async function openSettings() {
   try { loadHomeScreenStatus(); } catch(_) {}
   try { renderFullscreenRow(); } catch(_) {}
   try { loadMirror(); } catch(_) {}
+  try { renderFormMemoryStatus(); } catch(_) {}
   document.getElementById('m-settings-val').textContent = '⚙️';
   try {
     // Источник правды — бэкенд (notification_settings + get_proxy_policy). Раньше
@@ -37564,6 +37625,7 @@ function renderAudSegChart(segments) {
 <script src="screens/bot_mesh.js"></script>
 <script src="screens/crm_inbox.js"></script>
 <script src="screens/vault_dialogs.js"></script>
+<script src="screens/vault_connect.js"></script>
 <script src="screens/resource_actions.js"></script>
 <script src="screens/money_funnel.js"></script>
 <script src="screens/cohorts.js"></script>

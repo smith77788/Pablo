@@ -305,5 +305,18 @@ def test_seller_goal_path_reads_without_accounts(pool):
     from services import onboarding
     _run(onboarding.set_goal(pool, OWNER, "sell_bot"))
     r = _checklist(pool)
-    assert [s["id"] for s in r["steps"]] == ["bot", "persona", "plan", "first_result"]
+    # Хранилище диалогов — рекомендуемый шаг в каждом пути, сразу за первым;
+    # состояние читается из business_connections живым запросом.
+    assert [s["id"] for s in r["steps"]] == ["bot", "vault", "persona", "plan", "first_result"]
+    assert next(s for s in r["steps"] if s["id"] == "vault")["done"] is False
     assert r["next_step"] == "bot" and r["activated"] is False
+    # Подключил Хранилище — шаг закрыт, остальной путь не сдвинулся.
+    _run(pool.execute(
+        "INSERT INTO business_connections(connection_id, owner_id, is_enabled) "
+        "VALUES ('conn_onb_e2e', $1, TRUE)", OWNER))
+    try:
+        r = _checklist(pool)
+        assert next(s for s in r["steps"] if s["id"] == "vault")["done"] is True
+        assert r["next_step"] == "bot" and r["activated"] is False
+    finally:
+        _run(pool.execute("DELETE FROM business_connections WHERE connection_id='conn_onb_e2e'"))

@@ -104,6 +104,55 @@ def _op_title(op: Optional[dict]) -> str:
     return (desc or "операция")[:80]
 
 
+# Хранилище диалогов — одна из главных фишек продукта, и раньше в онбординге
+# его не было вовсе: подключить можно было только из экрана Хранилища или
+# командой /vault, о которых новичок не знает. Шаг есть в КАЖДОМ пути цели, но
+# он рекомендуемый: это не путь к первому результату цели, и держать
+# активацию он не должен. Показывается всем одинаково — подключать бота к
+# личным чатам Telegram теперь даёт и без Premium (решение владельца 21.11.2026).
+VAULT_STATES = frozenset({"never", "disabled", "on"})
+
+
+def vault_step(vault_state: Optional[str]) -> Optional[dict]:
+    """Шаг «Хранилище диалогов». None — состояние не прочитали (таблицы нет,
+    сбой базы): лучше без шага, чем с ложным «не подключено»."""
+    if vault_state not in VAULT_STATES:
+        return None
+    on = vault_state == "on"
+    step = {
+        "id": "vault",
+        "title": "Хранилище диалогов подключено" if on else "Подключить Хранилище диалогов",
+        "hint": ("Бот сохраняет все ваши личные переписки — даже если собеседник "
+                 "удалил сообщение или весь диалог, и сообщает об этом. Поиск по "
+                 "всей истории и ответ прямо из архива. Подключение — минута."),
+        "done": on,
+        "optional": True,
+        # Не обязателен для активации, но это главная фишка: подпись
+        # «рекомендуем», а не «необязательно».
+        "recommended": True,
+        "cta": "Подключить",
+        "action": {"kind": "vault_connect"},
+    }
+    if vault_state == "disabled":
+        step["title"] = "Хранилище отключено — переподключить"
+        step["hint"] = ("Подключение было, но сейчас выключено: бота убрали из "
+                        "«Чат-ботов» или Telegram сбросил связь. Новые сообщения "
+                        "не сохраняются, уже сохранённое на месте.")
+        step["cta"] = "Переподключить"
+    return step
+
+
+def _with_vault(steps: list, vault_state: Optional[str], after: str) -> list:
+    """Вставить шаг хранилища сразу за шагом ``after`` (или в конец)."""
+    st = vault_step(vault_state)
+    if st is None:
+        return steps
+    out = list(steps)
+    idx = next((i for i, s in enumerate(out) if s["id"] == after), len(out) - 1)
+    out.insert(idx + 1, st)
+    return out
+
+
 def build_checklist(
     *,
     accounts: int,
@@ -126,6 +175,7 @@ def build_checklist(
     sales_orders: int = 0,
     contacts: int = 0,
     deals: int = 0,
+    vault_state: Optional[str] = None,
 ) -> dict:
     """Собрать чеклист из снимка состояния владельца.
 
@@ -216,10 +266,12 @@ def build_checklist(
     if chosen == "sell_bot":
         return _sell_bot_checklist(plan_step, bots=bots, personas_bound=personas_bound,
                                    dialogs=sales_dialogs, orders=sales_orders,
-                                   activated_at=activated_at, trial=trial, stored=stored)
+                                   activated_at=activated_at, trial=trial, stored=stored,
+                                   vault_state=vault_state)
     if chosen == "crm":
         return _crm_checklist(acc_step, alive=alive, contacts=contacts, deals=deals,
-                              activated_at=activated_at, trial=trial, stored=stored)
+                              activated_at=activated_at, trial=trial, stored=stored,
+                              vault_state=vault_state)
 
     op_step = {
         "id": "first_op",
@@ -271,6 +323,7 @@ def build_checklist(
         res_step["cta"] = "Выбрать"
         res_step["action"] = {"kind": "first_action"}
     steps += [op_step, res_step]
+    steps = _with_vault(steps, vault_state, after="accounts")
 
     done_count = sum(1 for s in steps if s["done"])
     # Следующий незакрытый обязательный шаг — на нём фокус (подсветка).
@@ -331,7 +384,7 @@ def _finish(goal: str, steps: list, has_result: bool, first_result, activated_at
 
 
 def _sell_bot_checklist(plan_step: dict, *, bots, personas_bound, dialogs, orders,
-                        activated_at, trial, stored=None) -> dict:
+                        activated_at, trial, stored=None, vault_state=None) -> dict:
     """Путь продавца: бот → ИИ-менеджер на нём → подписка → первый диалог.
 
     Аккаунтов и прокси тут нет вовсе: боту продавца они не нужны, а были
@@ -370,11 +423,12 @@ def _sell_bot_checklist(plan_step: dict, *, bots, personas_bound, dialogs, order
     elif personas_bound:
         steps[-1]["cta"] = "Входящие"
         steps[-1]["action"] = {"kind": "inbox"}
+    steps = _with_vault(steps, vault_state, after="bot")
     return _finish("sell_bot", steps, has_result, fr, activated_at, trial)
 
 
 def _crm_checklist(acc_step: dict, *, alive, contacts, deals, activated_at, trial,
-                   stored=None) -> dict:
+                   stored=None, vault_state=None) -> dict:
     """Путь CRM: аккаунт → контакты собраны → первая сделка на доске."""
     contacts, deals = _n(contacts), _n(deals)
     has_result = deals > 0 or activated_at is not None
@@ -401,6 +455,7 @@ def _crm_checklist(acc_step: dict, *, alive, contacts, deals, activated_at, tria
         steps[-1]["action"] = None
         fr = ({"op_id": None, "title": "Первая сделка в воронке", "ok": deals}
               if deals or not stored else stored)
+    steps = _with_vault(steps, vault_state, after="accounts")
     return _finish("crm", steps, has_result, fr, activated_at, trial)
 
 
@@ -494,6 +549,21 @@ async def _goal_counts(pool, uid: int, goal: Optional[str]) -> dict:
     return dict(zip(sql.keys(), vals))
 
 
+async def load_vault_state(pool, uid: int) -> Optional[str]:
+    """Состояние Хранилища владельца: 'on' | 'disabled' | 'never'; None — не
+    прочитали (шаг тогда не показывается, а чеклист не падает)."""
+    try:
+        row = await pool.fetchrow(
+            "SELECT bool_or(is_enabled) AS on_, COUNT(*) AS n "
+            "FROM business_connections WHERE owner_id=$1", uid)
+        if not row or not row["n"]:
+            return "never"
+        return "on" if row["on_"] else "disabled"
+    except Exception:
+        log.warning("onboarding: vault state read failed uid=%s", uid, exc_info=True)
+        return None
+
+
 def goal_result(state: dict) -> Optional[dict]:
     """Первый результат пути цели (не операции): заказ, диалог, сделка."""
     goal = state.get("goal")
@@ -537,7 +607,7 @@ async def load_state(pool, uid: int) -> dict:
                 "goal": goal}
 
     excl = list(NOT_A_RESULT)
-    acc, proxies, user_ops, goal_counts, warmup_days = await asyncio.gather(
+    acc, proxies, user_ops, goal_counts, warmup_days, vault_st = await asyncio.gather(
         pool.fetchrow(
             "SELECT COUNT(*) AS total, "
             "COUNT(*) FILTER (WHERE is_active IS NOT FALSE "
@@ -557,6 +627,7 @@ async def load_state(pool, uid: int) -> dict:
         pool.fetchval(
             "SELECT COALESCE(MAX(current_day), 0) FROM account_warmup_plans "
             "WHERE owner_id=$1", uid),
+        load_vault_state(pool, uid),
     )
     proxies = proxies or 0
     user_ops = user_ops or 0
@@ -610,6 +681,7 @@ async def load_state(pool, uid: int) -> dict:
         "warmup_days": warmup_days,
         "activated_at": None,
         "goal": goal,
+        "vault_state": vault_st,
         **goal_counts,
     }
 
@@ -680,6 +752,7 @@ _STEP_TITLES = {
     "proxy": "Задали прокси", "plan": "Оформили подписку",
     "first_op": "Запустили первое действие", "bot": "Подключили бота",
     "persona": "Настроили ИИ-менеджера", "contacts": "Собрали контакты",
+    "vault": "Подключили Хранилище диалогов",
     "first_result": "Шаг «первый результат»", "result": "Первый результат",
 }
 _GOAL_TITLES = {k: t for k, t, _d in GOALS}
