@@ -280,15 +280,44 @@ async function loadChAutoposts(chId, boxId) {
     const left = r.repeat_count != null && r.repeat_count !== '' ? ` · осталось ${esc(String(r.repeat_count))}` : '';
     const chs = Number(r.channels || 1);
     const st = r.status === 'paused' ? ' · ⏸ на паузе' : r.status === 'running' ? ' · публикуется' : '';
-    return `<div class="li" style="cursor:default">
+    // Пауза, «опубликовать сейчас» и переход к журналу: раньше у автопостинга
+    // была одна кнопка — «Стоп», то есть пропустить праздники или выложить
+    // пост вне очереди можно было только удалив его и настроив заново.
+    const id = Number(r.id), ch = chId ? Number(chId) : 'null';
+    const sb = 'flex:0 0 auto;padding:6px 10px;font-size:12px;min-width:0';
+    const pauseBtn = r.status === 'paused'
+      ? `<button class="btn btn-p" style="${sb}" title="Возобновить" onclick="event.stopPropagation();chAutopostAct(${id}, 'resume', ${ch}, '${boxId}')">▶</button>`
+      : r.status === 'pending'
+        ? `<button class="btn btn-s" style="${sb}" title="Пауза — расписание сохранится" onclick="event.stopPropagation();chAutopostAct(${id}, 'pause', ${ch}, '${boxId}')">⏸</button>`
+        : '';
+    const nowBtn = r.status === 'pending'
+      ? `<button class="btn btn-s" style="${sb}" title="Опубликовать сейчас, не дожидаясь срока" onclick="event.stopPropagation();chAutopostAct(${id}, 'run_now', ${ch}, '${boxId}')">⚡</button>`
+      : '';
+    return `<div class="li tap" onclick="openOpDetail(${id})" role="button" tabindex="0">
       <div class="ava ava-purple">🔁</div>
       <div class="li-body">
         <div class="li-name">${esc((r.text || r.label || 'Пост').slice(0, 60))}</div>
         <div class="li-sub">${_cmEvery(r.repeat_interval_min)} · след.: ${esc(_cmWhen(r.scheduled_for))}${chs > 1 ? ' · каналов: ' + num(chs) : ''}${left}${st}</div>
       </div>
-      <button class="btn btn-s" style="flex:0 0 auto;padding:6px 10px;font-size:12px" onclick="stopChAutopost(${Number(r.id)}, ${chId ? Number(chId) : 'null'}, '${boxId}')">⏹ Стоп</button>
+      <div style="display:flex;gap:6px;flex:0 0 auto">${nowBtn}${pauseBtn}
+      <button class="btn btn-s" style="${sb}" title="Остановить совсем" onclick="event.stopPropagation();stopChAutopost(${id}, ${ch}, '${boxId}')">⏹</button></div>
     </div>`;
   }).join('') + '</div>';
+}
+
+const _CH_AP_ACT = {
+  pause:   {ask: 'Поставить автопостинг на паузу? Расписание сохранится, возобновить можно одной кнопкой.', ok: '⏸ На паузе'},
+  resume:  {ask: '', ok: '▶ Возобновлено'},
+  run_now: {ask: 'Опубликовать этот пост сейчас, не дожидаясь срока? Публикацию в канале не отменить.', ok: '⚡ Пост поставлен в работу'},
+};
+async function chAutopostAct(opId, act, chId, boxId) {
+  const a = _CH_AP_ACT[act]; if (!a) return;
+  if (a.ask && !await askConfirm(a.ask)) return;
+  try {
+    await api('/api/miniapp/operation/' + Number(opId) + '/' + act, {method: 'POST', body: '{}'});
+    toast(a.ok);
+  } catch (e) { toast('⚠️ ' + (errRu(e, 'Ошибка'))); }
+  loadChAutoposts(chId, boxId);
 }
 
 async function stopChAutopost(opId, chId, boxId) {
