@@ -15,6 +15,18 @@ from services import account_manager as am
 from telethon.errors import AuthKeyDuplicatedError  # noqa: F401 (класс-заглушка)
 
 
+@pytest.fixture(autouse=True)
+def _legacy_exclusive_mode():
+    """Этот файл проверяет ИСКЛЮЧАЮЩИЙ путь (одна операция и одно подключение
+    на аккаунт), который работает при `/fleet_parallel off` и
+    FLEET_SHARED_SESSIONS=0. По умолчанию режим совместной работы включён
+    (services/shared_sessions), его поведение — в test_shared_fleet_sessions.py."""
+    from services import shared_sessions as _ss
+    _ss.force(False)
+    yield
+    _ss.force(None)
+
+
 class _FakeClient:
     def __init__(self):
         self.disconnected = False

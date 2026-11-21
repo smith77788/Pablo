@@ -769,6 +769,10 @@ async def run_transport_refresh_loop(pool: Any, interval: int = _TRANSPORT_REFRE
         try:
             n = await prime_account_transport(pool)
             log.debug("карта транспорта обновлена: %d аккаунтов", n)
+            # Режим общего подключения (/fleet_parallel) — тот же негейтованный
+            # цикл, чтобы «выкл» доходил и до процессов без исполнителя (web).
+            from services import shared_sessions as _shared
+            await _shared.refresh_from_db(pool, force_read=True)
         except asyncio.CancelledError:
             raise
         except Exception:
@@ -1735,11 +1739,14 @@ def _shared_handle(session_string: str, device: dict | None, *, low_risk: bool,
                                     low_risk=low_risk, retry_auth_dup=retry_auth_dup,
                                     _no_share=True)
 
-    def _detached():
-        return _make_client(session_string, device, low_risk=low_risk,
-                            _no_pool=_no_pool, _no_share=True)
+    # Настоящий клиент строим СРАЗУ, без подключения: ошибки сборки (строгая
+    # прокси-изоляция, битая сессия) обязаны подниматься там же, где и раньше,
+    # — у вызывающего на `_make_client`, а не позже на connect(). Он же служит
+    # «отдельным» клиентом, если к держателю обратятся до connect().
+    _built = _make_client(session_string, device, low_risk=low_risk,
+                          _no_pool=_no_pool, _no_share=True)
 
-    return _shared.SharedClient(key, acc_id, _connect, _detached)
+    return _shared.SharedClient(key, acc_id, _connect, lambda: _built)
 
 
 def _make_client(session_string: str = "", device: dict | None = None, low_risk: bool = False,
