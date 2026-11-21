@@ -417,10 +417,12 @@ def setup_routes(app: web.Application, pool) -> None:
         try:
             ch_id = int(request.match_info["ch_id"])
             body = await request.json()
+            if not isinstance(body, dict):
+                raise ValueError("тело не объект")
+            account_id = int(body.get("account_id") or 0)
         except Exception:
             return _err("Неверный запрос", 400)
-        account_id = int(body.get("account_id") or 0)
-        username = (body.get("username") or "").strip().lstrip("@")
+        username = str(body.get("username") or "").strip().lstrip("@")
         if not account_id and not username:
             return _err("Укажите аккаунт флота или @юзернейм", 400)
         ch = await _safe_fetchrow(pool,

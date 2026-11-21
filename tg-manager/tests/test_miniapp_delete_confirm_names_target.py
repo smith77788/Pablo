@@ -137,6 +137,28 @@ def test_confirming_functions_accept_the_element():
         assert len(params) >= 2, f"{name}: нет параметра под элемент строки"
 
 
+def _menu_calls(name: str) -> list[str]:
+    """Аргументы вызова из пункта меню действий: `() => name(...)`."""
+    out = []
+    for m in re.finditer(r"\(\)\s*=>\s*" + re.escape(name) + r"\(", SRC):
+        i = m.end() - 1
+        depth = 0
+        for j in range(i, len(SRC)):
+            if SRC[j] == "(":
+                depth += 1
+            elif SRC[j] == ")":
+                depth -= 1
+                if depth == 0:
+                    out.append(SRC[i + 1:j])
+                    break
+    return out
+
+
+def test_menu_call_probe_sees_a_live_example():
+    """Пробник: заведомо живой вызов из меню действий проекта виден."""
+    assert _menu_calls("removeNetNode") == ["Number(node.id), trigger"]
+
+
 def test_call_sites_pass_the_element():
     """`this` доезжает из разметки: без него вопрос молча вернётся к безымянному."""
     missing = []
@@ -145,9 +167,19 @@ def test_call_sites_pass_the_element():
         if "confirmDelete(" not in body and "rowName(" not in body:
             continue
         calls = _markup_calls(name)
-        assert calls, f"{name}: не нашлось ни одного вызова из разметки"
+        menu = _menu_calls(name)
+        assert calls or menu, f"{name}: не нашлось ни одного вызова из разметки"
         for args in calls:
             if not re.search(r"\bthis\s*$", args.strip()):
+                missing.append(f"{name}({args})")
+        # Меню действий (screens/resource_actions.js) зовёт функцию из пункта
+        # меню, а не из onclick: элемент строки там — `trigger`, кнопка, по
+        # которой меню открыли (она стоит в строке, rowName найдёт имя).
+        # Вторым аргументом, как и `this` в разметке; следом может идти явное
+        # имя (removeChannel(id, trigger, label)).
+        for args in menu:
+            parts = [a.strip() for a in args.split(",")]
+            if len(parts) < 2 or parts[1] != "trigger":
                 missing.append(f"{name}({args})")
     assert not missing, "вызов не передаёт элемент строки: " + ", ".join(missing)
 

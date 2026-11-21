@@ -33722,6 +33722,7 @@ const OP_RU = {
   community_set_staff:'Роли ноды-сообщества',
   connect_discovered_bots:'Подключение найденных на флоте ботов',
   contacts_push:'Синхронизация контактов с устройства',
+  contacts_import:'Загрузка базы контактов из файла',
   contacts_sync:'Синхронизация контактов аккаунтов',
   create_channel:'Создание канала',
   create_chatlist_folder:'Сборка общей папки и экспорт chatlist-ссылки',
@@ -33938,7 +33939,7 @@ async function loadMirror() {
   box.innerHTML = '<div class="spin-wrap" style="padding:8px"><div class="spin"></div></div>';
   let d;
   try { d = await api('/api/miniapp/mirror'); }
-  catch (e) { box.innerHTML = `<div style="font-size:13px;color:var(--red)">${esc(errRu(e,'Не удалось загрузить'))}</div>`; return; }
+  catch (e) { box.innerHTML = errHtml(errRu(e,'Не удалось загрузить'), 'loadMirror()'); return; }
   if (!d.mini_app_ready) {
     box.innerHTML = '<div style="font-size:13px;color:var(--hint)">Панель-мини-апп не настроена на сервере — зеркало открывать нечему. Обратитесь к администратору.</div>';
     return;

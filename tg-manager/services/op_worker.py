@@ -20254,6 +20254,23 @@ async def _unmark_untried_invites(pool, owner_id: int, group_key: str, op_id: in
     return False
 
 
+async def _fleet_ids_with_session(pool: asyncpg.Pool, owner_id: int) -> list[int]:
+    """id активных аккаунтов владельца, у которых есть сессия.
+
+    Только выборка id: сессий здесь никто не открывает, поэтому захват не нужен.
+    Вынесено из `_exec_contacts_import`: тот лишь ставит отдельную операцию
+    contacts_push, а аккаунты захватывает уже её исполнитель
+    (`_exec_contacts_push` → try_claim_account). Храповики захвата
+    (test_executors_claim_sessions, test_one_session_is_never_used_by_two_operations)
+    считают «открывает сессию» по упоминанию session_str в теле исполнителя.
+    """
+    rows = await _safe_fetch(pool,
+        "SELECT id FROM tg_accounts WHERE owner_id=$1 "
+        "AND session_str IS NOT NULL AND session_str <> '' AND is_active "
+        "ORDER BY id", owner_id) or []
+    return [int(r["id"]) for r in rows]
+
+
 async def _exec_contacts_import(
     pool: asyncpg.Pool, op_id: int, owner_id: int, params: dict
 ) -> dict:
@@ -20309,11 +20326,7 @@ async def _exec_contacts_import(
     # По успеху — авто-выгрузка в книги всего флота (одно действие владельца).
     if added:
         try:
-            _accs = await _safe_fetch(pool,
-                "SELECT id FROM tg_accounts WHERE owner_id=$1 "
-                "AND session_str IS NOT NULL AND session_str <> '' AND is_active "
-                "ORDER BY id", owner_id) or []
-            _acc_ids = [int(r["id"]) for r in _accs]
+            _acc_ids = await _fleet_ids_with_session(pool, owner_id)
             if _acc_ids:
                 from services import operation_bus
                 _pid = await operation_bus.submit(
