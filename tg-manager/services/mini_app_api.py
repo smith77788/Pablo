@@ -5759,15 +5759,27 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                    WHERE r.referrer_id=$1 AND r.paid_at IS NOT NULL""",
                 uid,
             )
+            # Список страницами и со срезом по состоянию. Раньше — последние 20
+            # без смещения: рядом стояло «Рефералов: 57», а 21-го не было видно.
+            _ref_st = {"paid": " AND r.paid_at IS NOT NULL",
+                       "active": " AND r.paid_at IS NULL AND r.activated_at IS NOT NULL",
+                       "pending": " AND r.paid_at IS NULL AND r.activated_at IS NULL"}
+            st_key = request.query.get("status") if request.query.get("status") in _ref_st else ""
+            st_cond = _ref_st.get(st_key, "")
+            lim, off = _list_limit(request, 20, 200), _list_offset(request)
             top_refs = await pool.fetch(
-                """SELECT u.user_id AS id, u.username, r.created_at, r.activated_at,
+                f"""SELECT u.user_id AS id, u.username, r.created_at, r.activated_at,
                           r.paid_at
                    FROM platform_referrals r
                    JOIN platform_users u ON u.user_id=r.referred_id
-                   WHERE r.referrer_id=$1
-                   ORDER BY r.created_at DESC LIMIT 20""",
-                uid,
+                   WHERE r.referrer_id=$1{st_cond}
+                   ORDER BY r.created_at DESC, r.id DESC LIMIT $2 OFFSET $3""",
+                uid, lim, off,
             )
+            shown_total = await pool.fetchval(
+                f"""SELECT COUNT(*) FROM platform_referrals r
+                    JOIN platform_users u ON u.user_id=r.referred_id
+                    WHERE r.referrer_id=$1{st_cond}""", uid)
             # Голый код без ссылки бесполезен: непонятно, куда его вводить.
             # Бот («/referral») давно отдаёт t.me/<бот>?start=<код>, а мини-апп
             # показывал только сам код и писал «Поделитесь кодом!».
@@ -5786,6 +5798,10 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 "total_earned": float(amb_row["total_commission"] or 0) if amb_row else 0,
                 "referral_count": int(referral_count or 0),
                 "paid_count": int(paid_count or 0),
+                "status": st_key,
+                "shown_total": int(shown_total or 0),
+                "page": {"offset": off, "limit": lim,
+                         "has_more": off + len(top_refs) < int(shown_total or 0)},
                 "referrals": [
                     {
                         "id": r["id"], "username": r["username"],
