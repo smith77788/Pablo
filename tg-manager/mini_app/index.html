@@ -5796,6 +5796,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
       <button class="btn btn-s" id="boostTab-subscribers" onclick="boostSetType('subscribers')" style="flex:1 1 auto;padding:9px 4px;font-size:13px">👥 Подписчики</button>
       <button class="btn btn-s" id="boostTab-bot_starts" onclick="boostSetType('bot_starts')" style="flex:1 1 auto;padding:9px 4px;font-size:13px">🚀 Старты в ботах</button>
     </div>
+    <div class="preset-row" id="boostPresetRow" style="padding:0 16px"></div>
     <div style="padding:8px 16px">
       <div class="field" id="boostF-channel"><label>Канал (@username или ссылка)</label><input type="text" id="boostChannel" placeholder="@channel"></div>
       <div class="field" id="boostF-msgids"><label>ID сообщений (через запятую или диапазон 120-130)</label><input type="text" id="boostMsgIds" placeholder="123, 124, 125"></div>
@@ -19851,9 +19852,57 @@ function boostSetType(t) {
   show('boostF-payload', t==='bot_starts');
   show('boostF-premium', t==='subscribers'||t==='bot_starts');
 }
+// Наборы накрутки: тип и все поля формы под именем. Частая работа — одни и те
+// же каналы с тем же разбросом и числом аккаунтов; раньше всё вводилось заново.
+const BOOST_FIELDS = ['boostChannel','boostMsgIds','boostMsgId','boostEmojiMode','boostEmoji',
+  'boostSpread','boostTarget','boostSubTarget','boostBotUsername','boostPayload',
+  'boostPremiumOnly','boostAccCount'];
+function _boostSnapshot() {
+  const f = {};
+  BOOST_FIELDS.forEach(id => { const el = document.getElementById(id); if (el) f[id] = el.value; });
+  return {type: BOOST_TYPE, fields: f, emojis: [...BOOST_EMOJI_PICK]};
+}
+function _boostApply(snap) {
+  if (!snap || !snap.type) return;
+  boostSetType(snap.type);
+  Object.entries(snap.fields || {}).forEach(([id, v]) => {
+    const el = document.getElementById(id); if (el && v != null) el.value = v;
+  });
+  if (Array.isArray(snap.emojis)) { BOOST_EMOJI_PICK.clear(); snap.emojis.forEach(e => BOOST_EMOJI_PICK.add(e)); }
+  if (snap.type === 'reactions') boostRenderEmoji();
+}
+function _boostPresets() { const l = loadFormPrefs('boostPresets').list; return Array.isArray(l) ? l : []; }
+function renderBoostPresets() {
+  const row = document.getElementById('boostPresetRow'); if (!row) return;
+  const ICO = {views:'👁', reactions:'❤', stories:'📖', subscribers:'👥', bot_starts:'🚀'};
+  row.innerHTML = _boostPresets().map((p, i) =>
+    `<span class="preset-chip" role="button" tabindex="0" onclick="useBoostPreset(${i})">${ICO[p.type]||'🚀'} ${esc(p.name)}</span>`
+    + `<span class="preset-chip" role="button" tabindex="0" aria-label="Удалить набор" title="Удалить набор" onclick="delBoostPreset(${i}, this)">✕</span>`).join('')
+    + '<span class="preset-chip" role="button" tabindex="0" onclick="saveBoostPreset()">💾 Сохранить набор</span>';
+}
+function useBoostPreset(i) {
+  const p = _boostPresets()[i]; if (!p) return;
+  _boostApply(p); toast('Набор «'+p.name+'» подставлен');
+}
+async function saveBoostPreset() {
+  const name = ((await askPrompt('Название набора', {placeholder:'Например: реакции на новый пост'})) || '').trim().slice(0, 40);
+  if (!name) return;
+  const list = _boostPresets().filter(p => p.name !== name);
+  list.unshift(Object.assign({name}, _boostSnapshot()));
+  saveFormPrefs('boostPresets', {list: list.slice(0, 12)});
+  renderBoostPresets(); toast('💾 Набор «'+name+'» сохранён');
+}
+async function delBoostPreset(i, _el) {
+  const list = _boostPresets(); const p = list[i]; if (!p) return;
+  if (!await confirmDelete('Удалить набор «'+p.name+'»', _el)) return;
+  list.splice(i, 1); saveFormPrefs('boostPresets', {list}); renderBoostPresets();
+}
 async function openBoost() {
   push('s-boost');
   boostSetType('views');
+  // Последние настройки — те, с которыми накрутка ушла в очередь.
+  _boostApply(loadFormPrefs('boostLast').snap);
+  renderBoostPresets();
   const e=document.getElementById('boostErr'); if(e) e.textContent='';
   txt('boostHistory','<div class="spin-wrap"><div class="spin"></div></div>');
   try {
@@ -19927,6 +19976,7 @@ async function submitBoost() {
   const btn=document.getElementById('boostBtn'); btn.disabled=true; btn.textContent='Запускаю…';
   try {
     const r=await api('/api/miniapp/boost',{method:'POST',body:JSON.stringify(payload)});
+    saveFormPrefs('boostLast', {snap: _boostSnapshot()});
     toast(`🚀 Поставлено в очередь (#${r.op_id}) · ${r.accounts} акк.`);
     openBoost();
   } catch(e) { errEl.textContent=errRu(e,'Ошибка'); }
