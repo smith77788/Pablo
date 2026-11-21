@@ -62,11 +62,3 @@ python main.py
 * [`tg-manager/docs/BAN_WEATHER_MODULE.md`](tg-manager/docs/BAN_WEATHER_MODULE.md) — иммунитет флота
 * [`tg-manager/docs/AGENT_PROTOCOL.md`](tg-manager/docs/AGENT_PROTOCOL.md) — операционный протокол
 * [`tg-manager/.botmother/`](tg-manager/.botmother/) — свод правил продукта
-
-## Другие продукты
-
-В репозитории раньше лежал **BASIC.FOOD** — ИИ-агенты интернет-магазина
-зоотоваров. Это другой продукт: с Infragram он не связан ни кодом, ни данными,
-ни историей git (у веток нет общего предка). Из ствола он убран, сейчас лежит в
-ветке `claude/ai-agents-business-LCLnI` и переезжает в собственный репозиторий —
-шаги в [`docs/BASIC_FOOD_SEPARATION.md`](docs/BASIC_FOOD_SEPARATION.md).
