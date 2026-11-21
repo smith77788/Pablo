@@ -89,6 +89,7 @@ def _flag_and_cleanup(monkeypatch):
     monkeypatch.setattr(ow, "_db_pool", None)
     yield
     ss.force(None)
+    ss.set_mode(None)   # режим по умолчанию — не протекать в чужие тесты
     ss._entries.clear()
     ow._accounts_in_use.clear()
     ow._operation_account_locks.clear()
@@ -359,7 +360,7 @@ async def test_canary_owner_only(monkeypatch):
         ss._current_owner.reset(tok)
     await ss.save_mode(pool, "off")
     assert ss.enabled(42) is False
-    ss.set_mode("off")
+    ss.set_mode(None)
 
 
 @pytest.mark.asyncio
@@ -375,7 +376,7 @@ async def test_two_ops_share_only_for_canary_owner(monkeypatch):
         d = await ow._claim_available_accounts(602, _accs(2), owner_id=43)
         assert [x["id"] for x in c] == [2] and d == [], "чужой владелец — как раньше"
     finally:
-        ss.set_mode("off")
+        ss.set_mode(None)
 
 
 @pytest.mark.asyncio
@@ -392,12 +393,12 @@ async def test_db_blip_keeps_mode(monkeypatch):
         await ss.refresh_from_db(p, force_read=True)
         assert ss.enabled(1) is False
     finally:
-        ss.set_mode("off")
+        ss.set_mode(None)
 
 
 def test_env_still_enables_for_all(monkeypatch):
     ss.force(None)
-    ss.set_mode("off")
+    ss.set_mode(None)
     monkeypatch.setenv("FLEET_SHARED_SESSIONS", "1")
     assert ss.enabled(999) is True
 
@@ -429,4 +430,4 @@ async def test_parallel_buttons_switch_mode(monkeypatch):
         t = await admin._fleet_parallel_apply(pool, 77, "all")
         assert pool.value == "all" and "Включено для всех" in t
     finally:
-        ss.set_mode("off")
+        ss.set_mode(None)

@@ -29,6 +29,19 @@ import re
 
 import pytest
 
+
+
+@pytest.fixture(autouse=True)
+def _legacy_exclusive_mode():
+    """Перераспределение доли флота работает только в ИСКЛЮЧАЮЩЕМ режиме
+    (`/fleet_parallel off`): при совместной работе операции делят аккаунты,
+    а не флот, и отдавать нечего (см. test_shared_fleet_sessions.py)."""
+    from services import shared_sessions as _ss
+    _ss.force(False)
+    yield
+    _ss.force(None)
+
+
 DSN = os.getenv("INFRAGRAM_TEST_DSN", "")
 # Гейт базы — на тех проверках, которым база нужна, а не на всём модуле.
 # Модульный pytestmark уносил вместе с ними и проверки по исходникам
