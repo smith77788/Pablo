@@ -1403,6 +1403,10 @@ async def main() -> None:
         # Сводка за тихие часы: придержанное ночью уходит одним сообщением.
         from services import quiet_hours as _quiet_hours
         _spawn(_resilient("quiet_hours", _quiet_hours.run, pool, bot))
+        # Очередь доставки: уведомление, которое Telegram не принял с первых
+        # попыток, повторяется до суток, а не пропадает (services/notify_outbox).
+        from services import notify_outbox as _notify_outbox
+        _spawn(_resilient("notify_outbox", _notify_outbox.run, pool, bot))
         # Разведка рекламы: каналы на разведке пересканируются раз в сутки.
         from services import ad_intel_refresher as _ad_intel_refresher
         _spawn(_resilient("ad_intel_refresher", _ad_intel_refresher.run, pool, bot))
