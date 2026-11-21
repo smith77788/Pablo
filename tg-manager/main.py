@@ -1367,6 +1367,10 @@ async def main() -> None:
         # и один раз предупреждает владельца в ЛС (иначе узнаёт, только зайдя в архив).
         from services import vault_watchdog
         _spawn(_resilient("vault_watchdog", vault_watchdog.run, pool, bot))
+        # Напоминания новичку «подключите Хранилище диалогов» — ровно два, на
+        # второй и седьмой день, пока не подключено (services/vault_nudge.py).
+        from services import vault_nudge
+        _spawn(_resilient("vault_nudge", vault_nudge.run, pool, bot))
         # Сторож прокси: фоновой проверки не было вовсе — is_alive обновлялся
         # только вручную, и молча умерший прокси продолжал раздавать аккаунтам
         # сетевые ошибки. Снаружи это выглядит как «сломались аккаунты».

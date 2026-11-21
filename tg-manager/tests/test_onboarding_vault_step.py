@@ -165,3 +165,21 @@ def test_vault_how_callback_shows_the_vault_screen():
     # /vault и кнопка — один экран, а не две копии текста.
     assert "await send_vault_screen(message, pool, uid)" in src
     assert "CopyTextButton(text=handle)" in src
+
+
+# ── Напоминания в личку ─────────────────────────────────────────────────────
+
+def test_vault_nudge_is_started_and_bounded():
+    """Ровно два напоминания, только новичкам, через тумблер «Советы»;
+    поведение на живой базе — test_vault_nudge_postgres.py."""
+    from services import vault_nudge as vn
+    assert len(vn.TEXTS) == vn.MAX_NUDGES == 2
+    assert vn.FIRST_AFTER_DAYS < vn.SECOND_AFTER_DAYS
+    assert vn.NEW_USER_WINDOW_DAYS <= 30
+    src = _read("services/vault_nudge.py")
+    assert '"advice"' in src and "notify_if_enabled" in src
+    # Claim счётчика стоит ДО отправки.
+    body = src[src.index("async def check_once("):]
+    assert body.index("_claim(") < body.index("notify_if_enabled(")
+    assert 'vault_nudge.run, pool, bot' in _read("main.py")
+    assert "#vault_connect" in src
