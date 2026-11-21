@@ -184,11 +184,11 @@ def setup_routes(app: web.Application, pool) -> None:
                         return _err("Воронка не найдена", 404)
                     row = await conn.fetchrow(
                         """INSERT INTO funnels(bot_id, name, trigger_type, keyword, is_active)
-                           SELECT $1, $2, $3, $4, FALSE FROM managed_bots
+                           SELECT $1, $2, $3, $4, $6 FROM managed_bots
                             WHERE bot_id=$1 AND added_by=$5 AND deleted_at IS NULL
                            FOR SHARE RETURNING id""",
                         bot_id, (src["name"] + " · копия")[:200], src["trigger_type"],
-                        src["keyword"], uid)
+                        src["keyword"], uid, False)
                     if not row:
                         return _err("Бот не найден", 404)
                     n = await conn.fetchval(
