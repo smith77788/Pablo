@@ -1012,6 +1012,7 @@ POST /api/miniapp/links/create
 POST /api/miniapp/links/delete
 POST /api/miniapp/links/qr
 POST /api/miniapp/links/toggle
+POST /api/miniapp/links/update
 POST /api/miniapp/mailboxes
 POST /api/miniapp/mailboxes/oauth/{provider}
 POST /api/miniapp/mass_invite

@@ -288,7 +288,45 @@ async def resolve(pool, code: str) -> str | None:
     return row["target_url"] if row else None
 
 
-async def count_for_owner(pool, owner_id: int) -> int:
+def _search_where(q: str | None, start: int) -> tuple[str, list]:
+    """Условие поиска по коду, названию, цели и тегам. `%` и `_` в запросе —
+    символы, а не шаблон: иначе «50%» находил бы всё подряд."""
+    q = (q or "").strip()[:100]
+    if not q:
+        return "", []
+    pat = "%" + q.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%"
+    n = f"${start}"
+    return (f" AND (code ILIKE {n} OR title ILIKE {n} OR target_url ILIKE {n}"
+            f" OR tags ILIKE {n})"), [pat]
+
+
+async def update(pool, owner_id: int, code: str, *, target_url: str,
+                 title: str | None = None, tags=None, expires_at=None,
+                 self_hosts: set[str] | None = None) -> dict[str, Any]:
+    """Поправить ссылку: куда ведёт, название, теги, срок. Код и клики не
+    меняются — по коду ссылку уже раздали людям, клики копятся в том же месте.
+    Пустой срок снимает ограничение."""
+    url = normalize_url(target_url, self_hosts=self_hosts)
+    if not url:
+        return {"ok": False, "error": "Нужна корректная http(s)-ссылка"}
+    exp_dt, exp_err = _parse_expires(expires_at)
+    if exp_err:
+        return {"ok": False, "error": exp_err}
+    title = (title or "").strip()[:200] or None
+    try:
+        row = await pool.fetchrow(
+            "UPDATE short_links SET target_url=$3, title=$4, tags=$5, expires_at=$6 "
+            "WHERE code=$1 AND owner_id=$2 RETURNING code",
+            code, int(owner_id), url, title, _clean_tags(tags), exp_dt)
+    except Exception as e:
+        log_exc_swallow(log, f"link_shortener: update: {e}")
+        return {"ok": False, "error": "Не удалось сохранить ссылку"}
+    if not row:
+        return {"ok": False, "error": "Ссылка не найдена", "not_found": True}
+    return {"ok": True, "code": code, "target_url": url}
+
+
+async def count_for_owner(pool, owner_id: int, q: str | None = None) -> int:
     """Сколько ссылок у владельца всего — без потолка выборки.
 
     Экран показывал длину страницы как число ссылок, а страница упиралась в сто.
@@ -296,25 +334,31 @@ async def count_for_owner(pool, owner_id: int) -> int:
     посмотреть переходы.
     """
     try:
+        where, args = _search_where(q, 2)
         return int(await pool.fetchval(
-            "SELECT COUNT(*) FROM short_links WHERE owner_id=$1", int(owner_id)) or 0)
+            "SELECT COUNT(*) FROM short_links WHERE owner_id=$1" + where,
+            int(owner_id), *args) or 0)
     except Exception as e:
         log_exc_swallow(log, f"link_shortener: count: {e}")
         return 0
 
 
 async def list_for_owner(pool, owner_id: int, limit: int = 100,
-                         offset: int = 0) -> list[dict]:
+                         offset: int = 0, q: str | None = None,
+                         sort: str = "recent") -> list[dict]:
     import datetime as _dt
+    where, args = _search_where(q, 4)
+    # `code` в хвосте порядка: ни `created_at`, ни `clicks` не уникальны, и без
+    # разрыва ничьих страницы теряли бы и повторяли ссылки.
+    order = ("clicks DESC, created_at DESC, code" if sort == "clicks"
+             else "created_at DESC, code")
     try:
         rows = await pool.fetch(
             "SELECT code, target_url, title, clicks, disabled, created_at, "
             "last_click_at, expires_at, tags "
-            # `code` в хвосте порядка: `created_at` не уникален, и без разрыва
-            # ничьих страницы теряли бы и повторяли ссылки.
-            "FROM short_links WHERE owner_id=$1 "
-            "ORDER BY created_at DESC, code LIMIT $2 OFFSET $3",
-            int(owner_id), int(max(1, min(limit, 500))), int(max(0, offset)))
+            "FROM short_links WHERE owner_id=$1" + where + " "
+            "ORDER BY " + order + " LIMIT $2 OFFSET $3",
+            int(owner_id), int(max(1, min(limit, 500))), int(max(0, offset)), *args)
     except Exception as e:
         log_exc_swallow(log, f"link_shortener: list: {e}")
         return []
