@@ -26401,14 +26401,70 @@ async def _exec_auto_register(
     }
 
 
+def _cleaner_opts(params: dict) -> dict:
+    """Настройки очистки из params операции, с безопасными значениями.
+
+    Старые операции и массовое «выйти из всех» из списка аккаунтов приходят
+    только с account_id — для них действуют умолчания: свои каналы и чаты,
+    где аккаунт админ, НЕ трогаются.
+    """
+    from services import account_cleaner as _ac
+
+    kinds = str(params.get("kinds") or "all")
+    try:
+        inactive = max(0, min(3650, int(params.get("inactive_days") or 0)))
+    except (TypeError, ValueError):
+        inactive = 0
+    mode = str(params.get("contacts_mode") or "all")
+    return {
+        "kinds": kinds if kinds in _ac.CLEANER_KINDS else "all",
+        "keep_own": params.get("keep_own", True) is not False,
+        "whitelist": _ac.parse_whitelist(params.get("whitelist") or []),
+        "inactive_days": inactive,
+        "keep_bots": bool(params.get("keep_bots")),
+        "contacts_mode": mode if mode in _ac.CONTACT_MODES else "all",
+        "dry_run": bool(params.get("dry_run")),
+    }
+
+
+def _cleaner_dry_summary(head: str, picked: list, note: str) -> str:
+    names = [str(getattr(d, "name", "") or getattr(d, "first_name", "") or "")
+             for d in picked[:10]]
+    names = [n for n in names if n]
+    out = f"🧪 Пробный прогон, ничего не удалено. {head}: {len(picked)}"
+    if note:
+        out += f"\n{note}"
+    if names:
+        out += "\nНапример: " + ", ".join(names) + (" и др." if len(picked) > 10 else "")
+    return out
+
+
+async def _own_channel_ids(pool: asyncpg.Pool, owner_id: int, account_id: int) -> list:
+    """Каналы и группы, которые этот аккаунт ведёт в системе (каталог)."""
+    try:
+        rows = await pool.fetch(
+            "SELECT channel_id FROM managed_channels WHERE owner_id=$1 AND acc_id=$2",
+            owner_id, account_id)
+    except Exception as exc:
+        # Отказ чтения — не «своих нет»: без каталога остаются признаки
+        # создателя и админа на самой сущности, они защищают своё и так.
+        log_exc_swallow(log, f"cleaner: managed_channels read failed acc {account_id}: {exc}")
+        return []
+    return [r["channel_id"] for r in rows]
+
+
 async def _exec_leave_all_chats(
     pool: asyncpg.Pool, bot: Bot, op_id: int, owner_id: int, params: dict
 ) -> dict:
-    """Выход из всех чатов/групп аккаунта.
-    params: {account_id: int}
+    """Выход из групп и каналов аккаунта с отбором.
+
+    params: {account_id, kinds?, keep_own?, whitelist?, inactive_days?, dry_run?}
+    Отбор — `account_cleaner.pick_chats_to_leave`, один с ботом.
     """
     from services import account_manager
+    from services import account_cleaner as _ac
 
+    opts = _cleaner_opts(params)
     acc, err = await _claim_single_account(pool, owner_id, params)
     if err:
         return err
@@ -26417,27 +26473,32 @@ async def _exec_leave_all_chats(
     client = account_manager._make_client(acc["session_str"], dict(acc))
     left = 0
     failed = 0
+    note = ""
     try:
         await asyncio.wait_for(client.connect(), timeout=15)
-        # Use high-level get_dialogs() which resolves entities automatically.
-        # Raw GetDialogsRequest returns Dialog TL types without .entity attribute,
-        # which caused the list comprehension to always produce an empty chats list.
         # wait_for: мёртвый прокси/half-open сокет иначе подвешивает операцию навсегда.
-        dialogs = await asyncio.wait_for(client.get_dialogs(limit=200), timeout=60)
-        chats = [d.entity for d in dialogs if d.is_group or d.is_channel]
+        dialogs = await asyncio.wait_for(client.get_dialogs(limit=500), timeout=90)
+        own_ids = await _own_channel_ids(pool, owner_id, account_id) if opts["keep_own"] else []
+        chats, skipped = _ac.pick_chats_to_leave(
+            dialogs, kinds=opts["kinds"], keep_own=opts["keep_own"], own_ids=own_ids,
+            whitelist=opts["whitelist"], inactive_days=opts["inactive_days"])
+        note = _ac.skipped_note(skipped)
+        if opts["dry_run"]:
+            return {"status": "done", "ok": 1, "would_leave": len(chats), "skipped": skipped,
+                    "summary": _cleaner_dry_summary("Вышел бы из чатов", chats, note)}
         total = len(chats)
         await pool.execute("UPDATE operation_queue SET total_items=$1 WHERE id=$2", total, op_id)
-        for entity in chats:
+        for d in chats:
             if await _is_cancelled(pool, op_id):
                 break
             try:
-                await asyncio.wait_for(client.delete_dialog(entity), timeout=30)
+                await asyncio.wait_for(client.delete_dialog(d.entity), timeout=30)
                 left += 1
             except Exception as exc:
-                log.debug("leave_all_chats: skip %s: %s", getattr(entity, "id", "?"), exc)
+                log.debug("leave_all_chats: skip %s: %s", getattr(d.entity, "id", "?"), exc)
                 failed += 1
             await pool.execute("UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1", op_id)
-            await asyncio.sleep(1.5)
+            await cancellable_pause(pool, op_id, 1.5, "leave_all_chats")
     finally:
         try:
             await client.disconnect()
@@ -26447,15 +26508,13 @@ async def _exec_leave_all_chats(
 
     return {
         # `ok` обязателен: итог операции считается по СЧЁТЧИКАМ
-        # (op_status.classify_final), а не по слову исполнителя. Без него
-        # прогон, где часть целей взята, а часть нет, приходил как
-        # ok=0 / failed>0 и закрывался ПОЛНЫМ провалом, да ещё и шёл в
-        # предохранитель как сбой.
+        # (op_status.classify_final), а не по слову исполнителя.
         "status": "done",
         "ok": left,
         "left": left,
         "failed": failed,
-        "summary": f"🚪 Выход из чатов: ✅ {left} успешно" + (f" ❌ {failed}" if failed else ""),
+        "summary": f"🚪 Выход из чатов: ✅ {left} успешно" + (f" ❌ {failed}" if failed else "")
+                   + (f"\n{note}" if note else ""),
     }
 
 
@@ -26519,12 +26578,15 @@ async def _exec_read_all_dialogs(
 async def _exec_delete_private_dialogs(
     pool: asyncpg.Pool, bot: Bot, op_id: int, owner_id: int, params: dict
 ) -> dict:
-    """Удалить приватные (личные) диалоги аккаунта — очистка списка ЛС.
-    Комплемент к leave_all_chats (тот уходит из групп/каналов). delete_dialog по
-    личке удаляет переписку у себя. params: {account_id: int}.
+    """Удалить личные диалоги аккаунта — очистка списка ЛС.
+    Комплемент к leave_all_chats (тот уходит из групп/каналов). «Избранное» и
+    служебный чат Telegram с кодами входа не трогаются никогда.
+    params: {account_id, inactive_days?, keep_bots?, dry_run?}
     """
     from services import account_manager
+    from services import account_cleaner as _ac
 
+    opts = _cleaner_opts(params)
     acc, err = await _claim_single_account(pool, owner_id, params)
     if err:
         return err
@@ -26533,11 +26595,16 @@ async def _exec_delete_private_dialogs(
     client = account_manager._make_client(acc["session_str"], dict(acc))
     deleted = 0
     failed = 0
+    note = ""
     try:
         await asyncio.wait_for(client.connect(), timeout=15)
-        dialogs = await asyncio.wait_for(client.get_dialogs(limit=300), timeout=60)
-        # ТОЛЬКО личные диалоги (is_user) — группы/каналы за leave_all_chats.
-        private = [d for d in dialogs if getattr(d, "is_user", False)]
+        dialogs = await asyncio.wait_for(client.get_dialogs(limit=500), timeout=90)
+        private, skipped = _ac.pick_private_dialogs(
+            dialogs, inactive_days=opts["inactive_days"], keep_bots=opts["keep_bots"])
+        note = _ac.skipped_note(skipped)
+        if opts["dry_run"]:
+            return {"status": "done", "ok": 1, "would_delete": len(private), "skipped": skipped,
+                    "summary": _cleaner_dry_summary("Удалил бы личных диалогов", private, note)}
         total = len(private)
         await pool.execute("UPDATE operation_queue SET total_items=$1 WHERE id=$2", total, op_id)
         for d in private:
@@ -26550,7 +26617,7 @@ async def _exec_delete_private_dialogs(
                 log.debug("delete_private_dialogs: skip %s: %s", getattr(d, "id", "?"), exc)
                 failed += 1
             await pool.execute("UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1", op_id)
-            await asyncio.sleep(1.0)
+            await cancellable_pause(pool, op_id, 1.0, "delete_private_dialogs")
     finally:
         try:
             await client.disconnect()
@@ -26560,26 +26627,27 @@ async def _exec_delete_private_dialogs(
 
     return {
         # `ok` обязателен: итог операции считается по СЧЁТЧИКАМ
-        # (op_status.classify_final), а не по слову исполнителя. Без него
-        # прогон, где часть целей взята, а часть нет, приходил как
-        # ok=0 / failed>0 и закрывался ПОЛНЫМ провалом, да ещё и шёл в
-        # предохранитель как сбой.
+        # (op_status.classify_final), а не по слову исполнителя.
         "status": "done",
         "ok": deleted,
         "deleted": deleted,
         "failed": failed,
-        "summary": f"🗑 Удалено личных диалогов: ✅ {deleted}" + (f" ❌ {failed}" if failed else ""),
+        "summary": f"🗑 Удалено личных диалогов: ✅ {deleted}" + (f" ❌ {failed}" if failed else "")
+                   + (f"\n{note}" if note else ""),
     }
 
 
 async def _exec_delete_contacts(
     pool: asyncpg.Pool, bot: Bot, op_id: int, owner_id: int, params: dict
 ) -> dict:
-    """Удаление всех контактов аккаунта.
-    params: {account_id: int}
+    """Удаление контактов аккаунта: всех или только невзаимных.
+    params: {account_id, contacts_mode?: all|non_mutual, dry_run?}
     """
     from services import account_manager
     from telethon.tl.functions.contacts import GetContactsRequest, DeleteContactsRequest
+    from services import account_cleaner as _ac
+
+    opts = _cleaner_opts(params)
 
     acc, err = await _claim_single_account(pool, owner_id, params)
     if err:
@@ -26588,11 +26656,19 @@ async def _exec_delete_contacts(
 
     client = account_manager._make_client(acc["session_str"], dict(acc))
     deleted = 0
+    total = 0
     try:
         await asyncio.wait_for(client.connect(), timeout=15)
         contacts = await asyncio.wait_for(client(GetContactsRequest(hash=0)), timeout=30)
-        users = getattr(contacts, "users", [])
+        all_users = list(getattr(contacts, "users", []) or [])
+        users = _ac.pick_contacts(all_users, opts["contacts_mode"])
         total = len(users)
+        if opts["dry_run"]:
+            kept = len(all_users) - total
+            return {"status": "done", "ok": 1, "would_delete": total,
+                    "summary": _cleaner_dry_summary(
+                        "Удалил бы контактов", users,
+                        f"оставлено взаимных {kept}" if kept else "")}
         await pool.execute("UPDATE operation_queue SET total_items=$1 WHERE id=$2", total, op_id)
         if users:
             try:
@@ -26609,7 +26685,7 @@ async def _exec_delete_contacts(
                     except Exception as e:
                         log_exc_swallow(log, f"delete_contacts: single contact delete failed for user {getattr(u, 'id', '?')}: {e}")
                     await pool.execute("UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1", op_id)
-                    await asyncio.sleep(0.5)
+                    await cancellable_pause(pool, op_id, 0.5, "delete_contacts")
         await pool.execute("UPDATE operation_queue SET done_items=$1 WHERE id=$2", deleted, op_id)
     finally:
         try:
@@ -26619,9 +26695,13 @@ async def _exec_delete_contacts(
         await release_accounts([account_id])
 
     return {
+        # `ok`/`failed` — счётчики, по которым итог судит
+        # op_status.classify_final; без них он судил только по слову «done».
         "status": "done",
+        "ok": deleted,
         "deleted": deleted,
-        "summary": f"🗑 Удаление контактов: ✅ {deleted} из {total if users else 0} удалено",
+        "failed": max(0, total - deleted),
+        "summary": f"🗑 Удаление контактов: ✅ {deleted} из {total} удалено",
     }
 
 
