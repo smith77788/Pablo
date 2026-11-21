@@ -31725,6 +31725,24 @@ async function ecoAutoDiscover() {
     openEcoDetail(CUR_ECO_ID, document.getElementById('ecodetail-name').textContent);
   } catch(e){ toast('⚠️ '+errRu(e,'Ошибка')); }
 }
+// Переименование и описание. Править экосистему было нельзя: опечатка в
+// названии лечилась только удалением, а удаление снимает участников и доступы.
+let CUR_ECO = null;
+async function ecoEdit() {
+  const e = CUR_ECO; if (!e || !CUR_ECO_ID) return;
+  const name = await askPrompt('Название экосистемы', {value: e.name || ''});
+  if (name == null) return;
+  if (!name.trim()) { toast('⚠️ Название не может быть пустым'); return; }
+  const description = await askPrompt('Описание (можно оставить пустым)', {value: e.description || ''});
+  if (description == null) return;
+  try {
+    await api('/api/miniapp/ecosystem/' + Number(CUR_ECO_ID), {method:'PUT',
+      body: JSON.stringify({name: name.trim(), description: description.trim()})});
+    toast('💾 Сохранено');
+    back();
+    openEcoDetail(CUR_ECO_ID, name.trim());
+  } catch(err) { toast('⚠️ ' + errRu(err, 'Не удалось сохранить')); }
+}
 async function openEcoDetail(ecoId, ecoName) {
   CUR_ECO_ID = ecoId;
   push('s-ecodetail');
@@ -31738,6 +31756,7 @@ async function openEcoDetail(ecoId, ecoName) {
     const events = d.events||[];
     const sevCls = {info:'b-bl',warning:'b-or',error:'b-rd',critical:'b-rd'};
     const health = Math.round((e.health_score==null?1:e.health_score)*100);
+    CUR_ECO = e;
     let html = `
       <div class="lst" style="margin:12px 16px 0">
         <div class="row"><div class="row-body"><div class="row-name">Тип</div><div class="row-val">${ECO_TYPES[e.ecosystem_type]||e.ecosystem_type||'—'}</div></div></div>
@@ -31747,7 +31766,10 @@ async function openEcoDetail(ecoId, ecoName) {
           <div class="row-val" style="color:${health>=80?'var(--green)':(health>=50?'var(--orange,#f59e0b)':'var(--red)')}">${health}%</div></div></div>
         ${e.description?`<div class="row"><div class="row-body"><div class="row-name">Описание</div><div class="row-val">${esc(e.description)}</div></div></div>`:''}
       </div>
-      <div style="margin:12px 16px 0"><button class="btn btn-p" style="width:100%" onclick="ecoAutoDiscover()">🔎 Авто-наполнить участников</button></div>
+      <div style="margin:12px 16px 0;display:flex;gap:8px">
+        <button class="btn btn-p" style="flex:2" onclick="ecoAutoDiscover()">🔎 Авто-наполнить участников</button>
+        <button class="btn btn-s" style="flex:1" onclick="ecoEdit()">✏️ Изменить</button>
+      </div>
       <div class="sec" style="margin-top:8px">Участники${total?' ('+num(total)+')':''}</div>
       <div class="lst" style="margin:0 16px">`;
     if (!members.length) {
