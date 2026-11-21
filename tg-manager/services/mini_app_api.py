@@ -3027,6 +3027,34 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             n = await _os.revoke(pool, uid, session_id=sess_id)
         return _json_resp({"ok": True, "revoked": n})
 
+    async def owner_safeword_get(request: web.Request) -> web.Response:
+        """Секретное слово владельца (services/owner_safeword): показать на экране."""
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        from services import owner_safeword
+        return _json_resp({"phrase": await owner_safeword.get(pool, uid) or ""})
+
+    async def owner_safeword_set(request: web.Request) -> web.Response:
+        """Задать или сменить секретное слово ({phrase}). Пустое — снять."""
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            body = await request.json()
+        except Exception:
+            body = {}
+        from services import owner_safeword
+        raw = str(body.get("phrase") or "").strip()
+        if not raw:
+            res = await owner_safeword.clear(pool, uid)
+            return _json_resp({"ok": True, "phrase": ""}) if res.get("ok") \
+                else _err(res.get("error") or "Не удалось", 400)
+        res = await owner_safeword.set_phrase(pool, uid, raw)
+        if not res.get("ok"):
+            return _err(res.get("error") or "Не удалось", 400)
+        return _json_resp({"ok": True, "phrase": res.get("phrase") or ""})
+
     async def factory_name_preview(request: web.Request) -> web.Response:
         """Предпросмотр генерируемых имён и @юзернеймов ДО создания ресурсов.
         Чистый расчёт (name_variator), без БД и без Telegram — чтобы владелец
@@ -7273,6 +7301,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         uid = _get_uid(request)
         if not uid:
             return _err("Unauthorized", 401)
+        from services import owner_safeword as _owner_safeword
         action_filter = (request.rel_url.query.get("action") or "").strip()
         if action_filter not in ("", "warn", "cool", "pause", "resume"):
             action_filter = ""
@@ -7415,6 +7444,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 }
                 for r in history
             ],
+            # Подсказка задать секретное слово (есть аккаунты, слова ещё нет):
+            # экран «Защита» покажет карточку-подсказку (services/owner_safeword).
+            "safeword_suggested": await _owner_safeword.suggested(pool, uid),
         })
 
     async def ad_intel_overview(request: web.Request) -> web.Response:
@@ -10050,6 +10082,8 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     app.router.add_post("/api/miniapp/devices/revoke", devices_revoke)
     app.router.add_get("/api/miniapp/owner/sessions", owner_sessions_list)
     app.router.add_post("/api/miniapp/owner/sessions/revoke", owner_sessions_revoke)
+    app.router.add_get("/api/miniapp/owner/safeword", owner_safeword_get)
+    app.router.add_post("/api/miniapp/owner/safeword", owner_safeword_set)
     app.router.add_post("/api/miniapp/factory/name_preview", factory_name_preview)
     # Bots
     app.router.add_post("/api/miniapp/bot_factory/create", bot_factory_create)

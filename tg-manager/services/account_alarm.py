@@ -476,9 +476,13 @@ async def record(pool, acc: dict, found: dict, bot=None) -> int:
         try:
             if not await db.notify_dedup_ok(pool, owner, key, 7 * 86400):
                 continue
+            # Секретное слово в хвост (services/owner_safeword): тревога без
+            # него — подделка.
+            from services import owner_safeword
+            text = (build_alert(label, e, twofa_on=twofa_on, declined=declined)
+                    + await owner_safeword.line(pool, owner))
             delivered = await db.notify_if_enabled(
-                pool, bot, owner, "restriction",
-                build_alert(label, e, twofa_on=twofa_on, declined=declined),
+                pool, bot, owner, "restriction", text,
                 reply_markup=alert_keyboard(acc_id, kind, twofa_on=twofa_on, declined=declined),
                 dedup_key=key)
             if delivered is False:
