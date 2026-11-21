@@ -57,7 +57,7 @@ try {
   await page.getByText('Выберите проект, чтобы отметить его ресурсы.').waitFor();
   assert.equal(await target.isEnabled(), false);
   await page.locator('[data-cleanup-project]').selectOption('7');
-  await page.getByText('Скрыт из глобального поиска', {exact:false}).waitFor();
+  await page.locator('.row-val').getByText('Скрыт из глобального поиска', {exact:false}).first().waitFor();
   await page.getByRole('button', {name:'Выбрать доступные'}).click();
   assert.equal(await page.locator('[data-cleanup-target]:checked').count(), 2);
   await preview.click();

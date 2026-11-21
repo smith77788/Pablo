@@ -52,9 +52,12 @@ def test_render_pattern_keeps_its_promise_on_an_empty_column():
     """`render_pattern` обещает «не падает» — и на пустом гео тоже."""
     from services.presence_planner import render_pattern
 
-    out = render_pattern("Новости {{CITY}}", {"city": "Казань", "country": None,
-                                              "city_slug": None, "scope": ""})
-    assert "Казань" in out
+    # {{CITY}} с 17.11.2026 — латиница из нативного имени («Kazan»), нативное
+    # имя — {{CITY_NAME}}. Проверяем обещание «не падает и подставляет» на обоих.
+    out = render_pattern("Новости {{CITY_NAME}} / {{CITY}}",
+                         {"city": "Казань", "country": None,
+                          "city_slug": None, "scope": ""})
+    assert "Казань" in out and "Kazan" in out, out
 
 
 @pytest.fixture(scope="module")

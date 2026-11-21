@@ -86,4 +86,4 @@ def test_still_defaults_to_confirmation():
 def test_migration_adds_column():
     api = _src("services/mini_app_api.py")
     assert "ADD COLUMN IF NOT EXISTS ai_autopilot BOOLEAN" in api
-    assert os.path.exists(os.path.join(ROOT, "schema_v320_ai_autopilot.sql"))
+    assert os.path.exists(os.path.join(ROOT, "schema_v376_ai_autopilot.sql"))

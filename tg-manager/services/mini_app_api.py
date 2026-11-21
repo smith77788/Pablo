@@ -578,7 +578,7 @@ INLINE_MIGRATIONS: list[str] = [
         notify_stuck  BOOLEAN NOT NULL DEFAULT TRUE,
         updated_at    TIMESTAMPTZ NOT NULL DEFAULT now()
     )""",
-    # v320: автопилот ИИ-ассистента — исполнять действия сразу, а не только
+    # v376 (бывш. v320_ai_autopilot): автопилот ИИ-ассистента — исполнять действия сразу, а не только
     # черновиком с ручным подтверждением. По умолчанию FALSE (явное согласие
     # владельца): все действия всё равно идут через те же пути (execute_action →
     # operation_bus), снимается ровно шаг подтверждения в чате.

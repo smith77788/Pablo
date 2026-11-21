@@ -161,6 +161,13 @@ def render_pattern(pattern: str, geo: dict, rng: random.Random | None = None) ->
     # ключами «moscow», «saint_petersburg») и фолбэк, если нативный слаг пуст.
     en_slug = geo.get("city_slug") or slugify(geo.get("city", "")) or scope_slug
     city_slug = _native_slug or en_slug or "x"
+    # Узел района (geo_data.expand_city_to_districts) несёт район в слаге
+    # («sochi_adler»). Слаг из нативного имени города («sochi») его терял, и
+    # все районы города получали ОДИН username — второй и дальше не создавались
+    # (занято). Район возвращаем в слаг.
+    _district = geo.get("district_slug")
+    if _district and _native_slug and not city_slug.endswith("_" + _district):
+        city_slug = f"{_native_slug}_{_district}"
     city_abbr = _CITY_ABBR.get(en_slug) or _CITY_ABBR.get(city_slug) or city_slug
     # Падежи нужны, чтобы шаблон читался по-русски: «Работа в {{CITY_LOC}}» →
     # «Работа в Москве», «Новости города {{CITY_GEN}}» → «…города Самары».

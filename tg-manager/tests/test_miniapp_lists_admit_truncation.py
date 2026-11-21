@@ -112,7 +112,10 @@ def test_capped_routes_return_the_real_total():
                          if not l.lstrip().startswith("#"))
         if "_list_limit(" not in code:
             broken.append(f"{name}: потолок не подвинуть — экран не сможет догрузить")
-        elif "COUNT(*)" not in code or not re.search(r"[\"']total[\"']\s*:", code):
+        # COUNT(DISTINCT …) — тоже настоящий итог: new_users считает людей, а
+        # не строки (один человек на нескольких ботах — одна строка ленты).
+        elif (not re.search(r"COUNT\((?:\*|DISTINCT\b)", code)
+              or not re.search(r"[\"']total[\"']\s*:", code)):
             broken.append(f"{name}: в ответе нет настоящего итога (COUNT + total)")
     assert not broken, (
         "Список обрывается молча — владелец примет страницу за весь список:\n  "

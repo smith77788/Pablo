@@ -126,7 +126,9 @@ def test_single_item_callers_wire_poll_op_result():
     for fn in (
         "submitQuickChannel",   # вступление в канал
         "submitChanEdit",       # изменение канала
-        "promoteChannel",       # назначение админов
+        # promoteChannel снят: назначение теперь синхронное — один выбранный
+        # аккаунт/пользователь через /channel/{id}/promote_one (_promoteOne),
+        # операции в очереди нет, итог приходит в самом ответе (r.label).
         "accAction",            # действие с аккаунтом
         "checkAccount",         # проверка аккаунта
         "submitAdIntelChannel", # ad intelligence
