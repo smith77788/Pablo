@@ -24,9 +24,9 @@ def _fn(name):
 def _repeat(exp):
     if not shutil.which("node"):
         pytest.skip("нет node")
-    js = ("let _SX_CUR = %s; let got = null;\n"
-          "function openStarsExpModal(p) { got = p; }\n%s\n"
-          "repeatStarsExp(); console.log(JSON.stringify(got));") % (json.dumps(exp), _fn("repeatStarsExp"))
+    js = ("let _SX_CUR = " + json.dumps(exp) + "; let got = null;\n"
+          "function openStarsExpModal(p) { got = p; }\n" + _fn("repeatStarsExp") + "\n"
+          "repeatStarsExp(); console.log(JSON.stringify(got));")
     out = subprocess.run(["node", "-e", js], capture_output=True, text=True, check=True).stdout
     return json.loads(out)
 

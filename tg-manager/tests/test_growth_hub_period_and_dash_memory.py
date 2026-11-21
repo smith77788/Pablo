@@ -36,10 +36,9 @@ def test_growth_period_is_remembered():
           "function push(){} function gpLoad(){} function growthHubLoad(){ loaded++; }\n"
           "function loadFormPrefs(k){ return store[k]||{}; }\n"
           "function saveFormPrefs(k,o){ store[k]=Object.assign({},store[k]||{},o); }\n"
-          "%s\n%s\n"
+          + _body("openGrowthHub") + "\n" + _body("growthHubSetDays") + "\n"
           "openGrowthHub(); const a = GROWTH_DAYS; growthHubSetDays(7);\n"
-          "console.log(JSON.stringify([a, store.growthhub.days, loaded]));"
-          ) % (_body("openGrowthHub"), _body("growthHubSetDays"))
+          "console.log(JSON.stringify([a, store.growthhub.days, loaded]));")
     out = json.loads(subprocess.run(["node", "-e", js], capture_output=True, text=True,
                                     check=True).stdout)
     assert out == [90, 7, 2]
