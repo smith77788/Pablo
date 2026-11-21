@@ -969,6 +969,7 @@ POST /api/miniapp/fleet/sweep
 POST /api/miniapp/flood/{bot_id}/flag-recent
 POST /api/miniapp/flood/{bot_id}/purge
 POST /api/miniapp/flood/{bot_id}/unflag
+POST /api/miniapp/funnel/{funnel_id}/copy
 POST /api/miniapp/funnel/{funnel_id}/step
 POST /api/miniapp/ghost
 POST /api/miniapp/ghost/bulk
