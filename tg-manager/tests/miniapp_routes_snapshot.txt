@@ -1260,6 +1260,7 @@ PUT /api/miniapp/content_mesh/target/{target_id}/toggle
 PUT /api/miniapp/content_mesh/{mesh_id}
 PUT /api/miniapp/content_mesh/{mesh_id}/toggle
 PUT /api/miniapp/crm/deal/{deal_id}/stage
+PUT /api/miniapp/ecosystem/{eco_id}
 PUT /api/miniapp/editorial/policy
 PUT /api/miniapp/funnel/{funnel_id}/toggle
 PUT /api/miniapp/ghost/bulk_toggle

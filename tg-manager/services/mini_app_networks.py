@@ -246,6 +246,46 @@ def setup_routes(app: web.Application, pool) -> None:
             log.exception("ecosystem_create uid=%d", uid)
             return _err(_INTERNAL_ERROR, 500)
 
+    async def ecosystem_update(request: web.Request) -> web.Response:
+        """Переименовать экосистему и сменить описание.
+
+        Править экосистему было нельзя вовсе: опечатка в названии или
+        устаревшее описание лечились только удалением — а удаление снимает
+        участников и доступы, то есть ради названия приходилось собирать
+        экосистему заново.
+        """
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            eco_id = int(request.match_info["eco_id"])
+        except (KeyError, ValueError):
+            return _err("Неверный идентификатор экосистемы", 400)
+        try:
+            body = await request.json()
+        except Exception:
+            return _err("Не удалось разобрать запрос")
+        if not isinstance(body, dict):
+            return _err("Не удалось разобрать запрос")
+        name = (body.get("name") or "").strip()
+        if not name:
+            return _err("Нужно название")
+        if len(name) > 200:
+            return _err("Название длиннее 200 символов")
+        description = (body.get("description") or "").strip()
+        try:
+            done = await pool.fetchval(
+                """UPDATE ecosystems SET name=$3, description=$4
+                    WHERE id=$1 AND owner_id=$2 RETURNING id""",
+                eco_id, uid, name, description or None,
+            )
+            if not done:
+                return _err("Экосистема не найдена", 404)
+            return _json_resp({"ok": True})
+        except Exception:
+            log.exception("ecosystem_update uid=%d eco=%d", uid, eco_id)
+            return _err(_INTERNAL_ERROR, 500)
+
     async def ecosystem_delete(request: web.Request) -> web.Response:
         uid = _get_uid(request)
         if not uid:
@@ -775,6 +815,7 @@ def setup_routes(app: web.Application, pool) -> None:
     app.router.add_post("/api/miniapp/ecosystem/{eco_id}/member/drop", ecosystem_member_drop)
     app.router.add_post("/api/miniapp/ecosystem", ecosystem_create)
     app.router.add_delete("/api/miniapp/ecosystem/{eco_id}", ecosystem_delete)
+    app.router.add_put("/api/miniapp/ecosystem/{eco_id}", ecosystem_update)
     app.router.add_get("/api/miniapp/networks", networks_list)
     app.router.add_post("/api/miniapp/networks", network_create_plural)
     app.router.add_delete("/api/miniapp/networks/nodes/{node_id}", network_delete_node)
