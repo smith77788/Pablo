@@ -95,7 +95,7 @@ def test_auth_handler_validates_against_mirror_then_issues_main_session():
     assert "get_token_by_id(pool, _mid)" in a, "auth не берёт токен зеркала"
     assert "verify_token = _mt" in a
     assert "validate_init_data(init_data, verify_token)" in a
-    assert "make_token(user[\"user_id\"], bot_token)" in a, "сессия должна быть на основном токене"
+    assert "make_token(user[\"user_id\"], bot_token, sid=sid)" in a, "сессия должна быть на основном токене"
 
 
 def test_routes_registered():

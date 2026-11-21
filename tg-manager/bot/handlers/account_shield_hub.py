@@ -22,7 +22,7 @@ from aiogram import F, Router
 from aiogram.types import CallbackQuery
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
-from bot.callbacks import ShieldCb, BmCb, PhysicsCb
+from bot.callbacks import OwnSessCb, ShieldCb, BmCb, PhysicsCb
 from services import account_shield
 from services import physics_engine
 from bot.utils.op_helpers import safe_answer
@@ -434,3 +434,35 @@ async def cb_shield_autopsy(callback: CallbackQuery, pool: asyncpg.Pool) -> None
     await callback.message.edit_text(
         "\n".join(lines), parse_mode="HTML", reply_markup=kb.as_markup()
     )
+
+
+# ─── «Это не я» под тревогой о входе владельца ────────────────────────────────
+
+@router.callback_query(OwnSessCb.filter(F.action == "kill"))
+async def cb_owner_session_kill(callback: CallbackQuery, callback_data: OwnSessCb,
+                                pool: asyncpg.Pool) -> None:
+    """Завершить вход в Infragram, о котором пришла тревога.
+
+    Владелец — нажавший, сеанс ищется по паре (id, владелец): пересланная
+    кнопка чужой вход не завершит.
+    """
+    from services import owner_sessions
+    await safe_answer(callback)
+    try:
+        n = await owner_sessions.revoke(pool, callback.from_user.id,
+                                        session_id=int(callback_data.session_id or 0))
+    except Exception as exc:
+        log.warning("shield_hub.owner_kill: %s", exc)
+        n = -1
+    if n < 0:
+        text = "⚠️ Не получилось — попробуйте ещё раз"
+    elif n == 0:
+        text = "Этот вход уже завершён."
+    else:
+        text = ("🚫 Вход завершён. Если он был через Telegram, кто-то открыл ваш "
+                "Telegram: завершите чужие сеансы в <b>Настройки → Устройства</b> "
+                "и включите облачный пароль, иначе он войдёт снова.")
+    try:
+        await callback.message.answer(text, parse_mode="HTML")
+    except Exception as exc:
+        log.debug("shield_hub.owner_kill answer: %s", exc)

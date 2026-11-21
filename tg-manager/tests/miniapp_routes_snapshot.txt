@@ -289,6 +289,7 @@ GET /api/miniapp/operations/export
 GET /api/miniapp/operations/{op_id}/cleanup
 GET /api/miniapp/organism/digest
 GET /api/miniapp/organism/pulse
+GET /api/miniapp/owner/sessions
 GET /api/miniapp/parser/audience
 GET /api/miniapp/parser/audience/export
 GET /api/miniapp/parser/runs
@@ -655,6 +656,7 @@ HEAD /api/miniapp/operations/export
 HEAD /api/miniapp/operations/{op_id}/cleanup
 HEAD /api/miniapp/organism/digest
 HEAD /api/miniapp/organism/pulse
+HEAD /api/miniapp/owner/sessions
 HEAD /api/miniapp/parser/audience
 HEAD /api/miniapp/parser/audience/export
 HEAD /api/miniapp/parser/runs
@@ -1071,6 +1073,7 @@ POST /api/miniapp/operations/{op_id}/cleanup
 POST /api/miniapp/organism/dismiss
 POST /api/miniapp/organism/pending_open
 POST /api/miniapp/osint_search
+POST /api/miniapp/owner/sessions/revoke
 POST /api/miniapp/pair
 POST /api/miniapp/pair/exchange
 POST /api/miniapp/parser/submit

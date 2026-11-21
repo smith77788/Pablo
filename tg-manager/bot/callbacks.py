@@ -850,3 +850,10 @@ class DealMsgCb(CallbackData, prefix="dmsg"):
     b: int = 0       # bot_id, через которого написал клиент
     u: int = 0       # Telegram-id клиента
     s: str = ""      # стадия (для st)
+
+
+class OwnSessCb(CallbackData, prefix="osess"):
+    """Кнопка под тревогой о входе владельца (services/owner_sessions)."""
+
+    action: str
+    session_id: int = 0
