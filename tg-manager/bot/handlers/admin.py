@@ -428,6 +428,79 @@ async def cmd_admin_log(message: Message, pool: asyncpg.Pool) -> None:
     await message.answer("\n".join(lines), parse_mode="HTML", reply_markup=terminal_kb())
 
 
+@router.message(Command("fleet_parallel"))
+async def cmd_fleet_parallel(message: Message, pool: asyncpg.Pool) -> None:
+    """Несколько операций одновременно на одном аккаунте флота (админ).
+
+    /fleet_parallel            — показать режим и живые общие подключения
+    /fleet_parallel me         — включить только для себя (канарейка)
+    /fleet_parallel 111 222    — включить для этих владельцев
+    /fleet_parallel all        — включить для всех
+    /fleet_parallel off        — выключить (мгновенный откат)
+
+    Режим живёт в базе (services/shared_sessions), процессы подхватывают его
+    за полминуты без деплоя.
+    """
+    uid = message.from_user.id
+    if not _is_admin(uid):
+        return  # молчим — не раскрываем команду
+    from services import shared_sessions as _ss
+    parts = (message.text or "").split()[1:]
+    if parts:
+        arg = parts[0].lower()
+        if arg == "me":
+            raw = f"owners:{uid}"
+        elif arg in ("all", "off"):
+            raw = arg
+        elif all(p.isdigit() for p in parts):
+            raw = "owners:" + ",".join(parts)
+        else:
+            await message.answer(
+                "Не понял. Варианты: <code>/fleet_parallel me</code>, "
+                "<code>/fleet_parallel all</code>, <code>/fleet_parallel off</code> "
+                "или id владельцев через пробел.",
+                parse_mode="HTML", reply_markup=terminal_kb())
+            return
+        try:
+            mode, owners = await _ss.save_mode(pool, raw)
+        except Exception:
+            log_exc_swallow(log, "fleet_parallel: режим не записан", user_id=uid)
+            await message.answer("❌ Не удалось сохранить режим — база недоступна.",
+                                 reply_markup=terminal_kb())
+            return
+        try:
+            await db.log_admin_action(pool, uid, f"fleet_parallel {_ss.format_mode(mode, owners)}",
+                                      source="bot")
+        except Exception:
+            log_exc_swallow(log, "fleet_parallel: журнал не записан", user_id=uid)
+    else:
+        await _ss.refresh_from_db(pool, force_read=True)
+    mode, owners = _ss.current_mode()
+    st = _ss.stats()
+    if mode == "all":
+        head = "✅ Включено для всех владельцев."
+    elif mode == "owners":
+        head = ("✅ Включено для владельцев: "
+                + ", ".join(f"<code>{o}</code>" for o in sorted(owners)) + ".")
+    else:
+        head = "⏸ Выключено: операции на одном аккаунте идут по очереди, как раньше."
+    lines = [
+        "🔀 <b>Параллельные операции на одном аккаунте</b>",
+        "",
+        head,
+        "",
+        "Как работает: у аккаунта одно общее подключение, через него одновременно "
+        "идут до трёх операций; пока аккаунт делят, между его запросами держится пауза.",
+        "Изменение доходит до исполнителя за полминуты.",
+        "",
+        f"Сейчас в этом процессе: подключений {st['connections']}, "
+        f"держателей {st['holders']}, делят аккаунт {st['shared']}.",
+        "",
+        "<code>/fleet_parallel me</code> · <code>all</code> · <code>off</code>",
+    ]
+    await message.answer("\n".join(lines), parse_mode="HTML", reply_markup=terminal_kb())
+
+
 @router.message(Command("backup"))
 async def cmd_backup(message: Message, pool: asyncpg.Pool, bot) -> None:
     """Снять бэкап БД по требованию и отправить его в чат назначения (админ)."""

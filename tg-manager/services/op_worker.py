@@ -743,11 +743,12 @@ _current_op: "contextvars.ContextVar[int | None]" = contextvars.ContextVar(
     "op_worker_current_op", default=None)
 
 
-def shared_ops_mode() -> bool:
-    """Делят ли операции аккаунты (один флаг с общим подключением)."""
+def shared_ops_mode(owner_id: "int | None" = None) -> bool:
+    """Делят ли операции аккаунты (один флаг с общим подключением). Владелец —
+    явный или владелец операции из контекста задачи (режим «owners:…»)."""
     try:
         from services import shared_sessions as _ss
-        return _ss.enabled()
+        return _ss.enabled(owner_id)
     except Exception:
         return False
 
@@ -2328,7 +2329,7 @@ async def _claim_available_accounts(
     # от упавших процессов (сброс сторожем только через 60 мин) иначе раздули бы
     # делитель, и ОДИНОЧНАЯ операция получила бы лишь долю флота вместо всего
     # свободного флота (симптом «стартует лишь несколько аккаунтов из N»).
-    if shared_ops_mode():
+    if shared_ops_mode(owner_id):
         # Совместная работа: доля флота не режется — каждая операция берёт
         # весь доступный флот, а одновременность на аккаунте ограничивает
         # OP_ACCOUNT_MAX_SHARED_OPS и общий темп подключения.
@@ -2426,7 +2427,7 @@ async def _rebalance_claim(op_id: int, owner_id: int, held: list) -> list:
     просить меньше на входе (доля считается при захвате)."""
     if not held or not owner_id or not _db_pool:
         return held
-    if shared_ops_mode():
+    if shared_ops_mode(owner_id):
         # Операции делят аккаунты, а не флот: отдавать нечего.
         return held
     try:
@@ -5621,6 +5622,13 @@ async def _process_pending(pool: asyncpg.Pool, bot: Bot,
     _MAX_PARALLEL (канарейка горизонтального исполнителя для не-лидера)."""
     if _shutting_down:
         return
+    # Режим совместной работы на аккаунте (/fleet_parallel) живёт в базе:
+    # перечитываем не чаще раза в полминуты, сбой чтения ничего не меняет.
+    try:
+        from services import shared_sessions as _ss
+        await _ss.refresh_from_db(pool)
+    except Exception:
+        pass
     async with _active_lock:
         active_now = frozenset(_active_op_ids)
         available_slots = _MAX_PARALLEL - len(active_now)
@@ -6384,6 +6392,11 @@ async def _run_op_task(pool: asyncpg.Pool, bot: Bot, row: dict) -> None:
     # Чья это задача — для совместной работы операций на одном аккаунте
     # (захват и освобождение трогают только долю этой операции).
     _current_op.set(int(op_id))
+    try:
+        from services import shared_sessions as _ss
+        _ss._current_owner.set(int(owner_id))
+    except Exception:
+        pass
     _t_started = time.monotonic()      # метрика длительности операции (аудит №6)
     params = (
         row["params"]

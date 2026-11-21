@@ -302,3 +302,88 @@ async def test_reconnect_after_network_drop():
     await a.connect()                  # вызывающий переподключается
     assert len(made) == 2 and a.is_connected()
     await a.disconnect()
+
+
+# ── включение без деплоя и по владельцам (/fleet_parallel) ──────────────────
+
+class _SettingsPool:
+    def __init__(self, value=None, fail=False):
+        self.value, self.fail, self.reads = value, fail, 0
+
+    async def fetchval(self, q, key):
+        self.reads += 1
+        if self.fail:
+            raise RuntimeError("db down")
+        assert key == ss.SETTING_KEY
+        return self.value
+
+    async def execute(self, q, key, value):
+        self.value = value
+
+
+def test_parse_mode():
+    assert ss.parse_mode("all") == ("all", frozenset())
+    assert ss.parse_mode("owners:5, 7") == ("owners", frozenset({5, 7}))
+    assert ss.parse_mode("owners:") == ("off", frozenset())
+    assert ss.parse_mode("мусор") == ("off", frozenset())
+    assert ss.parse_mode(None) == ("off", frozenset())
+
+
+@pytest.mark.asyncio
+async def test_canary_owner_only(monkeypatch):
+    ss.force(None)
+    monkeypatch.delenv("FLEET_SHARED_SESSIONS", raising=False)
+    pool = _SettingsPool()
+    await ss.save_mode(pool, "owners:42")
+    assert pool.value == "owners:42"
+    assert ss.enabled(42) is True
+    assert ss.enabled(43) is False
+    assert ss.enabled() is False, "без владельца в режиме канарейки — старый путь"
+    tok = ss._current_owner.set(42)
+    try:
+        assert ss.enabled() is True and ow.shared_ops_mode() is True
+    finally:
+        ss._current_owner.reset(tok)
+    await ss.save_mode(pool, "off")
+    assert ss.enabled(42) is False
+    ss.set_mode("off")
+
+
+@pytest.mark.asyncio
+async def test_two_ops_share_only_for_canary_owner(monkeypatch):
+    ss.force(None)
+    monkeypatch.delenv("FLEET_SHARED_SESSIONS", raising=False)
+    ss.set_mode("owners:42")
+    try:
+        a = await ow._claim_available_accounts(501, _accs(1), owner_id=42)
+        b = await ow._claim_available_accounts(502, _accs(1), owner_id=42)
+        assert [x["id"] for x in a] == [1] and [x["id"] for x in b] == [1]
+        c = await ow._claim_available_accounts(601, _accs(2), owner_id=43)
+        d = await ow._claim_available_accounts(602, _accs(2), owner_id=43)
+        assert [x["id"] for x in c] == [2] and d == [], "чужой владелец — как раньше"
+    finally:
+        ss.set_mode("off")
+
+
+@pytest.mark.asyncio
+async def test_db_blip_keeps_mode(monkeypatch):
+    ss.force(None)
+    monkeypatch.delenv("FLEET_SHARED_SESSIONS", raising=False)
+    ss.set_mode("all")
+    try:
+        await ss.refresh_from_db(_SettingsPool(fail=True), force_read=True)
+        assert ss.enabled(1) is True, "сбой чтения базы не выключает режим"
+        p = _SettingsPool("off")
+        await ss.refresh_from_db(p)          # раньше REFRESH_S — не читает
+        assert p.reads == 0
+        await ss.refresh_from_db(p, force_read=True)
+        assert ss.enabled(1) is False
+    finally:
+        ss.set_mode("off")
+
+
+def test_env_still_enables_for_all(monkeypatch):
+    ss.force(None)
+    ss.set_mode("off")
+    monkeypatch.setenv("FLEET_SHARED_SESSIONS", "1")
+    assert ss.enabled(999) is True
