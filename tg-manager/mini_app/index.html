@@ -5141,6 +5141,13 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
     </div>
 
     <div class="sec">Мои ссылки <span id="lnkCount" style="opacity:.6"></span></div>
+    <div style="display:flex;gap:6px;padding:0 6px 6px">
+      <input id="lnkSearch" placeholder="🔍 Код, название, адрес или тег" oninput="_lnkSearchDebounced()" style="flex:1;min-width:0" aria-label="Поиск ссылок">
+      <select id="lnkSort" onchange="lnkLoad()" style="width:auto" aria-label="Порядок">
+        <option value="recent">Новые</option>
+        <option value="clicks">По переходам</option>
+      </select>
+    </div>
     <div class="lst" id="lnkList" style="padding:6px"><div style="padding:14px;opacity:.6;font-size:13px">Загрузка…</div></div>
   </div>
 </div>
@@ -16931,6 +16938,8 @@ let LNK_BASE = '';
 let LNK_ROWS = [], LNK_OFFSET = 0, LNK_TOTAL = 0;
 
 async function lnkLoadMore() { LNK_OFFSET = LNK_ROWS.length; await lnkLoad(true); }
+let _LNK_T = null;
+function _lnkSearchDebounced() { if (_LNK_T) clearTimeout(_LNK_T); _LNK_T = setTimeout(() => lnkLoad(), 350); }
 
 function openLinks() {
   push('s-links');
@@ -17014,7 +17023,10 @@ async function lnkLoad(keep) {
   const list=document.getElementById('lnkList'); if(!list) return;
   if(!keep){ LNK_ROWS=[]; LNK_OFFSET=0; }
   try {
-    const r=await api('/api/miniapp/links?limit=100&offset='+LNK_OFFSET);
+    const q=(document.getElementById('lnkSearch')?.value||'').trim();
+    const sort=document.getElementById('lnkSort')?.value||'recent';
+    const r=await api('/api/miniapp/links?limit=100&offset='+LNK_OFFSET
+      +(q?'&q='+encodeURIComponent(q):'')+(sort==='clicks'?'&sort=clicks':''));
     LNK_BASE=r.base||LNK_BASE;
     const bl=document.getElementById('lnkBase'); if(bl) bl.textContent=_lnkBaseLabel(LNK_BASE);
     const _page=listOf(r,'links');
@@ -17033,7 +17045,9 @@ function lnkRenderList(items) {
     ? ('· ' + (LNK_TOTAL > items.length
         ? num(items.length) + ' из ' + num(LNK_TOTAL) : num(LNK_TOTAL || items.length)))
     : '';
-  if(!items.length){ list.innerHTML='<div style="padding:14px;opacity:.6;font-size:13px">Пока ссылок нет — создайте первую выше.</div>'; return; }
+  if(!items.length){
+    const _q=(document.getElementById('lnkSearch')?.value||'').trim();
+    list.innerHTML='<div style="padding:14px;opacity:.6;font-size:13px">'+(_q?'Ничего не найдено — измените запрос.':'Пока ссылок нет — создайте первую выше.')+'</div>'; return; }
   let html='';
   for(const it of items){
     const su=it.short_url||'';
@@ -17049,10 +17063,15 @@ function lnkRenderList(items) {
     if(it.title) html+='<div style="font-size:12px;opacity:.75;margin-top:2px">'+_lnkEsc(it.title)+'</div>';
     html+='<div style="font-size:11px;opacity:.55;margin-top:2px;word-break:break-all">→ '+_lnkEsc(it.target_url)+'</div>';
     if(it.tags) html+='<div style="font-size:11px;opacity:.6;margin-top:2px">🏷 '+_lnkEsc(it.tags)+'</div>';
+    if(it.last_click_at||it.expires_at) html+='<div style="font-size:11px;opacity:.55;margin-top:2px">'
+      +(it.last_click_at?'Последний переход: '+_lnkEsc(ago(it.last_click_at)):'')
+      +(it.last_click_at&&it.expires_at?' · ':'')
+      +(it.expires_at?'Действует до '+_lnkEsc(new Date(it.expires_at).toLocaleString('ru-RU',{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'})):'')+'</div>';
     const c=_lnkEsc(it.code).replace(/'/g,"\\'");
     html+='<div style="display:flex;gap:6px;margin-top:8px;flex-wrap:wrap">';
     html+='<button class="btn btn-s" onclick="lnkCopy(\''+_lnkEsc(su).replace(/'/g,"\\'")+'\')" title="Копировать">📋</button>';
     html+='<button class="btn btn-s" onclick="lnkShowQr(\''+c+'\')">📱 QR</button>';
+    html+='<button class="btn btn-s" onclick="lnkEdit(\''+c+'\')" title="Изменить">✏️</button>';
     html+='<button class="btn btn-s" onclick="lnkToggle(\''+c+'\','+(it.disabled?'false':'true')+')">'+(it.disabled?'▶ Вкл':'⏸ Выкл')+'</button>';
     html+='<button class="btn btn-s" onclick="lnkDelete(\''+c+'\')" title="Удалить">🗑</button>';
     html+='</div></div>';
@@ -17078,6 +17097,52 @@ async function lnkShowQr(code) {
       ov.onclick=()=>ov.remove(); document.body.appendChild(ov); }
     ov.innerHTML='<div style="background:#fff;border-radius:16px;padding:16px;text-align:center"><img src="'+_lnkEsc(r.qr)+'" style="width:220px;height:220px"><div style="color:#333;font-size:12px;margin-top:6px;word-break:break-all">'+_lnkEsc(r.short_url||'')+'</div><div style="color:#888;font-size:11px;margin-top:6px">нажмите, чтобы закрыть</div></div>';
   } catch(e){ toast(errRu(e,'QR недоступен')); }
+}
+
+// Правка ссылки: адрес, название, теги, срок. Код и клики остаются — ссылку
+// уже раздали людям.
+function _lnkLocalDt(iso) {
+  if (!iso) return '';
+  const d = new Date(iso); if (isNaN(d)) return '';
+  const p = n => String(n).padStart(2, '0');
+  return d.getFullYear()+'-'+p(d.getMonth()+1)+'-'+p(d.getDate())+'T'+p(d.getHours())+':'+p(d.getMinutes());
+}
+function lnkEdit(code) {
+  const it = LNK_ROWS.find(x => x.code === code); if (!it) return;
+  const bg = document.createElement('div');
+  bg.className = 'mbg show'; bg.style.zIndex = '9999';
+  bg.innerHTML = '<div class="modal"><div class="modal-title">✏️ Ссылка /'+_lnkEsc(code)+'</div>'
+    + '<div class="field"><label>Куда ведёт</label><input id="_leUrl" type="url"></div>'
+    + '<div class="field"><label>Название</label><input id="_leTitle" maxlength="200"></div>'
+    + '<div class="field"><label>Теги через запятую</label><input id="_leTags" maxlength="400"></div>'
+    + '<div class="field"><label>Действует до (пусто — бессрочно)</label><input id="_leExp" type="datetime-local"></div>'
+    + '<div class="field-err" id="_leErr"></div>'
+    + '<button class="btn btn-p" id="_leSave" style="width:100%">💾 Сохранить</button>'
+    + '<button class="btn btn-d" id="_leCancel" style="width:100%;margin-top:6px">Отмена</button></div>';
+  document.body.appendChild(bg);
+  const $ = id => bg.querySelector('#'+id);
+  $('_leUrl').value = it.target_url || '';
+  $('_leTitle').value = it.title || '';
+  $('_leTags').value = it.tags || '';
+  $('_leExp').value = _lnkLocalDt(it.expires_at);
+  const close = () => { try { document.body.removeChild(bg); } catch(_) {} };
+  $('_leCancel').onclick = close;
+  bg.onclick = e => { if (e.target === bg) close(); };
+  $('_leSave').onclick = async () => {
+    const err = $('_leErr'); err.style.display = 'none';
+    const body = {code, target_url: $('_leUrl').value.trim(), title: $('_leTitle').value.trim(),
+                  tags: $('_leTags').value.trim(), expires_at: ''};
+    const ex = $('_leExp').value;
+    if (ex) { const d = new Date(ex); if (!isNaN(d)) body.expires_at = d.toISOString(); }
+    $('_leSave').disabled = true;
+    try {
+      await api('/api/miniapp/links/update', {method:'POST', body: JSON.stringify(body)});
+      close(); toast('💾 Ссылка сохранена'); lnkLoad();
+    } catch(e) {
+      err.textContent = errRu(e, 'Не удалось сохранить'); err.style.display = 'block';
+      $('_leSave').disabled = false;
+    }
+  };
 }
 
 async function lnkToggle(code, disabled) {
