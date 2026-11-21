@@ -262,6 +262,74 @@ def setup_routes(app: web.Application, pool) -> None:
             log.exception("ghost_create uid=%d", uid)
             return _err(_INTERNAL_ERROR, 500)
 
+    async def ghost_bulk_create(request: web.Request) -> web.Response:
+        """Призрак на все рабочие аккаунты без профиля — одним нажатием.
+
+        Профиль заводился по одному аккаунту за раз: на флоте в сорок
+        аккаунтов это сорок одинаковых форм. Здесь те же поля и та же
+        проверка, что у одиночного создания, а цели — активные аккаунты
+        владельца, у которых профиля ещё нет. Существующие профили НЕ
+        трогаются (DO NOTHING): их настройки владелец мог уже подобрать.
+        """
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            data = await request.json()
+        except Exception:
+            return _err("Не удалось разобрать запрос", 400)
+        _f, _ferr = _ghost_fields(data if isinstance(data, dict) else {})
+        if _ferr:
+            return _err(_ferr, 400)
+        try:
+            rows = await pool.fetch(
+                """INSERT INTO ghost_profiles
+                   (owner_id, account_id, personality, active_hours_start, active_hours_end,
+                    daily_cap, cooldown_minutes)
+                   SELECT $1, a.id, $2, $3, $4, $5, $6
+                     FROM tg_accounts a
+                    WHERE a.owner_id = $1 AND a.is_active = TRUE
+                      AND NOT EXISTS (SELECT 1 FROM ghost_profiles g
+                                       WHERE g.owner_id = $1 AND g.account_id = a.id)
+                   ON CONFLICT (owner_id, account_id) DO NOTHING
+                   RETURNING id""",
+                uid, _f["personality"], _f["active_hours_start"], _f["active_hours_end"],
+                _f["daily_cap"], _f["cooldown_minutes"],
+            )
+            return _json_resp({"ok": True, "created": len(rows)})
+        except Exception:
+            log.exception("ghost_bulk_create uid=%d", uid)
+            return _err(_INTERNAL_ERROR, 500)
+
+    async def ghost_bulk_toggle(request: web.Request) -> web.Response:
+        """Включить или выключить ВСЕ профили призрака владельца.
+
+        Остановить присутствие флота (например, на время волны банов) можно
+        было только нажимая «Выкл» на каждой строке.
+        """
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            data = await request.json()
+        except Exception:
+            return _err("Не удалось разобрать запрос", 400)
+        enabled = data.get("enabled") if isinstance(data, dict) else None
+        if not isinstance(enabled, bool):
+            return _err("Укажите, включить или выключить", 400)
+        try:
+            n = await pool.fetchval(
+                """WITH u AS (UPDATE ghost_profiles SET enabled=$2, updated_at=now()
+                               WHERE owner_id=$1 AND enabled IS DISTINCT FROM $2
+                               RETURNING 1)
+                   SELECT count(*) FROM u""",
+                uid, enabled,
+            )
+            return _json_resp({"ok": True, "enabled": enabled, "changed": int(n or 0)})
+        except Exception:
+            log.exception("ghost_bulk_toggle uid=%d", uid)
+            return _err(_INTERNAL_ERROR, 500)
+
     async def presence_map_overview(request: web.Request) -> web.Response:
         """Карта присутствия: флот по странам + активы (каналы/боты) + пробелы.
 
@@ -901,6 +969,8 @@ def setup_routes(app: web.Application, pool) -> None:
 
     app.router.add_get("/api/miniapp/ghost", ghost_profiles)
     app.router.add_post("/api/miniapp/ghost", ghost_create)
+    app.router.add_post("/api/miniapp/ghost/bulk", ghost_bulk_create)
+    app.router.add_put("/api/miniapp/ghost/bulk_toggle", ghost_bulk_toggle)
     app.router.add_get("/api/miniapp/ghost/{profile_id}", ghost_detail)
     app.router.add_put("/api/miniapp/ghost/{profile_id}", ghost_update)
     app.router.add_put("/api/miniapp/ghost/{profile_id}/toggle", ghost_toggle)

@@ -971,6 +971,7 @@ POST /api/miniapp/flood/{bot_id}/purge
 POST /api/miniapp/flood/{bot_id}/unflag
 POST /api/miniapp/funnel/{funnel_id}/step
 POST /api/miniapp/ghost
+POST /api/miniapp/ghost/bulk
 POST /api/miniapp/gifts/recipients
 POST /api/miniapp/gifts/scan
 POST /api/miniapp/gifts/transfer
@@ -1261,6 +1262,7 @@ PUT /api/miniapp/content_mesh/{mesh_id}/toggle
 PUT /api/miniapp/crm/deal/{deal_id}/stage
 PUT /api/miniapp/editorial/policy
 PUT /api/miniapp/funnel/{funnel_id}/toggle
+PUT /api/miniapp/ghost/bulk_toggle
 PUT /api/miniapp/ghost/{profile_id}
 PUT /api/miniapp/ghost/{profile_id}/toggle
 PUT /api/miniapp/persona/{persona_id}
