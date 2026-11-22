@@ -30072,8 +30072,8 @@ async function loadParsedAudience(source, append) {
     const more = shown < AUD_TOTAL
       ? `<div style="padding:10px 0"><button class="btn btn-s" id="audMoreBtn" style="width:100%" onclick="audLoadMore()">Загрузить ещё ${num(Math.min(AUD_PAGE, AUD_TOTAL - shown))}</button></div>`
       : '';
-    txt('parserAudList', filterBar+header+AUD_ROWS.map(u=>`
-      <div class="row">
+    txt('parserAudList', filterBar+header+AUD_ROWS.map((u,i)=>`
+      <div class="row tap" role="button" tabindex="0" onclick="audCopyOne(${i})" title="Скопировать @username или ID">
         <div class="row-body">
           <div class="row-name">${u.username?'@'+esc(u.username):(esc(u.name)||'ID '+u.tg_user_id)}${u.is_premium?' ⭐':''}${u.is_bot?' 🤖':''}${u.has_phone?' 📱':''}</div>
           <div class="row-val">${esc(u.source_title)||u.source_type} · ${ago(u.parsed_at)}</div>
@@ -30085,6 +30085,18 @@ async function loadParsedAudience(source, append) {
     if (append) { const b = document.getElementById('audMoreBtn'); if (b) { b.disabled = false; b.textContent = '↺ Не загрузилось, повторить'; } toast('⚠️ '+errRu(e,'Ошибка').substring(0,120)); return; }
     txt('parserAudList', errHtml(errRu(e), 'loadParsedAudience(AUD_SOURCE)'));
   }
+}
+// Тап по человеку копирует его @username, а без него — ID: чтобы написать
+// одному человеку или проверить его вручную, раньше приходилось выгружать
+// всю аудиторию файлом.
+function audHandle(u) {
+  if (!u) return '';
+  return u.username ? '@' + u.username : (u.tg_user_id ? String(u.tg_user_id) : '');
+}
+function audCopyOne(i) {
+  const h = audHandle(AUD_ROWS[i]);
+  if (!h) { toast('У этого человека нет ни @username, ни ID'); return; }
+  copyToClipboard(h, '📋 Скопировано: ' + h);
 }
 function openParserModal() {
   document.getElementById('parserSrc').value='';
