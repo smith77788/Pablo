@@ -83,9 +83,30 @@ function _udLoading() {
   if (b) b.innerHTML = '<div style="text-align:center;color:var(--hint);padding:40px">Загрузка…</div>';
 }
 function _udError(msg) {
+  // Ошибка без кнопки оставляла один путь — уйти с экрана и зайти снова.
   const b = document.getElementById('udBody');
   if (b) b.innerHTML = '<div style="text-align:center;color:var(--orange);padding:40px">⚠️ ' +
-    esc(msg || 'Ошибка загрузки') + '</div>';
+    esc(msg || 'Ошибка загрузки') + '<div style="margin-top:12px">' +
+    '<button class="btn btn-s" onclick="_udReload()">↺ Повторить</button></div></div>';
+}
+
+// Период аналитики. Сервер умеет 7/30/90 дней, а экран всегда просил 7:
+// месяц к месяцу было не посмотреть. Выбор запоминается.
+const _UD_RANGES = [['7d', 7], ['30d', 30], ['90d', 90]];
+function _udRange() {
+  const p = (typeof loadFormPrefs === 'function') ? (loadFormPrefs('unified_dash') || {}) : {};
+  return _UD_RANGES.some(r => r[0] === p.range) ? p.range : '7d';
+}
+function _udDays(rng) { const r = _UD_RANGES.find(x => x[0] === rng); return r ? r[1] : 7; }
+function udSetRange(rng) {
+  if (!_UD_RANGES.some(r => r[0] === rng) || rng === _udRange()) return;
+  if (typeof saveFormPrefs === 'function') saveFormPrefs('unified_dash', { range: rng });
+  _udLoad();
+}
+function _udRangeRow(cur) {
+  return '<div class="seg" style="margin:0 0 10px">' + _UD_RANGES.map(r =>
+    '<div class="seg-opt' + (r[0] === cur ? ' on' : '') + '" role="button" tabindex="0" ' +
+    'onclick="udSetRange(\'' + r[0] + '\')">' + r[1] + ' дней</div>').join('') + '</div>';
 }
 
 async function _udLoad() {
@@ -104,8 +125,9 @@ async function _udLoad() {
         ? _ccRender(d)
         : '<div style="color:var(--hint);padding:20px">Модуль инфраструктуры не загружен</div>';
     } else if (_udTabCur === 'analytics') {
-      const d = await api('/api/miniapp/dashboard_realtime?range=7d');
-      body.innerHTML = _udRenderAnalytics(d);
+      const rng = _udRange();
+      const d = await api('/api/miniapp/dashboard_realtime?range=' + rng);
+      body.innerHTML = _udRangeRow(rng) + _udRenderAnalytics(d, rng);
     }
   } catch (e) {
     _udError(errRu(e, 'Не удалось загрузить сводку'));
@@ -215,8 +237,9 @@ function _udLine(series, color) {
     `stroke-linejoin="round" stroke-linecap="round"/></svg>`;
 }
 
-function _udRenderAnalytics(d) {
+function _udRenderAnalytics(d, rng) {
   d = d || {};
+  const days = _udDays(rng || '7d');
   const g = d.growth_7d || 0;
   const gcol = g > 0 ? 'var(--green,#3bb6a6)' : g < 0 ? 'var(--red,#ef4444)' : 'var(--fg)';
   const chips = '<div style="display:flex;gap:8px;overflow-x:auto;padding:2px 0 4px;' +
@@ -233,7 +256,7 @@ function _udRenderAnalytics(d) {
     : `<div style="background:var(--card,var(--bg-input));border-radius:14px;padding:14px;margin-bottom:12px">` +
       `<div style="font-weight:700;font-size:13px;margin-bottom:10px">${esc(title)}</div>${inner}</div>`;
 
-  const charts = card('📈 Динамика (7 дней)',
+  const charts = card('📈 Динамика (' + days + ' дней)',
     '<div style="font-size:12px;color:var(--hint);margin-bottom:2px">Подписчики</div>' +
     _udLine(d.subs_history, 'var(--blue,#38bdf8)') +
     '<div style="font-size:12px;color:var(--hint);margin:8px 0 2px">Просмотры</div>' +

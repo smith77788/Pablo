@@ -9654,28 +9654,26 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             # Filter via owner's known channels (graph_nodes has no owner_id)
             stats = await pool.fetchrow(
                 """
+                -- Узлы владельца собираются ОДИН раз: EXISTS с OR внутри не
+                -- даёт планировщику хэш-соединения и шёл вложенным циклом
+                -- «узлы графа × каналы владельца» трижды (268 мс на 2000
+                -- узлов и 5000 каналов). IN по двум ключам считается
+                -- хэшированным подзапросом; условие то же — ник совпал с
+                -- ником или id канала текстом с entity_id.
+                WITH own AS (
+                    SELECT gn.id FROM graph_nodes gn
+                    WHERE gn.username IN (SELECT mc.username FROM managed_channels mc
+                                          WHERE mc.owner_id=$1)
+                       OR gn.entity_id IN (SELECT mc.channel_id::text FROM managed_channels mc
+                                           WHERE mc.owner_id=$1)
+                )
                 SELECT
-                    (SELECT COUNT(*) FROM graph_nodes gn
-                     WHERE EXISTS (
-                         SELECT 1 FROM managed_channels mc
-                         WHERE mc.owner_id=$1
-                           AND (mc.username = gn.username OR mc.channel_id::text = gn.entity_id)
-                     )) AS nodes,
+                    (SELECT COUNT(*) FROM own) AS nodes,
                     (SELECT COUNT(*) FROM graph_edges ge
-                     JOIN graph_nodes na ON na.id = ge.from_node
-                     WHERE EXISTS (
-                         SELECT 1 FROM managed_channels mc
-                         WHERE mc.owner_id=$1
-                           AND (mc.username = na.username OR mc.channel_id::text = na.entity_id)
-                     )) AS edges,
+                     WHERE ge.from_node IN (SELECT id FROM own)) AS edges,
                     (SELECT COUNT(*) FROM audience_overlaps ao
-                     JOIN graph_nodes na ON na.id = ao.node_a
                      WHERE ao.overlap_pct > 0.1
-                       AND EXISTS (
-                           SELECT 1 FROM managed_channels mc
-                           WHERE mc.owner_id=$1
-                             AND (mc.username = na.username OR mc.channel_id::text = na.entity_id)
-                       )) AS strong_overlaps
+                       AND ao.node_a IN (SELECT id FROM own)) AS strong_overlaps
                 """,
                 uid,
             )
@@ -9698,12 +9696,16 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 JOIN graph_nodes na ON na.id = ao.node_a
                 JOIN graph_nodes nb ON nb.id = ao.node_b
                 WHERE ao.overlap_pct > 0.05
-                  AND EXISTS (
-                      SELECT 1 FROM managed_channels mc
-                      WHERE mc.owner_id=$1
-                        AND (mc.username = na.username OR mc.username = nb.username
-                             OR mc.channel_id::text = na.entity_id OR mc.channel_id::text = nb.entity_id)
-                  )
+                  -- Тот же сбор узлов владельца, что в graph_stats: без OR
+                  -- внутри EXISTS, который шёл вложенным циклом по каналам.
+                  AND (na.username IN (SELECT mc.username FROM managed_channels mc
+                                       WHERE mc.owner_id=$1)
+                       OR nb.username IN (SELECT mc.username FROM managed_channels mc
+                                          WHERE mc.owner_id=$1)
+                       OR na.entity_id IN (SELECT mc.channel_id::text FROM managed_channels mc
+                                           WHERE mc.owner_id=$1)
+                       OR nb.entity_id IN (SELECT mc.channel_id::text FROM managed_channels mc
+                                           WHERE mc.owner_id=$1))
                 ORDER BY ao.overlap_pct DESC LIMIT 20
                 """,
                 uid,

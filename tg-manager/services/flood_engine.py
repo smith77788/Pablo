@@ -600,7 +600,19 @@ async def account_risk_factors(pool, account_id: int) -> dict:
         return neutral
     if not row:
         return neutral
+    return _risk_factors_from_row(row)
 
+
+# Колонки, из которых считаются факторы риска: одни и те же для поштучного и
+# пакетного расчёта, чтобы они не разъехались.
+_RISK_FACTOR_COLUMNS = """a.first_name, a.username, a.warmup_level, a.tg_user_id,
+                      a.is_premium, a.has_photo, a.profile_checked_at,
+                      a.phone, a.lang_code, a.system_lang_code,
+                      r.reg_date"""
+
+
+def _risk_factors_from_row(row) -> dict:
+    """Факторы риска по уже прочитанной строке аккаунта (см. account_risk_factors)."""
     mult, notes = 1.0, []
 
     reg_date = row.get("reg_date")
@@ -768,7 +780,13 @@ async def recommended_daily_limit(pool, account_id: int) -> dict:
         return cold
     if not row or not int(row["active_days"] or 0):
         return cold
+    # Свойства самого аккаунта (возраст/профиль/прогрев) — поверх истории.
+    factors = await account_risk_factors(pool, account_id)
+    return _limit_from_stats(row, factors)
 
+
+def _limit_from_stats(row, factors: dict) -> dict:
+    """Лимит по строке статистики за 7 суток и факторам риска аккаунта."""
     inv_ok = int(row["inv_ok"] or 0)
     fails = int(row["fails"] or 0)
     floods = int(row["floods"] or 0)
@@ -797,7 +815,6 @@ async def recommended_daily_limit(pool, account_id: int) -> dict:
     # история говорит «как он себя вёл», факторы — «насколько он вообще похож
     # на живого». Молодой аккаунт с пустым профилем ограничат быстрее даже при
     # идентичной истории.
-    factors = await account_risk_factors(pool, account_id)
     if factors.get("notes"):
         limit = int(limit * float(factors.get("multiplier") or 1.0))
         basis += "; " + ", ".join(factors["notes"])
@@ -810,6 +827,75 @@ async def recommended_daily_limit(pool, account_id: int) -> dict:
         "basis": basis,
         "factors": factors,
     }
+
+
+async def recommended_daily_limits(pool, account_ids) -> dict[int, dict]:
+    """`recommended_daily_limit` для СПИСКА аккаунтов — двумя запросами.
+
+    Экраны и планировщики звали поштучный расчёт на каждый аккаунт флота: два
+    запроса на аккаунт (статистика и факторы риска), то есть на флоте в 2500
+    рабочих аккаунтов — пять тысяч запросов на одно открытие «Разбора
+    инвайта», около секунды ожидания и восемь соединений пула, занятых всё это
+    время. Здесь статистика читается одним GROUP BY, факторы — одним запросом
+    по тем, у кого история есть; считается тем же кодом, что и поштучно.
+
+    Сбой чтения статистики — холодный старт всем (как поштучно); сбой чтения
+    факторов — нейтральные факторы (как поштучно).
+    """
+    try:
+        ids = sorted({int(a) for a in (account_ids or ()) if a})
+    except (TypeError, ValueError):
+        ids = []
+    cold = {
+        "limit": _INVITE_LIMIT_COLD_START,
+        "used_today": 0,
+        "remaining": _INVITE_LIMIT_COLD_START,
+        "basis": "нет истории — консервативный старт",
+    }
+    out = {i: dict(cold) for i in ids}
+    if not pool or not ids:
+        return out
+    try:
+        rows = await pool.fetch(
+            """SELECT account_id,
+                   COALESCE(SUM(invites_ok), 0)                        AS inv_ok,
+                   COALESCE(SUM(actions_fail), 0)                      AS fails,
+                   COALESCE(SUM(flood_events), 0)                      AS floods,
+                   COUNT(*) FILTER (WHERE invites_ok > 0)              AS active_days,
+                   COALESCE(MAX(invites_ok), 0)                        AS best_day,
+                   COALESCE(SUM(invites_ok) FILTER (
+                       WHERE stat_date = CURRENT_DATE), 0)             AS today
+               FROM account_daily_stats
+               WHERE account_id = ANY($1::bigint[])
+                 AND stat_date >= CURRENT_DATE - INTERVAL '7 days'
+               GROUP BY account_id""",
+            ids,
+        )
+    except Exception:
+        log.debug("recommended_daily_limits: query failed (%d acc)", len(ids), exc_info=True)
+        return out
+    stats = {int(r["account_id"]): r for r in (rows or ()) if int(r["active_days"] or 0)}
+    if not stats:
+        return out
+    factor_rows: dict[int, dict] = {}
+    try:
+        frows = await pool.fetch(
+            f"""SELECT a.id, {_RISK_FACTOR_COLUMNS}
+               FROM tg_accounts a
+               LEFT JOIN reg_check_cache r
+                      ON r.entity_id = a.tg_user_id AND r.entity_type = 'user'
+               WHERE a.id = ANY($1::bigint[])""",
+            sorted(stats),
+        )
+        for fr in frows or ():
+            factor_rows[int(fr["id"])] = dict(fr)
+    except Exception:
+        log.debug("recommended_daily_limits: factors query failed", exc_info=True)
+    neutral = {"multiplier": 1.0, "notes": []}
+    for acc_id, row in stats.items():
+        fr = factor_rows.get(acc_id)
+        out[acc_id] = _limit_from_stats(row, _risk_factors_from_row(fr) if fr else neutral)
+    return out
 
 
 def gaussian_delay(

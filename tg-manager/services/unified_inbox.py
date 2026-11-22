@@ -134,12 +134,16 @@ def merge_threads(fleet=None, vault=None, bots=None, contacts=None,
             t["username"] = username
         return t
 
-    def _touch(t, at, text, src, waiting):
+    def _touch(t, at, text, src, waiting, enc=None):
         if t["last_at"] is None or _ts(at) >= _ts(t["last_at"]):
             t["last_at"] = at
             t["last_text"] = (text or "")[:_PREVIEW]
             t["last_source"] = src
             t["waiting"] = bool(waiting)
+            # Зашифрованный текст расшифровывает вызывающий — и только у тех
+            # разговоров, что попадут на экран (см. list_threads).
+            if enc is not None or "last_text_enc" in t:
+                t["last_text_enc"] = enc
 
     for r in fleet or []:
         pid = r.get("peer_user_id")
@@ -151,7 +155,8 @@ def merge_threads(fleet=None, vault=None, bots=None, contacts=None,
         t["total"] += int(r.get("total") or 0)
         t["channels"].append({"source": SRC_FLEET, "account_id": r.get("account_id"),
                               "label": f"Аккаунт #{r.get('account_id')}"})
-        _touch(t, r.get("last_at"), r.get("last_text"), SRC_FLEET, unread > 0)
+        _touch(t, r.get("last_at"), r.get("last_text"), SRC_FLEET, unread > 0,
+               r.get("last_text_enc"))
 
     for r in vault or []:
         pid = r.get("peer_user_id")
@@ -161,7 +166,7 @@ def merge_threads(fleet=None, vault=None, bots=None, contacts=None,
         t["total"] += int(r.get("total") or 0)
         t["channels"].append({"source": SRC_VAULT, "label": "Хранилище"})
         _touch(t, r.get("last_at"), r.get("last_text"), SRC_VAULT,
-               r.get("last_direction") == "in")
+               r.get("last_direction") == "in", r.get("last_text_enc"))
 
     for r in bots or []:
         pid = r.get("peer_user_id")
@@ -261,8 +266,13 @@ async def list_threads(pool, owner_id: int, *, only_waiting: bool = False,
              FROM inbox_messages
             WHERE owner_id=$1
             ORDER BY peer_user_id, account_id, msg_date DESC""", uid)
+    # Текст НЕ расшифровываем здесь: строк столько, сколько разговоров у
+    # владельца (десятки тысяч), а на экран уходит сотня. Расшифровка стоит
+    # десятки микросекунд на строку, и на 30 000 разговоров Хранилища экран
+    # «Входящие» открывался ~5 с только из-за неё. Шифр едет через слияние и
+    # раскрывается у тех, кого покажем.
     for r in fleet:
-        r["last_text"] = _decrypt(r.pop("text_enc", None))
+        r["last_text_enc"] = r.pop("text_enc", None)
     vault = await _safe(pool,
         """SELECT DISTINCT ON (chat_id)
                   chat_id AS peer_user_id, peer_name, peer_username,
@@ -273,7 +283,7 @@ async def list_threads(pool, owner_id: int, *, only_waiting: bool = False,
             WHERE owner_id=$1 AND chat_id > 0 AND NOT is_deleted
             ORDER BY chat_id, COALESCE(msg_date, created_at) DESC""", uid)
     for r in vault:
-        r["last_text"] = _decrypt(r.pop("text_enc", None))
+        r["last_text_enc"] = r.pop("text_enc", None)
     bots = await _safe(pool,
         """SELECT d.customer_chat_id AS peer_user_id, d.bot_id, b.username AS bot_username,
                   d.last_at, d.history, d.handed_off, d.msg_count AS total,
@@ -312,6 +322,11 @@ async def list_threads(pool, owner_id: int, *, only_waiting: bool = False,
                                 relay=relay)
     threads = ([t for t in all_threads if t["waiting"]] if only_waiting
                else all_threads)[: max(1, int(limit))]
+    for t in threads:
+        if "last_text_enc" in t:
+            enc = t.pop("last_text_enc")
+            if enc:
+                t["last_text"] = _decrypt(enc)[:_PREVIEW]
     return {
         "threads": [_iso(t) for t in threads],
         "total": len(all_threads),

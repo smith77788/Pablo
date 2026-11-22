@@ -92,3 +92,19 @@ def test_choice_is_remembered_and_used():
 
 def test_dashboard_unknown_screen_is_not_silent():
     assert "else toast('⚠️ Раздел недоступен')" in _fn(DASH, "_udAct")
+
+
+def test_analytics_period_is_chosen_and_remembered():
+    load = _fn(DASH, "_udLoad")
+    assert "api('/api/miniapp/dashboard_realtime?range=' + rng)" in load
+    assert "_udRangeRow(rng) + _udRenderAnalytics(d, rng)" in load
+    assert "saveFormPrefs('unified_dash', { range: rng })" in _fn(DASH, "udSetRange")
+    js = ("const PREFS={};function loadFormPrefs(k){return PREFS[k]||{}}"
+          + _fn(DASH, "_udRange").replace("function _udRange", "const _UD_RANGES = [['7d', 7], ['30d', 30], ['90d', 90]];\nfunction _udRange")
+          + "const a=_udRange(); PREFS.unified_dash={range:'30d'}; const b=_udRange();"
+          + "PREFS.unified_dash={range:'1y'}; console.log(JSON.stringify([a,b,_udRange()]))")
+    assert _run(js) == ["7d", "30d", "7d"]
+
+
+def test_dashboard_error_can_be_retried():
+    assert "onclick=\"_udReload()\"" in _fn(DASH, "_udError")

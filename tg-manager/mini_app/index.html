@@ -15256,11 +15256,15 @@ const OPS_STATUS_LABELS = {pending:'ожидают', running:'работают',
                            failed:'ошибки', cancelled:'отменены'};
 function OPS_STATUS_RU(s) { return OPS_STATUS_LABELS[s] || s; }
 let OPS_PROJECT_ID = null;
-function openOps(projectId) {
+function openOps(projectId, projectName) {
   const nextProject = Number.isSafeInteger(projectId) && projectId > 0 ? projectId : null;
   const changed = OPS_PROJECT_ID !== nextProject;
   OPS_PROJECT_ID = nextProject;
-  document.getElementById('opsTitle').textContent = nextProject ? 'Журнал проекта #' + nextProject : '⚙️ Операции';
+  // Заголовок называет проект по имени, когда его знает тот, кто открыл
+  // журнал: «Журнал проекта #17» не говорил, какой это проект.
+  const pname = (typeof projectName === 'string' && projectName.trim()) ? projectName.trim() : '';
+  document.getElementById('opsTitle').textContent = nextProject
+    ? (pname ? 'Журнал: ' + pname : 'Журнал проекта #' + nextProject) : '⚙️ Операции';
   push('s-ops');
   if (changed) {
     OPS_SEL.clear();
@@ -19456,9 +19460,9 @@ async function deleteCmd(idx) {
   const newList = CMD_LIST.filter((_,i)=>i!==idx);
   try {
     await api('/api/miniapp/bot/'+CMD_BOT_ID+'/commands', {method:'PUT', body:JSON.stringify({commands:newList})});
-    toast('✅ Удалено');
+    toast('🗑 Команда /'+(CMD_LIST[idx]?.command||'')+' удалена');
     loadBotCommands();
-  } catch(e) { toast('⚠️ '+errRu(e,'Ошибка')); }
+  } catch(e) { toast('⚠️ '+errRu(e,'Не удалось удалить команду')); }
 }
 
 
