@@ -50,3 +50,11 @@ def test_mesh_unknown_status_is_not_a_raw_code():
     mesh = (SCREENS / "bot_mesh.js").read_text(encoding="utf-8")
     for raw in ("t.status||''", "d.status||''", "h.outcome||''"):
         assert raw not in mesh, raw
+
+
+def test_bot_commands_and_subscribers_are_spelled_out():
+    assert "' подп.'" not in BD
+    assert "plural(BS_TOTAL,'подписчик','подписчика','подписчиков')" in BD
+    clear = BD[BD.index("async function clearBotCommands"):BD.index("async function openBotStats")]
+    assert "if (!n) { toast('ℹ️ У бота нет команд'); return; }" in clear
+    assert "Меню команд у бота в Telegram опустеет." in clear

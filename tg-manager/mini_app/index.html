@@ -19456,9 +19456,9 @@ async function deleteCmd(idx) {
   const newList = CMD_LIST.filter((_,i)=>i!==idx);
   try {
     await api('/api/miniapp/bot/'+CMD_BOT_ID+'/commands', {method:'PUT', body:JSON.stringify({commands:newList})});
-    toast('✅ Удалено');
+    toast('🗑 Команда /'+(CMD_LIST[idx]?.command||'')+' удалена');
     loadBotCommands();
-  } catch(e) { toast('⚠️ '+errRu(e,'Ошибка')); }
+  } catch(e) { toast('⚠️ '+errRu(e,'Не удалось удалить команду')); }
 }
 
 
