@@ -111,7 +111,7 @@ def network_ops_menu() -> InlineKeyboardMarkup:
         text="👥 Пересечение аудиторий", callback_data=NetworkCb(action="overlap")
     )
     kb.button(
-        text="📢 Сетевая рассылка v2", callback_data=NetBcCb(action="choose_target")
+        text="📢 Сетевая рассылка", callback_data=NetBcCb(action="choose_target")
     )
     kb.button(text="🔄 Клонировать настройки", callback_data=NetworkCb(action="clone"))
     # ── Массовые операции ──
@@ -119,8 +119,8 @@ def network_ops_menu() -> InlineKeyboardMarkup:
     kb.button(text="🌍 Имя по гео", callback_data=NetworkCb(action="bulk_name_lang"))
     kb.button(text="📄 Описание всем", callback_data=NetworkCb(action="bulk_desc"))
     kb.button(text="🌍 Описание по гео", callback_data=NetworkCb(action="bulk_desc_lang"))
-    kb.button(text="📃 Краткое всем", callback_data=NetworkCb(action="bulk_short"))
-    kb.button(text="🌍 Краткое по гео", callback_data=NetworkCb(action="bulk_short_lang"))
+    kb.button(text="📃 Краткое описание всем", callback_data=NetworkCb(action="bulk_short"))
+    kb.button(text="🌍 Краткое описание по гео", callback_data=NetworkCb(action="bulk_short_lang"))
     kb.button(text="🤖 Команды всем", callback_data=NetworkCb(action="bulk_commands"))
     kb.button(
         text="🌍 Команды по гео", callback_data=NetworkCb(action="bulk_commands_lang")
@@ -201,8 +201,8 @@ def bulk_menu() -> InlineKeyboardMarkup:
     kb.button(text="🌍 Имя по гео", callback_data=BulkCb(action="name_lang"))
     kb.button(text="📄 Описание всем", callback_data=BulkCb(action="desc"))
     kb.button(text="🌍 Описание по гео", callback_data=BulkCb(action="desc_lang"))
-    kb.button(text="📃 Краткое всем", callback_data=BulkCb(action="short"))
-    kb.button(text="🌍 Краткое по гео", callback_data=BulkCb(action="short_lang"))
+    kb.button(text="📃 Краткое описание всем", callback_data=BulkCb(action="short"))
+    kb.button(text="🌍 Краткое описание по гео", callback_data=BulkCb(action="short_lang"))
     kb.button(text="🤖 Команды всем", callback_data=BulkCb(action="commands"))
     kb.button(text="🌍 Команды по гео", callback_data=BulkCb(action="commands_lang"))
     kb.button(text="🔍 Проверить токены", callback_data=BulkCb(action="check"))

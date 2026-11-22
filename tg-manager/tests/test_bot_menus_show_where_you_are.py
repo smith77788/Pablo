@@ -47,3 +47,10 @@ def test_bot_count_is_declined():
     from bot.handlers.bots import _bots_word
     assert [_bots_word(n) for n in (1, 3, 5, 11, 21, 112)] == [
         "1 бот", "3 бота", "5 ботов", "11 ботов", "21 бот", "112 ботов"]
+
+
+def test_network_menu_has_no_version_jargon():
+    t = _texts(kb.network_ops_menu())
+    assert "📢 Сетевая рассылка" in t
+    assert not any("v2" in x for x in t)
+    assert "📃 Краткое описание всем" in t
