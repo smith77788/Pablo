@@ -15,7 +15,8 @@ SYNC = (ROOT / "services" / "contacts_hub" / "sync_service.py").read_text(encodi
 
 
 def _sync_account_body() -> str:
-    return SYNC[SYNC.index("async def sync_account("): SYNC.index("async def sync_all_accounts(")]
+    # Запись идёт пачками в `_write_chunk` — читаем от него до конца sync_account.
+    return SYNC[SYNC.index("async def _write_chunk("): SYNC.index("async def sync_all_accounts(")]
 
 
 def test_source_linked_for_existing_contacts_too():

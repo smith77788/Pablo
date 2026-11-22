@@ -37,6 +37,13 @@ class _FakePool:
         self.executed.append((query, args))
         return "INSERT 1"
 
+    async def fetch(self, query, *args):
+        return []  # контактов ещё нет → ветка вставки
+
+    async def executemany(self, query, rows):
+        for args in rows:
+            self.executed.append((query, tuple(args)))
+
 
 def _inserted_user_ids(pool):
     """user_id — 3-й позиционный аргумент INSERT unified_contacts ($3)."""
