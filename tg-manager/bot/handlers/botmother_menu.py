@@ -1715,7 +1715,22 @@ def _parse_datetime(text: str) -> datetime | None:
                 parts = val.split(":")
                 dt = dt.replace(hour=int(parts[0]), minute=int(parts[1]))
             elif "%Y" not in fmt:
-                dt = datetime.strptime(f"{val}.{now.year}", f"{fmt}.%Y")
+                # Дата без года — ближайшая будущая: «05.01 10:00», введённое
+                # в декабре, — это январь следующего года. Раньше бралась
+                # дата текущего года, уже прошедшая, и планировщик отвечал
+                # «время должно быть в будущем» без возможности запланировать
+                # на январь коротким форматом. 29.02 — до ближайшего високосного.
+                dt = None
+                for _y in range(now.year, now.year + 5):
+                    try:
+                        cand = datetime.strptime(f"{val}.{_y}", f"{fmt}.%Y")
+                    except ValueError:
+                        continue
+                    if cand.replace(tzinfo=timezone.utc) > datetime.now(timezone.utc):
+                        dt = cand
+                        break
+                if dt is None:
+                    raise ValueError("нет будущей даты")
             else:
                 dt = datetime.strptime(val, fmt)
             # Возвращаем как UTC-aware

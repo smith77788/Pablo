@@ -9658,6 +9658,42 @@ async def _exec_bulk_post_to_channel(
         await release_accounts(claimed_ids)
 
 
+def _profile_error_ru(err: str) -> tuple[str, int]:
+    """Причина сбоя правки профиля по-русски + секунды флуда (0 — не флуд). ЧИСТАЯ.
+
+    Telethon отдаёт английский текст («The username is already taken (caused
+    by UpdateUsernameRequest)», «A wait of 300 seconds is required»), и он шёл
+    владельцу как есть.
+    """
+    t = str(err or "")
+    low = t.lower()
+    if "flood" in low or "a wait of" in low:
+        m = re.search(r"(\d+)", t)
+        secs = int(m.group(1)) if m else 60
+        return f"Telegram просит подождать {secs} с — аккаунт пропущен", max(1, secs)
+    if "occupied" in low or "already taken" in low:
+        return "это имя пользователя уже занято", 0
+    if "username_invalid" in low or "username is invalid" in low or "invalid username" in low:
+        return "недопустимое имя пользователя (5–32 символа: латиница, цифры, _)", 0
+    if "purchase_available" in low or "purchase" in low:
+        return "это имя продаётся на Fragment — его нельзя занять бесплатно", 0
+    if "about_too_long" in low or "too long" in low:
+        return "слишком длинный текст для Telegram", 0
+    if "firstname_invalid" in low or "first name" in low:
+        return "недопустимое имя", 0
+    return (t[:50] or "ошибка"), 0
+
+
+async def _record_profile_flood(pool, acc: dict, seconds: int, op_id: int) -> None:
+    """Записать флуд аккаунта из правки профиля в общий пульс (best-effort)."""
+    try:
+        from services.flood_engine import record_flood
+
+        await record_flood(pool, int(acc["id"]), int(seconds), "bulk_update_profile", op_id)
+    except Exception:
+        log_exc_swallow(log, "bulk_update_profile: record_flood failed")
+
+
 async def _exec_bulk_update_profile(
     pool: asyncpg.Pool, bot: Bot, op_id: int, owner_id: int, params: dict
 ) -> dict:
@@ -9723,7 +9759,14 @@ async def _exec_bulk_update_profile(
                     elif isinstance(result, dict) and result.get("flood_wait"):
                         err_list.append(f"⏳ {label}: flood_wait, пропущен")
                     elif result and not isinstance(result, dict):
-                        err_list.append(f"❌ {label}: {_html.escape(str(result)[:50])}")
+                        if "not_modified" in str(result).lower() or "not modified" in str(result).lower():
+                            # Имя уже такое — цель достигнута, это не ошибка.
+                            ok_list.append(f"✅ {label}: @{_html.escape(actual_value)}")
+                        else:
+                            _why, _fw = _profile_error_ru(str(result))
+                            if _fw:
+                                await _record_profile_flood(pool, acc, _fw, op_id)
+                            err_list.append(f"{'⏳' if _fw else '❌'} {label}: {_html.escape(_why)}")
                     else:
                         ok_list.append(f"✅ {label}: @{_html.escape(actual_value)}")
                 else:
@@ -9742,7 +9785,16 @@ async def _exec_bulk_update_profile(
             except asyncio.CancelledError:
                 raise
             except Exception as e:
-                err_list.append(f"❌ {label}: {str(e)[:50]}")
+                # update_profile пробрасывает FloodWaitError наружу: раньше он
+                # уходил владельцу английским «A wait of N seconds…», а флуд
+                # аккаунта нигде не записывался — следующая операция снова
+                # била тем же аккаунтом.
+                _secs = getattr(e, "seconds", None)
+                _is_flood = "flood" in type(e).__name__.lower() and isinstance(_secs, int)
+                _why, _fw = _profile_error_ru(f"FloodWait {_secs}" if _is_flood else str(e))
+                if _fw:
+                    await _record_profile_flood(pool, acc, _fw, op_id)
+                err_list.append(f"{'⏳' if _fw else '❌'} {label}: {_html.escape(_why)}")
 
             await _safe_execute(
                     pool,"UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1", op_id)
