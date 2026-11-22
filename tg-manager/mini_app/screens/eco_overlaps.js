@@ -36,6 +36,78 @@ function _eoTone(pct) {
   return {c: 'var(--hint)', t: 'общих подписчиков нет'};
 }
 
+// Пар у экосистемы из десятка каналов — сорок пять, и почти все «почти не
+// совпадают». Фильтр оставляет только те, с которыми есть что делать; выбор
+// запоминается.
+const _EO_BIG = 20;
+let _eoPairs = [];
+
+function _eoOnlyBig() {
+  const p = (typeof loadFormPrefs === 'function') ? (loadFormPrefs('eco_overlaps') || {}) : {};
+  return !!p.only_big;
+}
+
+function eoSetOnlyBig(on) {
+  if (typeof saveFormPrefs === 'function') saveFormPrefs('eco_overlaps', {only_big: !!on});
+  const box = document.getElementById('eoPairs');
+  if (box) box.innerHTML = _eoPairsHtml();
+}
+
+// Подпись на кнопке режется ДО экранирования: срез готового HTML мог
+// разрезать «&amp;» пополам, и на кнопке появлялся мусор вроде «&am».
+function _eoShort(name) {
+  const s = String(name || '');
+  return esc(s.length > 18 ? s.substring(0, 18) + '…' : s);
+}
+
+function _eoPairRow(p) {
+  const pct = p.overlap_pct || 0;
+  const tone = _eoTone(pct);
+  const w = Math.max(2, Math.min(100, Math.round(pct)));
+  return '<div class="row"><div class="row-body">' +
+    '<div class="row-name">' + esc(p.name_a) + ' ↔ ' + esc(p.name_b) + '</div>' +
+    '<div class="row-val" style="color:' + tone.c + '">' + pct.toFixed(1) + '% · общих ' + num(p.shared || 0) + '</div>' +
+    '<div style="height:5px;background:var(--sep);border-radius:3px;overflow:hidden;margin:5px 0 3px">' +
+      '<div style="height:100%;width:' + w + '%;background:' + tone.c + ';border-radius:3px"></div></div>' +
+    '<div style="font-size:11px;color:var(--hint);line-height:1.35">' + tone.t + '</div>' +
+    '<div style="display:flex;gap:6px;margin-top:7px">' +
+      '<button class="btn btn-s" style="font-size:11px;padding:5px 9px" onclick="openChannel(' +
+        Number(p.channel_a) + ')">' + _eoShort(p.name_a) + ' →</button>' +
+      '<button class="btn btn-s" style="font-size:11px;padding:5px 9px" onclick="openChannel(' +
+        Number(p.channel_b) + ')">' + _eoShort(p.name_b) + ' →</button>' +
+    '</div></div></div>';
+}
+
+function _eoVisiblePairs() {
+  const list = (_eoPairs || []).slice().sort((a, b) => (b.overlap_pct || 0) - (a.overlap_pct || 0));
+  return _eoOnlyBig() ? list.filter(p => (p.overlap_pct || 0) >= _EO_BIG) : list;
+}
+
+function _eoPairsHtml() {
+  const list = _eoVisiblePairs();
+  if (!list.length) {
+    return '<div style="padding:12px 4px;font-size:13px;color:var(--hint)">Заметных пересечений нет: ' +
+      'ни одна пара не совпадает на ' + _EO_BIG + '% и больше.</div>';
+  }
+  return list.map(_eoPairRow).join('');
+}
+
+// Отчёт текстом — переслать партнёру или вставить в заметку о чистке каналов.
+function eoReportText() {
+  const list = _eoVisiblePairs();
+  const lines = ['Пересечения аудитории каналов' + (_eoOnlyBig() ? ' (от ' + _EO_BIG + '%)' : '') + ':'];
+  for (const p of list) {
+    lines.push('• ' + (p.name_a || '') + ' ↔ ' + (p.name_b || '') + ': ' +
+      (p.overlap_pct || 0).toFixed(1) + '%, общих ' + (p.shared || 0));
+  }
+  return lines.join('\n');
+}
+
+function eoCopyReport() {
+  if (!_eoVisiblePairs().length) { toast('Нечего копировать'); return; }
+  copyToClipboard(eoReportText(), '📋 Отчёт скопирован');
+}
+
 async function openEcoOverlaps(ecoId) {
   _eoEcoId = ecoId;
   _eoScreen('s-ecooverlaps', '🔀 Пересечения аудитории');
@@ -74,25 +146,13 @@ async function openEcoOverlaps(ecoId) {
         'Лишних подписок ' + num(dup) + ': столько раз люди повторяются в разных каналах экосистемы. ' +
         'Рассылка по всем каналам придёт им по нескольку раз — это главная причина жалоб и отписок.</div>';
     }
-    h += '<div class="sec">Пары каналов</div><div class="lst" style="margin:0 16px">';
-    h += pairs.map(function (p) {
-      const pct = p.overlap_pct || 0;
-      const tone = _eoTone(pct);
-      const w = Math.max(2, Math.min(100, Math.round(pct)));
-      return '<div class="row"><div class="row-body">' +
-        '<div class="row-name">' + esc(p.name_a) + ' ↔ ' + esc(p.name_b) + '</div>' +
-        '<div class="row-val" style="color:' + tone.c + '">' + pct.toFixed(1) + '% · общих ' + num(p.shared || 0) + '</div>' +
-        '<div style="height:5px;background:var(--sep);border-radius:3px;overflow:hidden;margin:5px 0 3px">' +
-          '<div style="height:100%;width:' + w + '%;background:' + tone.c + ';border-radius:3px"></div></div>' +
-        '<div style="font-size:11px;color:var(--hint);line-height:1.35">' + tone.t + '</div>' +
-        '<div style="display:flex;gap:6px;margin-top:7px">' +
-          '<button class="btn btn-s" style="font-size:11px;padding:5px 9px" onclick="openChannel(' +
-            Number(p.channel_a) + ')">' + esc(p.name_a).substring(0, 18) + ' →</button>' +
-          '<button class="btn btn-s" style="font-size:11px;padding:5px 9px" onclick="openChannel(' +
-            Number(p.channel_b) + ')">' + esc(p.name_b).substring(0, 18) + ' →</button>' +
-        '</div></div></div>';
-    }).join('');
-    h += '</div>';
+    _eoPairs = pairs;
+    h += '<div class="sec-row"><div class="sec">Пары каналов</div>' +
+      '<span class="sec-btn" onclick="eoCopyReport()" role="button" tabindex="0">📋 Отчёт</span></div>' +
+      '<label style="display:flex;gap:8px;align-items:center;margin:0 16px 8px;font-size:13px">' +
+        '<input type="checkbox" id="eoOnlyBig"' + (_eoOnlyBig() ? ' checked' : '') +
+        ' onchange="eoSetOnlyBig(this.checked)"> Только заметные (от ' + _EO_BIG + '%)</label>' +
+      '<div class="lst" id="eoPairs" style="margin:0 16px">' + _eoPairsHtml() + '</div>';
     h += '<div style="display:flex;gap:8px;padding:12px 16px 20px">' +
       '<button class="btn btn-s" style="flex:1;font-size:12px;padding:10px 6px" onclick="openMassPub()">📤 Публикация без дублей</button>' +
       '<button class="btn btn-s" style="flex:1;font-size:12px;padding:10px 6px" onclick="goTab(\'channels\')">📡 Мои каналы</button>' +
