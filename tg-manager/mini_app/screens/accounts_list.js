@@ -60,7 +60,7 @@ async function reauthAccount(id) {
     const r = await api(`/api/miniapp/account/${id}/action/reauth`, {method:'POST'});
     // Переавторизация интерактивна (код из Telegram) → показываем инструкцию, ведущую в бота.
     await askConfirm(errRu(r,'Переавторизация выполняется в боте: Аккаунты → 🔄 Переавторизатор → Релог.'));
-  } catch(e) { toast('⚠️ '+errRu(e,'Ошибка').substring(0,80)); }
+  } catch(e) { toast('⚠️ '+errRu(e,'Ошибка')); }
 }
 
 async function loadAccounts() {

@@ -61,7 +61,7 @@ async function loadMoreBots() {
     renderBots();
     if (BOT_SEL_MODE) updateBotSelBar();
   } catch(e) {
-    toast('⚠️ '+(errRu(e,'Ошибка').substring(0,60)));
+    toast('⚠️ '+(errRu(e,'Ошибка')));
     // Не оставляем застрявшую крутилку: у сценария всегда есть видимый выход.
     if (box) box.innerHTML = '<button class="btn btn-s" onclick="loadMoreBots()" style="width:100%;font-size:13px;padding:10px">↺ Повторить загрузку</button>';
   } finally { BOT_LOADING = false; }

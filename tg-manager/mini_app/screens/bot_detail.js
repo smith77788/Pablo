@@ -44,7 +44,7 @@ async function botPowerConfirm(botId, name, isActive) {
     loadBots();
     if (document.getElementById('s-botdetail')?.classList.contains('show') &&
         String(CUR_BOT?.id) === String(botId)) openBot(botId);
-  } catch(e) { toast('⚠️ '+errRu(e,'Ошибка').substring(0,60)); }
+  } catch(e) { toast('⚠️ '+errRu(e,'Ошибка')); }
 }
 
 async function botDeleteConfirm(botId, name) {
@@ -55,7 +55,7 @@ async function botDeleteConfirm(botId, name) {
     if (document.getElementById('s-botdetail')?.classList.contains('show') &&
         String(CUR_BOT?.id) === String(botId)) back();
     loadBots();
-  } catch(e) { toast('⚠️ '+errRu(e,'Ошибка').substring(0,60)); }
+  } catch(e) { toast('⚠️ '+errRu(e,'Ошибка')); }
 }
 
 function buildBotDetail(d) {
@@ -349,7 +349,7 @@ async function loadBotSubs(append) {
     moreEl.style.display = (BS_OFFSET < BS_TOTAL) ? 'block' : 'none';
   } catch(e) {
     if (!append) txt('bsList', errHtml(errRu(e), retryCall('loadBotSubs', append)));
-    else toast('⚠️ '+errRu(e,'Ошибка').substring(0,60));
+    else toast('⚠️ '+errRu(e,'Ошибка'));
   }
 }
 
@@ -483,7 +483,7 @@ async function clearBotCommands() {
     await api('/api/miniapp/bot/'+CMD_BOT_ID+'/commands', {method:'PUT', body:JSON.stringify({commands:[]})});
     toast('🗑 Все команды удалены');
     loadBotCommands();
-  } catch(e) { toast('⚠️ '+errRu(e,'Ошибка').substring(0,60)); }
+  } catch(e) { toast('⚠️ '+errRu(e,'Ошибка')); }
 }
 
 async function openBotStats(botId, botName) {
