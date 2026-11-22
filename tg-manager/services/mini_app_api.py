@@ -8876,6 +8876,25 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         return _json_resp({"ok": True, "policy": _cbs.to_public(brain),
                            "next_pillar": await _editorial_next_pillar(uid, brain)})
 
+    # Свои правила канала можно было завести, но не снять: канал навсегда
+    # отрывался от общих правил, и правка общих его больше не касалась.
+    async def editorial_policy_reset(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        from services import channel_brain_store as _cbs
+        key = await _editorial_key(request, uid)
+        if key is None:
+            return _err("Канал не найден среди ваших каналов", 404)
+        if key == _cbs.OWNER_DEFAULT_KEY:
+            return _err("Общие правила не удаляются — их можно только изменить", 400)
+        try:
+            removed = await _cbs.delete_profile(pool, uid, key)
+        except Exception:
+            log.exception("editorial_policy_reset uid=%s", uid)
+            return _err("Не удалось вернуть общие правила, попробуйте ещё раз", 500)
+        return _json_resp({"ok": True, "removed": removed})
+
     async def editorial_review_draft(request: web.Request) -> web.Response:
         """Совет редактора по черновику перед публикацией. Не блокирует её."""
         uid = _get_uid(request)
@@ -10247,6 +10266,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     app.router.add_post("/api/miniapp/check_bot_geoban", check_bot_geoban)
     app.router.add_get("/api/miniapp/editorial/policy", editorial_policy_get)
     app.router.add_put("/api/miniapp/editorial/policy", editorial_policy_save)
+    app.router.add_delete("/api/miniapp/editorial/policy", editorial_policy_reset)
     app.router.add_post("/api/miniapp/editorial/review", editorial_review_draft)
     # ── Прокси ───────────────────────────────────────────────────────────────
     mini_app_proxies.setup_routes(app, pool)
