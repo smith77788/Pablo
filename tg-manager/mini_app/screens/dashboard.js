@@ -224,7 +224,7 @@ function _udChip(ico, val, lbl, color) {
 // Мини-спарклайн из массива чисел / [{value}].
 function _udLine(series, color) {
   const vals = (series || []).map(p => typeof p === 'object' ? (p.value || 0) : (p || 0));
-  if (vals.length < 2) return '<div class="empty-inline">Нет данных</div>';
+  if (vals.length < 2) return '<div class="empty-inline">Пока мало точек для графика: нужно хотя бы два дня данных</div>';
   const W = 300, H = 54, max = Math.max(1, ...vals), min = Math.min(...vals);
   const rng = (max - min) || 1;
   const pts = vals.map((v, i) => {
@@ -272,7 +272,9 @@ function _udRenderAnalytics(d, rng) {
         `<span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">` +
         `${esc(c.name || c.username || c.title || '—')}</span>` +
         `<span style="font-weight:700">${_udNum(c.subscribers || c.value || 0)}</span></div>`).join('')
-    : '<div class="empty-inline">Нет данных</div>');
+    : '<div class="empty-inline">Каналов пока нет. ' +
+      ((typeof openChannels === 'function') ? '<span role="button" tabindex="0" style="color:var(--accent);cursor:pointer" onclick="openChannels()">Подключить канал ›</span>' : '') +
+      '</div>');
 
   const acts = d.recent_activity || [];
   const actCard = card('🕑 Последние события', acts.length
@@ -281,7 +283,7 @@ function _udRenderAnalytics(d, rng) {
         `<span style="flex:1;min-width:0">${esc(a.text || a.type || '—')}</span>` +
         (a.value != null ? `<span style="font-weight:700;color:var(--hint)">${esc(String(a.value))}</span>` : '') +
         '</div>').join('')
-    : '<div style="color:var(--hint);font-size:12px">Нет событий</div>');
+    : '<div style="color:var(--hint);font-size:12px">За период событий не было</div>');
 
   // Пульс здоровья, SEO и гео сервер отдаёт в этом же ответе с самого начала,
   // но экран их не рисовал — данные приходили и выбрасывались.
