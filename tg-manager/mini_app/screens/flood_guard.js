@@ -165,10 +165,16 @@ async function fgFlagRecent() {
   } catch (e) { toast('⚠️ ' + errRu(e, 'Не получилось, попробуйте ещё раз')); }
 }
 
+// Подтверждение называет, скольких затронет: «удалить безвозвратно» без
+// числа подписывает владельца на неизвестный объём. Ноль — нечего и спрашивать.
+function _fgPurgeText(hard, n) {
+  const who = n > 0 ? (n + ' ' + plural(n, 'накрученного подписчика', 'накрученных подписчика', 'накрученных подписчиков')) : 'накрученных подписчиков';
+  return hard ? 'Удалить ' + who + ' БЕЗВОЗВРАТНО?' : 'Убрать ' + who + ' из аудитории (мягко, можно вернуть)?';
+}
 async function fgPurge(hard) {
-  const msg = hard
-    ? 'Удалить накрученных подписчиков БЕЗВОЗВРАТНО?'
-    : 'Убрать накрученных из аудитории (мягко, можно вернуть)?';
+  const n = Number((_fgData && _fgData.suspect_count) || 0);
+  if (_fgData && _fgData.suspect_count != null && n === 0) { toast('ℹ️ Помеченных как накрутка нет'); return; }
+  const msg = _fgPurgeText(hard, n);
   if (!await askConfirm(msg)) return;
   try {
     const r = await api('/api/miniapp/flood/' + _fgBotId + '/purge',

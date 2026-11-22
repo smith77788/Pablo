@@ -67,3 +67,25 @@ def test_currency_list_names_every_main_currency():
     for code in owner_currency.MAIN_CURRENCIES:
         assert code + ":" in block, code
     assert "esc(_msCurLabel(c))" in co
+
+
+def test_project_journal_is_titled_by_name():
+    index = (SCREENS.parent / "index.html").read_text(encoding="utf-8")
+    m = re.search(r"\nfunction openOps\(projectId, projectName\) \{[\s\S]*?\n}\n", index)
+    assert m and "'Журнал: ' + pname" in m.group(0)
+    assert "openOps(project.id, project.name)" in PO
+
+
+def test_flood_purge_names_how_many():
+    fg = (SCREENS / "flood_guard.js").read_text(encoding="utf-8")
+    index = (SCREENS.parent / "index.html").read_text(encoding="utf-8")
+    plural = re.search(r"\nfunction plural\([\s\S]*?\n}\n", index).group(0)
+    fn = re.search(r"\nfunction _fgPurgeText\([\s\S]*?\n}\n", fg).group(0)
+    js = plural + fn + "console.log(JSON.stringify([_fgPurgeText(true, 3), _fgPurgeText(false, 1), _fgPurgeText(true, 0)]))"
+    out = subprocess.run(["node", "-e", js], check=False, capture_output=True, text=True, timeout=30)
+    assert out.returncode == 0, out.stderr
+    hard3, soft1, hard0 = json.loads(out.stdout)
+    assert hard3 == "Удалить 3 накрученных подписчика БЕЗВОЗВРАТНО?"
+    assert soft1 == "Убрать 1 накрученного подписчика из аудитории (мягко, можно вернуть)?"
+    assert hard0 == "Удалить накрученных подписчиков БЕЗВОЗВРАТНО?"
+    assert "toast('ℹ️ Помеченных как накрутка нет')" in fg
