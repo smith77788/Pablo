@@ -52,6 +52,7 @@ async function accPhoneStart(){
   try{
     const r=await api('/api/miniapp/account/add/phone/start',{method:'POST',body:JSON.stringify({phone,proxy_id:_accProxy().id})});
     _accLoginPhone=phone; _accLoginHash=r.phone_code_hash;
+    accCodeTyped.last='';  // новый код — снова можно подтвердить сам
     document.getElementById('accPhoneStep-code').style.display='block';
     // Код Telegram отдаёт в приложение. Если живая сессия этого номера есть у
     // нас, ждать доставки владельцу не нужно — код читается из служебного чата.
@@ -61,8 +62,19 @@ async function accPhoneStart(){
   finally{ b.disabled=false; b.textContent='📨 Отправить код'; }
 }
 
+// Код из Telegram часто вставляют с пробелами или дефисами («1 2 3 4 5»:
+// так его пересылают, чтобы Telegram не сжёг код в чате). Сервер ждёт цифры.
+function accCodeDigits(v){ return String(v||'').replace(/\D/g,''); }
+
+// Пять цифр — полный код Telegram: подтверждаем сразу, без лишнего тапа.
+// Один раз на значение: правка того же кода не шлёт его повторно.
+function accCodeTyped(el){
+  const d=accCodeDigits(el && el.value);
+  if(d.length===5 && accCodeTyped.last!==d){ accCodeTyped.last=d; accPhoneCode(); }
+}
+
 async function accPhoneCode(){
-  _accErr(''); const code=(document.getElementById('accPhoneCode').value||'').trim();
+  _accErr(''); const code=accCodeDigits(document.getElementById('accPhoneCode').value);
   if(!code){ _accErr('Введите код из Telegram'); return; }
   const b=document.getElementById('accPhoneCodeBtn'); b.disabled=true; b.textContent='⏳ Проверяю…';
   try{
@@ -105,6 +117,7 @@ async function accPhoneResend(){
       return {flood:true, retry_after:(r.retry_after||0)};
     }
     if(r&&r.phone_code_hash) _accLoginHash=r.phone_code_hash;  // хэш после ResendCode меняется
+    accCodeTyped.last='';
     _accResendNote((r&&r.hint)?r.hint:'Код запрошен повторно. Введите его, как получите.');
     toast((r&&r.hint)?r.hint:'Код запрошен повторно');
     return {ok:true, timeout:((r&&r.timeout)||0)};

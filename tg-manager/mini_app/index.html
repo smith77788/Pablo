@@ -8523,13 +8523,13 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
     <div id="accMethod-phone" style="display:none">
       <div class="field" id="accPhoneStep-phone">
         <label>Номер телефона</label>
-        <input type="tel" id="accPhoneNum" placeholder="+71234567890" style="width:100%;padding:10px;border-radius:var(--radius);border:1.5px solid var(--border-input);background:var(--bg-input);color:var(--text);font-size:14px;box-sizing:border-box">
+        <input type="tel" id="accPhoneNum" onkeydown="if(event.key==='Enter'){event.preventDefault();accPhoneStart()}" placeholder="+71234567890" style="width:100%;padding:10px;border-radius:var(--radius);border:1.5px solid var(--border-input);background:var(--bg-input);color:var(--text);font-size:14px;box-sizing:border-box">
         <div class="field-note">Telegram пришлёт код в приложение на этом номере.</div>
         <button class="btn btn-p" data-main id="accPhoneStartBtn" onclick="accPhoneStart()" style="width:100%;margin-top:8px">📨 Отправить код</button>
       </div>
       <div class="field" id="accPhoneStep-code" style="display:none">
         <label>Код из Telegram</label>
-        <input type="text" inputmode="numeric" id="accPhoneCode" placeholder="12345" style="width:100%;padding:10px;border-radius:var(--radius);border:1.5px solid var(--border-input);background:var(--bg-input);color:var(--text);font-size:14px;box-sizing:border-box">
+        <input type="text" inputmode="numeric" autocomplete="one-time-code" id="accPhoneCode" placeholder="12345" oninput="accCodeTyped(this)" style="width:100%;padding:10px;border-radius:var(--radius);border:1.5px solid var(--border-input);background:var(--bg-input);color:var(--text);font-size:14px;box-sizing:border-box">
         <button class="btn btn-p" id="accPhoneCodeBtn" onclick="accPhoneCode()" style="width:100%;margin-top:8px">✅ Подтвердить код</button>
         <div style="display:flex;gap:8px;margin-top:8px">
           <button class="btn btn-s" id="accPhoneResendBtn" onclick="accPhoneResend()" style="flex:1 1 50%;font-size:13px;padding:10px 6px">🔁 Запросить ещё раз</button>
@@ -8547,7 +8547,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
       </div>
       <div class="field" id="accPhoneStep-2fa" style="display:none">
         <label>Пароль 2FA (облачный пароль)</label>
-        <input type="password" id="accPhone2fa" placeholder="пароль двухфакторной защиты" style="width:100%;padding:10px;border-radius:var(--radius);border:1.5px solid var(--border-input);background:var(--bg-input);color:var(--text);font-size:14px;box-sizing:border-box">
+        <input type="password" id="accPhone2fa" onkeydown="if(event.key==='Enter'){event.preventDefault();accPhone2fa()}" placeholder="пароль двухфакторной защиты" style="width:100%;padding:10px;border-radius:var(--radius);border:1.5px solid var(--border-input);background:var(--bg-input);color:var(--text);font-size:14px;box-sizing:border-box">
         <button class="btn btn-p" id="accPhone2faBtn" onclick="accPhone2fa()" style="width:100%;margin-top:8px">🔓 Подтвердить 2FA</button>
       </div>
     </div>
@@ -8562,7 +8562,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
       </div>
       <div class="field" id="accQrStep-2fa" style="display:none">
         <label>Пароль 2FA</label>
-        <input type="password" id="accQr2fa" placeholder="облачный пароль" style="width:100%;padding:10px;border-radius:var(--radius);border:1.5px solid var(--border-input);background:var(--bg-input);color:var(--text);font-size:14px;box-sizing:border-box">
+        <input type="password" id="accQr2fa" onkeydown="if(event.key==='Enter'){event.preventDefault();accQr2fa()}" placeholder="облачный пароль" style="width:100%;padding:10px;border-radius:var(--radius);border:1.5px solid var(--border-input);background:var(--bg-input);color:var(--text);font-size:14px;box-sizing:border-box">
         <button class="btn btn-p" id="accQr2faBtn" onclick="accQr2fa()" style="width:100%;margin-top:8px">🔓 Подтвердить 2FA</button>
       </div>
     </div>

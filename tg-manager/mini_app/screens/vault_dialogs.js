@@ -256,7 +256,14 @@ function vaultBubblesHtml(msgs, prevIso) {
 // Отмечаем по одному тем же запросом, что и меню строки, — сервер ничего
 // нового не знает, а если часть не прошла, остальные уже прочитаны.
 function vaultReadAllBar(chats) {
-  if (VAULT_FOLDER !== 'unread' || VAULT_READ_ONLY) return '';
+  if (VAULT_READ_ONLY) return '';
+  // «Ждут ответа»: ответили другим путём (звонок, другой чат) — разом снять
+  // всех, а не долгим нажатием на каждом. Обратимо: «Снять отвечено» в меню.
+  if (VAULT_FOLDER === 'waiting') {
+    const w = (chats || []).filter(c => c.awaiting_reply).length;
+    return w ? `<div class="vread-all"><button class="btn btn-s" onclick="vaultHandleAll()">✅ Отметить все отвеченными (${w})</button></div>` : '';
+  }
+  if (VAULT_FOLDER !== 'unread') return '';
   const n = (chats || []).filter(c => c.unread).length;
   if (!n) return '';
   return `<div class="vread-all"><button class="btn btn-s" onclick="vaultReadAll()">👁 Прочитать все (${n})</button></div>`;
@@ -274,5 +281,21 @@ async function vaultReadAll() {
     } catch (e) { bad++; }
   }
   toast(bad ? `👁 Прочитано: ${ok}, не получилось: ${bad}` : `👁 Прочитано: ${ok}`);
+  try { await reloadVaultDialogs(); } catch (e) { toast('⚠️ ' + errRu(e, 'Не удалось обновить список')); }
+}
+
+async function vaultHandleAll() {
+  const ids = (_VAULT_CHATS || []).filter(c => c.awaiting_reply).map(c => c.chat_id);
+  if (!ids.length) return;
+  if (!await askConfirm(`Отметить отвеченными ${ids.length} ${plural(ids.length, 'диалог', 'диалога', 'диалогов')}? Напоминаний о них не будет, пока человек не напишет снова. Снять отметку можно в меню диалога.`)) return;
+  let ok = 0, bad = 0;
+  for (const cid of ids) {
+    try {
+      await api(vaultPath('/api/miniapp/vault/chat/' + cid + '/state'),
+                {method: 'POST', body: JSON.stringify({handled: true})});
+      ok++;
+    } catch (e) { bad++; }
+  }
+  toast(bad ? `✅ Отмечено: ${ok}, не получилось: ${bad}` : `✅ Отмечено отвеченными: ${ok}`);
   try { await reloadVaultDialogs(); } catch (e) { toast('⚠️ ' + errRu(e, 'Не удалось обновить список')); }
 }
