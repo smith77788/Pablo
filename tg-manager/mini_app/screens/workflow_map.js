@@ -60,7 +60,7 @@ function wfEdges(steps) {
   return out;
 }
 
-function _wfmSvg(steps, stats) {
+function _wfmSvg(steps, stats, editable) {
   const n = steps.length;
   const W = 230, BX = 4, BH = 50, GAP = 28, LANE = 14;
   const edges = wfEdges(steps);
@@ -100,11 +100,14 @@ function _wfmSvg(steps, stats) {
     const t = (s && typeof s.type === 'string') ? s.type : '';
     const y = yOf(i), r = reached(i), dr = dropped(i);
     const body = String(s.text || s.condition || s.action || s.url || (t === 'delay' ? (s.delay_minutes ? s.delay_minutes + ' мин' : (s.until_time ? 'до ' + s.until_time : '')) : '') || '').replace(/\s+/g, ' ').slice(0, dr ? 20 : 32);   // справа от текста — «↘ N ушли»
-    svg += `<rect x="${BX}" y="${y}" width="${W}" height="${BH}" rx="10" fill="var(--bg2)" stroke="var(--border-strong)"/>
+    // Шаг на схеме — дверь в его правку: увидев на схеме ошибку в ветке,
+    // владелец закрывал схему и искал тот же шаг в столбце по номеру.
+    const open = editable ? `<g style="cursor:pointer" role="button" tabindex="0" aria-label="Изменить шаг ${i + 1}" onclick="wfMapEditStep(${i})">` : '<g>';
+    svg += `${open}<rect x="${BX}" y="${y}" width="${W}" height="${BH}" rx="10" fill="var(--bg2)" stroke="var(--border-strong)"/>
       <text x="${BX + 10}" y="${y + 19}" font-size="12" font-weight="700" fill="var(--text)">${i + 1}. ${_WFM_ICON[t] || '•'} ${esc(_WFM_NAME[t] || t || 'Шаг')}</text>
       <text x="${BX + 10}" y="${y + 37}" font-size="11" fill="var(--hint)">${esc(body)}</text>
       ${r != null ? `<text x="${BX + W - 10}" y="${y + 19}" font-size="11" text-anchor="end" fill="var(--hint)">👥 ${num(r)}</text>` : ''}
-      ${dr ? `<text x="${BX + W - 10}" y="${y + 37}" font-size="11" text-anchor="end" fill="var(--red)">↘ ${num(dr)} ушли</text>` : ''}`;
+      ${dr ? `<text x="${BX + W - 10}" y="${y + 37}" font-size="11" text-anchor="end" fill="var(--red)">↘ ${num(dr)} ушли</text>` : ''}</g>`;
   });
   svg += labels;
   const ye = yOf(endIdx);
@@ -143,6 +146,16 @@ async function openWorkflowMap(wfId) {
   if (d.name) txt('wfMapTitle', '🗺 ' + esc(d.name));
   const steps = d.steps || [];
   if (!steps.length) { txt('wfMapBody', empty('🗺', 'Шагов пока нет', 'Добавьте шаги — схема появится здесь.')); return; }
-  txt('wfMapBody', '<div style="overflow-x:auto;-webkit-overflow-scrolling:touch">' + _wfmSvg(steps, d.stats) + '</div>' +
-    '<div class="hint" style="margin-top:8px">Короткая стрелка — следующий шаг. Дуга справа — переход или ветка, подпись — условие перехода. 👥 — сколько людей дошли до шага, ↘ — сколько ушли после него, не дойдя до конца (ошибка, истёк срок, остановлен).</div>');
+  // Править можно только свой сценарий из его же экрана: у воронок старого
+  // типа (legacy) шаги не редактируются, а форма шага привязана к открытому
+  // сценарию.
+  const editable = !d.legacy_kind && typeof _currentWfId !== 'undefined' && Number(_currentWfId) === Number(wfId)
+    && typeof openWfAddStepModal === 'function';
+  txt('wfMapBody', '<div style="overflow-x:auto;-webkit-overflow-scrolling:touch">' + _wfmSvg(steps, d.stats, editable) + '</div>' +
+    '<div class="hint" style="margin-top:8px">' + (editable ? 'Нажмите на шаг, чтобы изменить его. ' : '') + 'Короткая стрелка — следующий шаг. Дуга справа — переход или ветка, подпись — условие перехода. 👥 — сколько людей дошли до шага, ↘ — сколько ушли после него, не дойдя до конца (ошибка, истёк срок, остановлен).</div>');
+}
+
+function wfMapEditStep(i) {
+  closeModal('mo-wf-map');
+  openWfAddStepModal(Number(i));
 }
