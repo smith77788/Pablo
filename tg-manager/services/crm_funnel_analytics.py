@@ -48,6 +48,7 @@
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 import math
 from datetime import datetime, timedelta, timezone
@@ -350,8 +351,11 @@ async def report(pool, owner_id: int, window_days: int = DEFAULT_WINDOW) -> dict
         window_days = DEFAULT_WINDOW
     main = await owner_main_currency(pool, owner_id)
     deals, hist = await gather(pool, owner_id, main)
-    out = analyze(deals, hist, now=datetime.now(timezone.utc),
-                  window_days=window_days, main_currency=main)
+    # Разбор — чистый Python по всем сделкам и переходам владельца; в потоке,
+    # чтобы не останавливать цикл событий процесса (бот, исполнитель операций).
+    out = await asyncio.to_thread(
+        analyze, deals, hist, now=datetime.now(timezone.utc),
+        window_days=window_days, main_currency=main)
     for row in out["stages"]:
         row["label"] = STAGE_LABELS.get(row["stage"], row["stage"])
     for row in out["stuck"]:

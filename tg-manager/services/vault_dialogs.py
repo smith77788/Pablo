@@ -15,6 +15,7 @@
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 import re
 from typing import Any
@@ -259,7 +260,15 @@ async def dialogs(pool, owner_id: int, *, folder: str = "all", q: str = "",
     вкладки показывали числа без лишних запросов.
     """
     folder = folder if folder in FOLDERS else "all"
-    items = [_ui(d) for d in await _rows(pool, owner_id)]
+    rows = await _rows(pool, owner_id)
+    # Разбор — чистый Python по всем диалогам владельца; в потоке, чтобы не
+    # останавливать цикл событий процесса (бот и исполнитель операций).
+    return await asyncio.to_thread(_assemble, rows, folder, q, limit, offset)
+
+
+def _assemble(rows: list[dict], folder: str, q: str, limit: int, offset: int) -> dict:
+    """Чистая часть `dialogs`: строки экрана, счётчики папок, отбор и страница."""
+    items = [_ui(d) for d in rows]
     counts = {
         "all": sum(1 for c in items if not c["archived"]),
         "unread": sum(1 for c in items if c["unread"] and not c["archived"]),

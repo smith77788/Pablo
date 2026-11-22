@@ -30,6 +30,7 @@
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 from datetime import date, datetime, timedelta, timezone
 
@@ -324,7 +325,10 @@ async def report(pool, owner_id: int, grain: str = "month", periods: int | None 
     since = datetime(first.year, first.month, first.day, tzinfo=timezone.utc)
     conv, money = await owner_currency.load(pool, owner_id, fetch=fetch_rates)
     sources, orders, activity = await gather(pool, owner_id, since)
-    out = build(acquisition(sources), orders, activity, grain=grain, periods=periods,
-                now=now, convert=conv.convert)
+    # Сборка — чистый Python по всем касаниям владельца; в потоке, чтобы не
+    # останавливать цикл событий процесса.
+    out = await asyncio.to_thread(
+        lambda: build(acquisition(sources), orders, activity, grain=grain,
+                      periods=periods, now=now, convert=conv.convert))
     out["money"] = money
     return out

@@ -10,6 +10,7 @@ from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
+from bot.utils.paging import page_label
 from bot.callbacks import BmCb, GraphCb
 from services import graph_engine
 from bot.utils.op_helpers import safe_answer
@@ -81,18 +82,25 @@ async def cb_graph_overlaps(
         text = "\n".join(lines)
 
     kb = InlineKeyboardBuilder()
+    nav = 0
     if page > 0:
         kb.button(
             text="◀️",
             callback_data=GraphCb(action="overlaps", page=page - 1),
         )
+        nav += 1
+    lbl = page_label(page, len(overlaps), per_page)
+    if lbl:
+        kb.button(text=lbl, callback_data=GraphCb(action="overlaps", page=page))
+        nav += 1
     if len(overlaps) > (page + 1) * per_page:
         kb.button(
             text="▶️",
             callback_data=GraphCb(action="overlaps", page=page + 1),
         )
+        nav += 1
     kb.button(text="◀️ Назад", callback_data=GraphCb(action="menu"))
-    kb.adjust(2, 1)
+    kb.adjust(*([nav] if nav else []), 1)
 
     await callback.message.edit_text(text, parse_mode="HTML", reply_markup=kb.as_markup())
 
