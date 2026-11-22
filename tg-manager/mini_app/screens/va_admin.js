@@ -81,9 +81,9 @@ async function _vaMutate(path, options, config) {
   } catch (e) {
     if (_vaWorkspace.current(ticket)) {
       const err = (config.error && document.getElementById(config.error)) || root.querySelector('[data-va-action]');
-      if (err) { err.textContent = e.message || 'Не получилось'; err.style.display = 'block'; }
-      else toast('⚠️ ' + (e.message || 'Не получилось'));
-    } else toast('Не удалось выполнить действие с каналом: ' + (e.message || 'ошибка'));
+      if (err) { err.textContent = errRu(e, 'Не получилось'); err.style.display = 'block'; }
+      else toast('⚠️ ' + errRu(e, 'Не получилось'));
+    } else toast('Не удалось выполнить действие с каналом: ' + errRu(e, 'ошибка'));
   } finally {
     _vaWorkspace.unlock(key);
     if (btn && btn.isConnected) { btn.disabled = false; btn.textContent = label; }
@@ -178,7 +178,7 @@ async function _vaLoadList() {
     d = await api(_vaListUrl(true));
   } catch (e) {
     if (!_vaWorkspace.current(ticket)) return;
-    body.innerHTML = errHtml('Не удалось загрузить каналы: ' + ((e && e.message) || ''), '_vaLoadList()');
+    body.innerHTML = errHtml('Не удалось загрузить каналы: ' + errRu(e), '_vaLoadList()');
     return;
   }
   if (!_vaWorkspace.current(ticket)) return;
@@ -252,7 +252,7 @@ async function _vaLoadChannelsPage(append) {
     _vaListPage = Number(data.page) || 0;
   } catch (e) {
     if (_vaWorkspace.current(ticket)) {
-      _vaListError = e.message || 'Не удалось загрузить список';
+      _vaListError = errRu(e, 'Не удалось загрузить список');
       if (append) _vaListPage = Math.max(0, _vaListPage - 1);
     }
   } finally {
@@ -465,7 +465,7 @@ async function vaDraftAct(id, action, reason, draftContext) {
       method: 'POST', body: JSON.stringify({ reason: reason || '', body: edited }), timeoutMs: 180000 });
     toast(action === 'publish' ? (edited ? '✅ Правка отправлена в канал' : '✅ Отправлено в канал') : (action === 'regenerate' ? '✅ Новый вариант готов' : 'Пропущено'));
   } catch (e) {
-    toast('⚠️ ' + ((e && e.message) || 'Не получилось'));
+    toast('⚠️ ' + errRu(e, 'Не получилось'));
   } finally {
     _vaWorkspace.unlock(key);
   }
@@ -492,7 +492,7 @@ async function _vaLoadChannel() {
     if (_vaWorkspace.current(ticket)) _vaRenderForm(body, key, _vaChannelHtml(d));
   } catch (e) {
     if (!_vaWorkspace.current(ticket)) return;
-    body.innerHTML = errHtml('Не удалось загрузить канал: ' + ((e && e.message) || ''), '_vaLoadChannel()');
+    body.innerHTML = errHtml('Не удалось загрузить канал: ' + errRu(e), '_vaLoadChannel()');
   }
 }
 
@@ -941,7 +941,7 @@ async function vaMediaLoad(cid) {
         '<button class="btn btn-s" onclick="vaMediaRemove(\'' + esc(cid) + '\',' + Number(item.id) + ')">Отключить</button></div></div>';
     }).join('') || 'Пока нет одобренных изображений.';
   } catch (e) {
-    if (box.isConnected) box.textContent = (e && e.message) || 'Не удалось загрузить медиатеку';
+    if (box.isConnected) box.textContent = errRu(e, 'Не удалось загрузить медиатеку');
   }
 }
 
@@ -958,7 +958,7 @@ async function vaMediaPreview(cid, id, button) {
     img.style.cssText = 'display:block;max-width:100%;max-height:360px;object-fit:contain;margin-top:8px;border-radius:8px';
     button.replaceWith(img);
   } catch (e) {
-    toast((e && e.message) || 'Не удалось показать фото');
+    toast(errRu(e, 'Не удалось показать фото'));
   } finally { button.disabled = false; }
 }
 
@@ -967,7 +967,7 @@ async function vaMediaRemove(cid, id) {
   try {
     await api('/api/miniapp/va/channel/' + encodeURIComponent(cid) + '/media/' + id, {method:'DELETE'});
     if (String(cid) === String(_vaCid)) await vaMediaLoad(cid);
-  } catch (e) { toast((e && e.message) || 'Не удалось отключить изображение'); }
+  } catch (e) { toast(errRu(e, 'Не удалось отключить изображение')); }
 }
 
 function _vaVal(id) { const el = document.getElementById(id); return el ? el.value : undefined; }
@@ -1048,7 +1048,7 @@ async function vaLoadStrategy() {
     _vaRenderForm(body, 'strategy', _vaStrategyHtml(data.settings || {}));
   } catch (e) {
     if (!_vaWorkspace.current(ticket)) return;
-    body.innerHTML = errHtml(e.message || 'Не удалось загрузить стратегию', 'vaLoadStrategy()');
+    body.innerHTML = errHtml(errRu(e, 'Не удалось загрузить стратегию'), 'vaLoadStrategy()');
   }
 }
 
@@ -1109,6 +1109,6 @@ async function vaSaveStrategy() {
     } else await vaLoadStrategy();
     toast('Стратегия сохранена');
   } catch (e) {
-    err.textContent = e.message || 'Не удалось сохранить'; err.style.display = 'block';
+    err.textContent = errRu(e, 'Не удалось сохранить'); err.style.display = 'block';
   } finally { _vaWorkspace.unlock('strategy'); btn.disabled = false; _vaDraftNotice(body); }
 }

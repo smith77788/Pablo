@@ -113,6 +113,9 @@ async function adIntelLoad(append) {
   try {
     const d = await api(url);
     const items = d.items || [];
+    // Показанное копится для выгрузки: CSV отдаёт ровно то, что видно.
+    adIntelLoad.items = (append && adIntelLoad.tab === tab ? adIntelLoad.items || [] : []).concat(items);
+    adIntelLoad.tab = tab;
     if (tab === 'channels') adIntelFiltersChannels(d.niches || []);
     else if (tab === 'advertisers') adIntelFiltersAdv();
     else adIntelFiltersAds();
@@ -132,9 +135,11 @@ async function adIntelLoad(append) {
       el.innerHTML = html;
     }
     const shown = _adi.offset + items.length;
-    txt('adIntelMore', d.has_more
+    const csv = adIntelLoad.items.length
+      ? `<button class="btn btn-s" style="width:100%;margin-top:8px" onclick="adIntelExportCsv()">⬇️ Выгрузить показанное в CSV · ${num(adIntelLoad.items.length)}</button>` : '';
+    txt('adIntelMore', (d.has_more
       ? `<button class="btn btn-s" style="width:100%" onclick="adIntelMore()">Показать ещё · ${num(shown)} из ${num(d.total||0)}</button>`
-      : (d.total ? `<div class="field-note" style="text-align:center">Всего: ${num(d.total)}</div>` : ''));
+      : (d.total ? `<div class="field-note" style="text-align:center">Всего: ${num(d.total)}</div>` : '')) + csv);
   } catch (e) {
     if (!append) el.innerHTML = errHtml(errRu(e), 'adIntelReload()');
     else toast('⚠️ ' + errRu(e));
@@ -161,6 +166,42 @@ function adIntelFiltersAds() {
     adiChip(l, (_adi.days||0) === d, `adIntelSetFilter('days',${d})`));
   chips.push(adiChip('С маркировкой erid', _adi.erid, "adIntelSetFilter('erid')"));
   txt('adIntelFilters', chips.join(''));
+}
+
+// ── Выгрузка ─────────────────────────────────────────────────────────────
+// Подборка каналов под закупку, список рекламодателей или объявлений —
+// в таблицу одним файлом, с теми же отборами и сортировкой, что на экране.
+// Доли — в процентах, как на экране, а не долями.
+function adIntelCsv(tab, items) {
+  const pct = x => ((Number(x) || 0) * 100).toFixed(1).replace('.', ',');
+  const heads = {
+    channels: ['Канал', 'Ссылка', 'Подписчики', 'Охват, %', 'ER, %', 'Рекламы в неделю', 'Цена поста, ₽', 'Качество', 'Ниша'],
+    advertisers: ['Рекламодатель', 'Тип', 'Размещений', 'Каналов', 'Просмотров', 'Последний раз'],
+    ads: ['Дата', 'Канал', 'Рекламодатель', 'Просмотры', 'ER, %', 'erid', 'Текст'],
+  };
+  const row = {
+    channels: c => [c.title || '', c.username ? 'https://t.me/' + c.username : '', c.subscribers || 0, pct(c.reach_rate),
+      pct(c.engagement_rate), String(c.ads_per_week || 0).replace('.', ','), c.ad_price_rub || '', Math.round(Number(c.quality_score) || 0), c.niche || ''],
+    advertisers: a => [a.username || '', a.kind_label || a.kind || '', a.placements || 0, a.channels || 0, a.views || 0, a.last_seen || ''],
+    ads: a => [a.date || '', a.channel ? '@' + a.channel : '', a.advertiser || '', a.views || 0, pct(a.er), a.has_erid ? 'да' : 'нет',
+      String(a.text || '').replace(/\s+/g, ' ').slice(0, 500)],
+  };
+  if (!heads[tab]) return '';
+  const q = v => '"' + String(v == null ? '' : v).replace(/"/g, '""') + '"';
+  return [heads[tab]].concat((items || []).map(row[tab])).map(r => r.map(q).join(';')).join('\r\n');
+}
+
+function adIntelExportCsv() {
+  const tab = adIntelLoad.tab, items = adIntelLoad.items || [];
+  if (!items.length) { toast('Нечего выгружать'); return; }
+  const name = {channels: 'kanaly', advertisers: 'reklamodateli', ads: 'obyavleniya'}[tab] || 'razvedka';
+  const blob = new Blob(['\ufeff' + adIntelCsv(tab, items)], {type: 'text/csv;charset=utf-8'});
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'razvedka_' + name + '_' + new Date().toISOString().slice(0, 10) + '.csv';
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+  toast('⬇️ Выгружено: ' + num(items.length));
 }
 
 // ── Строки ───────────────────────────────────────────────────────────────
