@@ -19,6 +19,7 @@ from aiogram.types import BufferedInputFile, CallbackQuery, Message
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from aiogram.filters import Command, StateFilter
+from bot.utils.op_names import op_name
 from bot.keyboards import main_menu
 from bot.utils.picker_cap import cap_slice as _cap, cap_note_button as _cap_note
 from bot.utils.subscription import get_free_mode, set_free_mode
@@ -3284,7 +3285,7 @@ async def _adm_platform_ops(callback: CallbackQuery, pool: asyncpg.Pool) -> None
     if top_ops:
         lines.append("\n🔝 <b>Топ операций (7 дней):</b>")
         for row in top_ops:
-            lines.append(f"• {row['op_type']}: <b>{row['cnt']}</b>")
+            lines.append(f"• {_html.escape(op_name(row['op_type'], None))}: <b>{row['cnt']}</b>")
 
     # ML Pacing Engine health — адаптивный темп на основе истории флудов/банов
     try:

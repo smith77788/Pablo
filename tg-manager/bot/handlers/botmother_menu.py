@@ -25,6 +25,7 @@ from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message
 from aiogram.utils.keyboard import InlineKeyboardBuilder
+from bot.utils.op_names import op_name, status_label
 from bot.utils.picker_cap import cap_slice as _cap, cap_note_button as _cap_note
 
 import os as _os
@@ -144,12 +145,7 @@ log = logging.getLogger(__name__)
 router = Router()
 
 
-def _op_name(op_type) -> str:
-    """Название операции по-русски (реестр operation_bus) вместо кода
-    «mass_invite»: владелец английского не читает."""
-    from services import operation_bus as _ob
-    meta = _ob.OP_REGISTRY.get(str(op_type or ""), {})
-    return meta.get("description") or "Операция"
+from bot.utils.op_names import op_name as _op_name  # noqa: E402
 
 def _lock(user_plan: str, required: str) -> str:
     from bot.utils.subscription import PLAN_LEVELS, coerce_plan
@@ -2807,7 +2803,7 @@ async def cb_op_cancel(
         return
     if row["status"] not in ("pending", "running", "waiting_approval"):
         await callback.answer(
-            f"Нельзя отменить операцию со статусом: {row['status']}", show_alert=True
+            f"Нельзя отменить операцию: она {status_label(row['status'])}", show_alert=True
         )
         return
 
@@ -2886,7 +2882,7 @@ async def cb_op_csv(
         caption=(
             f"📋 <b>Лог операции #{op_id}</b>\n"
             f"Тип: {html.escape(op['op_type'])}\n"
-            f"Статус: {op['status']} | {op['done_items']}/{op['total_items'] or '?'} шагов"
+            f"Статус: {status_label(op['status'])} | {op['done_items']}/{op['total_items'] or '?'} шагов"
         ),
         parse_mode="HTML",
     )

@@ -38,3 +38,18 @@ def test_operation_names_are_russian_in_bot_screens():
         assert 'escape(op["op_type"])' not in src, name
     assert "<code>{op['op_type']}</code>" not in (root / "approval_flow.py").read_text(encoding="utf-8")
     assert "[{op['status']}]" not in (root / "mass_ops.py").read_text(encoding="utf-8")
+
+
+def test_shared_op_names_helper():
+    from pathlib import Path
+    from bot.utils.op_names import op_name, status_label
+    assert op_name("mass_invite") == "Массовый инвайт участников в группы"
+    assert op_name("zzz_unknown") == "Операция"
+    assert op_name("zzz_unknown", None) == "zzz_unknown"
+    assert status_label("paused") == "на паузе"
+    root = Path(__file__).resolve().parents[1] / "bot/handlers"
+    bm = (root / "botmother_menu.py").read_text(encoding="utf-8")
+    assert "со статусом: {row['status']}" not in bm
+    assert "Статус: {op['status']}" not in bm
+    for name in ("botmother_menu.py", "channel_ops.py", "mass_ops.py", "approval_flow.py"):
+        assert "def _op_name(" not in (root / name).read_text(encoding="utf-8"), name
