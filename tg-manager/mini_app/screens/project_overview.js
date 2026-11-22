@@ -26,7 +26,12 @@ function renderHomeProjects(section, data) {
       openNetworkBuilder();
       openNetBuilderCreateModal();
     });
-    list.append(create);
+    // Голая кнопка без слов не объясняла, что такое проект и зачем он.
+    const hint = document.createElement('div');
+    hint.className = 'hint';
+    hint.style.margin = '8px 0 0';
+    hint.textContent = 'Проектов пока нет. Проект собирает каналы, ботов и чаты в одну сеть.';
+    list.append(create, hint);
     return;
   }
   for (const project of data.projects) {

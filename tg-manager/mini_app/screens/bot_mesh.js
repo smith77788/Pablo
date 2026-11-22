@@ -37,7 +37,7 @@ async function openBotMesh(keep) {
       return;
     }
     txt('botmeshList', tasks.map(t=>{
-      const [cls, lbl] = MESH_ST[t.status] || ['b-gy', t.status||''];
+      const [cls, lbl] = MESH_ST[t.status] || ['b-gy', 'другое'];
       const steps = (t.route||[]).length;
       const where = steps
         ? `шаг ${num(Math.min((t.step||0)+1, steps))} из ${num(steps)}`
@@ -68,7 +68,7 @@ async function openBotMeshTask(taskId, keep) {
   try {
     const d = await api('/api/miniapp/mesh/task/'+encodeURIComponent(taskId));
     openBotMeshTask.last = d;
-    const [cls, lbl] = MESH_ST[d.status] || ['b-gy', d.status||''];
+    const [cls, lbl] = MESH_ST[d.status] || ['b-gy', 'другое'];
     const hops = d.hops||[];
     txt('botmeshStop', d.status === 'running'
       ? '<button class="btn btn-d" style="padding:7px 14px;font-size:13px" onclick="meshStopTask()">Прервать</button>'
@@ -95,7 +95,7 @@ async function openBotMeshTask(taskId, keep) {
     const OUT = {accepted:['b-bl','принято'], handled:['b-gr','выполнено'],
                  dropped:['b-or','отброшено'], failed:['b-rd','ошибка']};
     txt('botmeshDetail', head + '<div class="lst">' + hops.map(h=>{
-      const [oc, ol] = OUT[h.outcome] || ['b-gy', h.outcome||''];
+      const [oc, ol] = OUT[h.outcome] || ['b-gy', 'другое'];
       // Шаг трассы был текстом: бота, который принял работу, открыть нельзя.
       // Дверь ведёт к исполнителю (to_id), а если его карточки нет — к тому,
       // кто передал: это единственные два бота, о которых шаг что-то знает.

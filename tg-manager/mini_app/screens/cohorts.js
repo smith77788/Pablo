@@ -216,6 +216,14 @@ async function openMoneySettings() {
   }
 }
 
+// В выпадашке стояли голые коды «KZT», «UZS», «BYN» — их помнит не каждый.
+// Ключи — services/owner_currency.MAIN_CURRENCIES.
+const MS_CUR_NAME = {
+  RUB: 'рубль', USD: 'доллар', EUR: 'евро', KZT: 'тенге', UAH: 'гривна',
+  BYN: 'бел. рубль', UZS: 'сум', TRY: 'лира', GBP: 'фунт', CNY: 'юань',
+};
+function _msCurLabel(c) { return MS_CUR_NAME[c] ? c + ' — ' + MS_CUR_NAME[c] : c; }
+
 function _msRender() {
   const body = document.getElementById('s-moneyset-body');
   const d = _msData || {};
@@ -228,7 +236,7 @@ function _msRender() {
   out += '<div class="sec">Основная валюта</div><div style="margin:0 16px">' +
     '<select id="ms-cur" class="inp" style="width:100%" onchange="msChangeMain(this.value)">' +
     (d.choices || ['RUB']).map(function (c) {
-      return '<option value="' + esc(c) + '"' + (c === main ? ' selected' : '') + '>' + esc(c) + '</option>';
+      return '<option value="' + esc(c) + '"' + (c === main ? ' selected' : '') + '>' + esc(_msCurLabel(c)) + '</option>';
     }).join('') + '</select></div>';
   out += '<div class="sec">Свои курсы (1 единица = сколько ' + esc(main) + ')</div><div style="margin:0 16px">';
   const codes = (d.choices || []).filter(function (c) { return c !== main; }).concat(['XTR']);

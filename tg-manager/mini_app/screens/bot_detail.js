@@ -316,7 +316,7 @@ async function loadBotSubs(append) {
                        + (BS_TAG ? '&tag='+encodeURIComponent(BS_TAG) : ''));
     const subs = d.subscribers||[];
     BS_TOTAL = d.total||0;
-    txt('bs-cnt', BS_TOTAL+' подп.');
+    txt('bs-cnt', num(BS_TOTAL)+' '+plural(BS_TOTAL,'подписчик','подписчика','подписчиков'));
     if (!subs.length && !append) {
       txt('bsList', BS_TAG
         ? empty('🏷','Никого с этим тегом','Тег #'+esc(BS_TAG)+' сейчас ни на кого не стоит',
@@ -349,7 +349,7 @@ async function loadBotSubs(append) {
     moreEl.style.display = (BS_OFFSET < BS_TOTAL) ? 'block' : 'none';
   } catch(e) {
     if (!append) txt('bsList', errHtml(errRu(e), retryCall('loadBotSubs', append)));
-    else toast('⚠️ '+errRu(e,'Ошибка'));
+    else toast('⚠️ '+errRu(e,'Не удалось догрузить подписчиков'));
   }
 }
 
@@ -478,12 +478,16 @@ async function loadBotCommands() {
 }
 
 async function clearBotCommands() {
-  if (!await askConfirm('Удалить все команды бота?')) return;
+  // Пустое меню нечего чистить; иначе подтверждение называет, сколько уйдёт
+  // и что увидят люди: меню команд бота в Telegram опустеет.
+  const n = (CMD_LIST || []).length;
+  if (!n) { toast('ℹ️ У бота нет команд'); return; }
+  if (!await askConfirm('Удалить все ' + n + ' ' + plural(n, 'команду', 'команды', 'команд') + ' бота?\n\nМеню команд у бота в Telegram опустеет.')) return;
   try {
     await api('/api/miniapp/bot/'+CMD_BOT_ID+'/commands', {method:'PUT', body:JSON.stringify({commands:[]})});
     toast('🗑 Все команды удалены');
     loadBotCommands();
-  } catch(e) { toast('⚠️ '+errRu(e,'Ошибка')); }
+  } catch(e) { toast('⚠️ '+errRu(e,'Не удалось удалить команды')); }
 }
 
 async function openBotStats(botId, botName) {
@@ -555,10 +559,12 @@ async function applyBotSeo(botId, btn) {
     const r = await api('/api/miniapp/seo/apply_bot', {method:'POST', body:JSON.stringify({bot_id:botId})});
     const parts = r.applied||[];
     const errs = (r.errors||[]).join('; ');
-    toast(parts.length ? ('✅ Применено: '+parts.join(', ')+(errs?(' · ошибки: '+errs):'')) : ('⚠️ '+(errs||'без изменений')));
+    // «⚠️ без изменений» читалось как сбой, хотя бот уже совпадал с рекомендацией.
+    toast(parts.length ? ('✅ Применено: '+parts.join(', ')+(errs?(' · ошибки: '+errs):''))
+      : (errs ? ('⚠️ Не применилось: '+errs) : 'ℹ️ Менять нечего: бот уже совпадает с рекомендацией'));
     openSeo();
   } catch(e) {
-    toast('⚠️ '+errRu(e,'Ошибка'));
+    toast('⚠️ '+errRu(e,'Не удалось применить рекомендацию'));
   } finally {
     if (btn) { btn.disabled = false; btn.textContent = 'Применить'; }
   }

@@ -66,8 +66,12 @@ def test_account_statuses_lead_to_the_list():
 
 def test_proxies_health_and_ops_lead_somewhere():
     body = _js_func(_cc(), "_ccRender")
-    for fn in ("openProxies()", "openHealth()", "openOps()"):
+    for fn in ("_ccPool(", "openHealth()", "openOps()"):
         assert fn in body, f"с командного центра нет перехода через {fn}"
+    # Полоска прокси ведёт в парк на своём срезе, а не на общий экран.
+    for flt in ("alive", "dead", "backup"):
+        assert "_ccPool('" + flt + "')" in body, flt
+    assert "openProxyPool('" in _js_func(_cc(), "_ccPool")
 
 
 def test_a_status_without_a_slice_is_not_a_fake_button():
