@@ -209,6 +209,8 @@ function accStatusOf(a) {
 }
 
 function renderAccounts(list) {
+  // Подсветка активного сохранённого вида идёт за фильтром и поиском.
+  if (typeof _fxMarkViews === 'function') _fxMarkViews('accounts');
   const el = document.getElementById('accList');
   if (catalogResourceMenus.account) bindCatalogResourceActions(el, 'account', () => CUR_ACCS);
   if (!list.length) {

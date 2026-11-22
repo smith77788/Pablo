@@ -14498,6 +14498,8 @@ function renderChLoadMore(shownCount) {
 // Аргумент больше не нужен: срез всегда считается от CUR_CHANNELS, чтобы поиск,
 // фильтр и «Выбрать все» не могли разойтись между собой.
 function renderChannels(_ignored) {
+  // Подсветка активного сохранённого вида идёт за фильтром и поиском.
+  if (typeof _fxMarkViews === 'function') _fxMarkViews('channels');
   if (catalogResourceMenus.channel) {
     bindCatalogResourceActions(document.getElementById('chList'), 'channel', () => CUR_CHANNELS);
   }
@@ -18532,6 +18534,8 @@ function renderProxyPoolBars(items) {
   }).join('');
 }
 function renderProxyPoolList(items) {
+  // Подсветка активного сохранённого вида идёт за фильтром и поиском.
+  if (typeof _fxMarkViews === 'function') _fxMarkViews('proxies');
   const el = document.getElementById('proxyPoolList');
   if (!items.length) {
     // «Нет прокси» под активным поиском — неправда: прокси есть, просто ни один

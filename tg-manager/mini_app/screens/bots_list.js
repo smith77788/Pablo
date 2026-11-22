@@ -247,6 +247,8 @@ async function openBotByUsername(uname) {
 }
 
 function renderBots() {
+  // Подсветка активного сохранённого вида идёт за фильтром и поиском.
+  if (typeof _fxMarkViews === 'function') _fxMarkViews('bots');
   const wrap = document.getElementById('botList');
   if (!wrap) return;
   // Пустой список ≠ «ботов нет»: боты могли быть созданы с аккаунтов флота, а
