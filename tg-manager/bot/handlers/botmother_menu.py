@@ -1317,6 +1317,45 @@ async def cb_pick_bot_for(
 # ── Alerts (Visibility → Alerts) ─────────────────────────────────────────
 
 
+# Тип события в «Алертах» печатался кодом из базы: «account_flood_risk»,
+# «channel_search_hidden», «drift_detected». Владелец английского не читает.
+# Типы собираются как «<что>_<что случилось>» (entity_restriction_check.
+# event_type_for), поэтому перевод — из двух половин; незнакомое — общей
+# фразой, а не кодом.
+_ALERT_EXACT = {
+    "ban_detected": "Аккаунт забанен",
+    "session_dead": "Сессия аккаунта умерла",
+    "account_restricted": "Аккаунт ограничен Telegram",
+    "account_flood_risk": "Аккаунт часто ловит флуд-лимиты",
+    "dm_restricted": "Аккаунту закрыли личные сообщения",
+    "invite_degraded": "Инвайты стали проходить хуже",
+    "search_drop": "Бот выпал из поиска",
+    "search_position_drop": "Бот опустился в поиске",
+    "drift_detected": "Канал изменили вне Infragram",
+}
+_ALERT_WHO = {"channel": ("Канал", 0), "group": ("Группа", 1), "bot": ("Бот", 0),
+              "account": ("Аккаунт", 0), "entity": ("Ресурс", 0)}
+# (мужской род, женский род): «Группа скрыта», а не «Группа скрыт».
+_ALERT_WHAT = {
+    "restricted": ("ограничен Telegram", "ограничена Telegram"),
+    "search_hidden": ("скрыт из поиска", "скрыта из поиска"),
+    "unreachable": ("недоступен снаружи", "недоступна снаружи"),
+    "geoban": ("заблокирован в части стран", "заблокирована в части стран"),
+    "banned": ("забанен", "забанена"),
+}
+
+
+def _alert_ru(event_type: str | None) -> str:
+    code = str(event_type or "")
+    if code in _ALERT_EXACT:
+        return _ALERT_EXACT[code]
+    who, _, what = code.partition("_")
+    if who in _ALERT_WHO and what in _ALERT_WHAT:
+        name, fem = _ALERT_WHO[who]
+        return f"{name} {_ALERT_WHAT[what][fem]}"
+    return "Событие безопасности"
+
+
 @router.callback_query(BmCb.filter(F.action == "alerts"))
 async def cb_alerts(
     callback: CallbackQuery,
@@ -1392,12 +1431,12 @@ async def cb_alerts(
         emoji = sev_emoji.get(r["severity"], "🔔")
         dt = r["created_at"].strftime("%d.%m %H:%M")
         if r.get("account_id"):
-            entity = acc_names.get(r["account_id"], f"acc#{r['account_id']}")
+            entity = acc_names.get(r["account_id"], f"аккаунт #{r['account_id']}")
         elif r.get("bot_id"):
             entity = f"@{bot_names_a.get(r['bot_id'], str(r['bot_id']))}"
         else:
             entity = "—"
-        etype = html.escape(r["event_type"])
+        etype = html.escape(_alert_ru(r["event_type"]))
         lines.append(f"{emoji} <code>{dt}</code> {etype} ({html.escape(entity)})")
 
     total_pages = max(1, -(-total // limit))
