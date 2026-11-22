@@ -3057,6 +3057,34 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             n = await _os.revoke(pool, uid, session_id=sess_id)
         return _json_resp({"ok": True, "revoked": n})
 
+    async def owner_safeword_get(request: web.Request) -> web.Response:
+        """Секретное слово владельца (services/owner_safeword): показать на экране."""
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        from services import owner_safeword
+        return _json_resp({"phrase": await owner_safeword.get(pool, uid) or ""})
+
+    async def owner_safeword_set(request: web.Request) -> web.Response:
+        """Задать или сменить секретное слово ({phrase}). Пустое — снять."""
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            body = await request.json()
+        except Exception:
+            body = {}
+        from services import owner_safeword
+        raw = str(body.get("phrase") or "").strip()
+        if not raw:
+            res = await owner_safeword.clear(pool, uid)
+            return _json_resp({"ok": True, "phrase": ""}) if res.get("ok") \
+                else _err(res.get("error") or "Не удалось", 400)
+        res = await owner_safeword.set_phrase(pool, uid, raw)
+        if not res.get("ok"):
+            return _err(res.get("error") or "Не удалось", 400)
+        return _json_resp({"ok": True, "phrase": res.get("phrase") or ""})
+
     async def owner_guard_state(request: web.Request) -> web.Response:
         """Стоит ли код Infragram и не заперт ли ввод (для экрана «Мои входы»)."""
         uid = _get_uid(request)
@@ -7375,6 +7403,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         uid = _get_uid(request)
         if not uid:
             return _err("Unauthorized", 401)
+        from services import owner_safeword as _owner_safeword
         action_filter = (request.rel_url.query.get("action") or "").strip()
         if action_filter not in ("", "warn", "cool", "pause", "resume"):
             action_filter = ""
@@ -7518,9 +7547,10 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 }
                 for r in history
             ],
-            # Подсказка поставить код Infragram: есть аккаунты, кода ещё нет
-            # (services/owner_guard). Экран «Защита» покажет карточку-подсказку.
+            # Подсказки задать защиту: есть аккаунты, а кода Infragram или
+            # секретного слова ещё нет (owner_guard / owner_safeword).
             "pin_suggested": await _owner_guard.pin_suggested(pool, uid),
+            "safeword_suggested": await _owner_safeword.suggested(pool, uid),
         })
 
     async def ad_intel_overview(request: web.Request) -> web.Response:
@@ -10156,6 +10186,8 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     app.router.add_post("/api/miniapp/devices/revoke", devices_revoke)
     app.router.add_get("/api/miniapp/owner/sessions", owner_sessions_list)
     app.router.add_post("/api/miniapp/owner/sessions/revoke", owner_sessions_revoke)
+    app.router.add_get("/api/miniapp/owner/safeword", owner_safeword_get)
+    app.router.add_post("/api/miniapp/owner/safeword", owner_safeword_set)
     app.router.add_get("/api/miniapp/owner/guard", owner_guard_state)
     app.router.add_post("/api/miniapp/owner/guard/set", owner_guard_set)
     app.router.add_post("/api/miniapp/owner/guard/remove", owner_guard_remove)

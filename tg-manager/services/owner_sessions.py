@@ -236,8 +236,11 @@ async def _alert(pool, owner_id: int, sid: str, kind: str, meta: dict, why: str)
                   callback_data=OwnSessCb(action="kill", session_id=int(sess_id or 0)))
         kb.adjust(1)
         bot = Bot(token=BOT_TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
-        await db.notify_if_enabled(pool, bot, owner_id, "restriction",
-                                   build_alert(meta, kind, why),
+        # Секретное слово в хвост (services/owner_safeword): тревога без него —
+        # подделка, по ссылке переходить нельзя.
+        from services import owner_safeword
+        text = build_alert(meta, kind, why) + await owner_safeword.line(pool, owner_id)
+        await db.notify_if_enabled(pool, bot, owner_id, "restriction", text,
                                    reply_markup=kb.as_markup(),
                                    dedup_key=f"owner_login:{sid}")
     except Exception as exc:

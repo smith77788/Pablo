@@ -7601,6 +7601,16 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
         <button class="btn btn-p" style="width:100%" onclick="openDevices()">Поставить код</button>
       </div>
     </div>
+    <div id="shieldSafewordNudge" style="display:none;padding:0 16px 4px">
+      <div class="card" style="padding:12px 14px;border:1px solid var(--accent)">
+        <div style="font-weight:600;font-size:14px">🛟 Задайте секретное слово</div>
+        <div style="font-size:13px;color:var(--hint);line-height:1.5;margin:6px 0 10px">
+          Короткая фраза, которую знаете только вы. Её покажет каждая наша тревога —
+          и подделку «от Infragram» вы узнаете сразу.
+        </div>
+        <button class="btn btn-p" style="width:100%" onclick="openDevices()">Задать слово</button>
+      </div>
+    </div>
     <div id="shieldAttentionWrap" style="display:none">
       <div class="sec" style="margin-top:8px;color:var(--red)">Нужно действие сейчас</div>
       <div class="lst" id="shieldAttention"></div>
@@ -22954,17 +22964,64 @@ async function ownSessRevokeOthers() {
   } catch(e) { toast('⚠️ '+errRu(e,'Не удалось завершить входы')); }
 }
 
+// ── Секретное слово против фишинга (services/owner_safeword) ───────────────
+// Слово владельца, которое показывает КАЖДАЯ наша тревога. Сообщение без него —
+// подделка. Блок на экране «Мои входы»: задать/сменить/снять.
+function ownSafewordHtml(w) {
+  const phrase = (w && w.phrase) || '';
+  if (phrase) {
+    return `<div class="card" style="margin-bottom:14px;padding:14px 16px">
+      <div style="font-weight:600;font-size:14px">🛟 Секретное слово задано</div>
+      <div style="font-size:13px;color:var(--hint);line-height:1.5;margin:6px 0 8px">
+        Его показывает каждая наша тревога. Сообщение «от Infragram» без этого слова —
+        подделка, по ссылкам из него не переходите.
+      </div>
+      <div style="font-size:15px;font-weight:700;padding:8px 12px;background:var(--bg3);border-radius:var(--radius);margin-bottom:10px">${esc(phrase)}</div>
+      <div style="display:flex;gap:8px">
+        <button class="btn btn-s" style="flex:1" onclick="ownSafewordSet()">Сменить</button>
+        <button class="btn btn-d" style="flex:1" onclick="ownSafewordClear()">Снять</button>
+      </div></div>`;
+  }
+  return `<div class="card" style="margin-bottom:14px;padding:14px 16px">
+    <div style="font-weight:600;font-size:14px">🛟 Секретное слово против фишинга</div>
+    <div style="font-size:13px;color:var(--hint);line-height:1.5;margin:6px 0 10px">
+      Задайте короткую фразу, которую знаете только вы. Её покажет каждая наша
+      тревога — и вы сразу отличите настоящее сообщение от поддельного. По желанию.
+    </div>
+    <button class="btn btn-p" style="width:100%" onclick="ownSafewordSet()">Задать слово</button></div>`;
+}
+
+async function ownSafewordSet() {
+  const v = await askPrompt('Секретное слово', {placeholder:'2–48 символов', value:''});
+  if (v == null) return;
+  const phrase = String(v).trim();
+  if (!phrase) { toast('⚠️ Пустое слово'); return; }
+  try {
+    await api('/api/miniapp/owner/safeword', {method:'POST', body:JSON.stringify({phrase})});
+    toast('🛟 Слово сохранено'); openDevices();
+  } catch(e) { toast('⚠️ '+errRu(e,'Не удалось')); }
+}
+
+async function ownSafewordClear() {
+  if (!await askConfirm('Снять секретное слово? Тревоги перестанут его показывать.')) return;
+  try {
+    await api('/api/miniapp/owner/safeword', {method:'POST', body:JSON.stringify({phrase:''})});
+    toast('Слово снято'); openDevices();
+  } catch(e) { toast('⚠️ '+errRu(e,'Не удалось')); }
+}
+
 async function openDevices() {
   push('s-devices');
   txt('devBody', '<div class="spin-wrap"><div class="spin"></div></div>');
   try {
-    const [d, s, g] = await Promise.all([
+    const [d, s, g, w] = await Promise.all([
       api('/api/miniapp/devices'),
       api('/api/miniapp/owner/sessions').catch(() => ({sessions: []})),
       api('/api/miniapp/owner/guard').catch(() => ({has_pin: false})),
+      api('/api/miniapp/owner/safeword').catch(() => ({phrase: ''})),
     ]);
     const rows = d.devices || [];
-    let html = `<div style="padding:12px 16px">` + ownGuardHtml(g) + ownSessHtml(s) + `
+    let html = `<div style="padding:12px 16px">` + ownGuardHtml(g) + ownSafewordHtml(w) + ownSessHtml(s) + `
       <div class="sec" style="margin-top:14px">Связанные браузеры</div>
       <div style="font-size:13px;color:var(--hint);line-height:1.5;margin-bottom:10px">
         Это браузеры, которым вы разрешили вход по коду из бота. Внутри Telegram
@@ -29145,9 +29202,11 @@ async function openShield() {
             'Заводит второй свой сеанс без SMS: если основная сессия умрёт, флот поднимет аккаунт сам',
             "shieldToggle('guard_reserve')"));
 
-    // Подсказка поставить код Infragram (есть аккаунты, кода нет).
+    // Подсказки защиты: код Infragram и секретное слово (есть аккаунты, нет их).
     const _pn = document.getElementById('shieldPinNudge');
     if (_pn) _pn.style.display = d.pin_suggested ? '' : 'none';
+    const _sw = document.getElementById('shieldSafewordNudge');
+    if (_sw) _sw.style.display = d.safeword_suggested ? '' : 'none';
     // Сигналы атаки: аккаунты, которым нужно действие сейчас, и журнал.
     const att = d.attention||[];
     document.getElementById('shieldAttentionWrap').style.display = att.length ? '' : 'none';

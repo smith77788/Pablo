@@ -304,8 +304,11 @@ async def alert_drain(pool, owner_id: int, kind: str, detail: str | None = None)
     bot = None
     try:
         bot = Bot(token=BOT_TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
-        await db.notify_if_enabled(pool, bot, int(owner_id), "restriction",
-                                   build_drain_alert(kind, detail),
+        # Секретное слово в хвост (services/owner_safeword): сигнал без него —
+        # подделка.
+        from services import owner_safeword
+        text = build_drain_alert(kind, detail) + await owner_safeword.line(pool, int(owner_id))
+        await db.notify_if_enabled(pool, bot, int(owner_id), "restriction", text,
                                    dedup_key=f"owner_drain:{owner_id}:{kind}")
     except Exception as exc:
         log.warning("owner_guard.alert_drain owner=%s: %s", owner_id, exc)
