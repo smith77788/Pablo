@@ -176,7 +176,7 @@ async function nrOpenAssets(id, status) {
   box.innerHTML = '<div class="spin-wrap"><div class="spin"></div></div>';
   let d;
   try {
-    d = await api(`/api/miniapp/niche/campaign/${cid}/assets?limit=60&status=${encodeURIComponent(NR.status)}`);
+    d = await api(`/api/miniapp/niche/campaign/${cid}/assets?limit=60&offset=0&status=${encodeURIComponent(NR.status)}`);
   } catch (e) {
     box.innerHTML = errHtml(errRu(e, 'Не удалось загрузить каталог'), 'nrOpenAssets(' + esc(cid) + ')');
     return;
@@ -187,21 +187,49 @@ async function nrOpenAssets(id, status) {
     chip(_nrNum(s.found), 'найдено') + chip(_nrNum(s.joined), 'вступили')
     + chip(_nrNum(s.actions), 'действий') + chip(_nrNum(s.reach), 'охват');
   const items = d.items || [];
-  box.innerHTML = items.length ? items.map(a => `
+  NR.assetOffset = items.length;
+  box.innerHTML = items.length ? items.map(_nrAssetRow).join('') + _nrMoreBtn(d)
+    : empty('📋', NR.status ? 'В этом срезе пусто' : 'Каталог пуст', 'Запустите поиск — агент наберёт чаты и каналы ниши.', {label: '🔭 Искать', fn: 'nrScan(' + esc(cid) + ', null)'});
+}
+
+function _nrAssetRow(a) {
+  const manualSkip = a.status === 'skipped' && a.skip_reason === 'убрано вручную';
+  return `
     <div class="row" style="flex-wrap:wrap">
       <div class="row-ico" style="background:${a.status === 'joined' ? 'var(--bg-green-16)' : 'var(--bg3)'}">${a.kind === 'channel' ? '📢' : '💬'}</div>
       <div class="row-body">
         <div class="row-name">${esc(a.title || '@' + a.username)}</div>
-        <div class="row-val">@${esc(a.username)} · ${esc(_nrNum(a.members))} уч. · ${esc(a.status_ru)}</div>
+        <div class="row-val">@${esc(a.username)} · ${esc(_nrNum(a.members))} уч. · <span class="nr-st">${esc(a.status_ru)}</span></div>
         <div class="row-val" style="color:var(--hint)">${esc(a.source_ru)}${a.keyword ? ' · «' + esc(a.keyword) + '»' : ''}${a.actions_done ? ' · действий: ' + esc(_nrNum(a.actions_done)) : ''}</div>
       </div>
       <div style="display:flex;gap:6px;width:100%;margin-top:6px">
         <button class="btn btn-s" style="flex:1;min-height:32px;font-size:13px;padding:6px" onclick="openTgLink('https://t.me/${escJs(a.username)}')">Открыть</button>
         ${a.kind === 'group' ? `<button class="btn btn-s" style="flex:1;min-height:32px;font-size:13px;padding:6px" onclick="startChatWarmup('${escJs(a.username)}', this)">🔥 Прогрев флотом</button>` : ''}
         ${a.status !== 'skipped' ? `<button class="btn btn-s" style="flex:1;min-height:32px;font-size:13px;padding:6px" onclick="nrSkip(${Number(a.id)}, this)">Не наше</button>` : ''}
+        ${manualSkip ? `<button class="btn btn-s" style="flex:1;min-height:32px;font-size:13px;padding:6px" onclick="nrUnskip(${Number(a.id)}, this)">↩️ Вернуть</button>` : ''}
       </div>
-    </div>`).join('') + (d.has_more ? `<div class="field-note" style="padding:8px 4px">Показаны первые ${esc(String(items.length))} из ${esc(_nrNum(d.total))} — остальные в работе у присутствия.</div>` : '')
-    : empty('📋', NR.status ? 'В этом срезе пусто' : 'Каталог пуст', 'Запустите поиск — агент наберёт чаты и каналы ниши.', {label: '🔭 Искать', fn: 'nrScan(' + esc(cid) + ', null)'});
+    </div>`;
+}
+
+// Каталог показывал первые 60 ресурсов и честно писал, что остальные есть, —
+// но посмотреть их было нельзя. Теперь — страницами.
+function _nrMoreBtn(d) {
+  if (!d.has_more) return '';
+  const left = Math.max(0, Number(d.total || 0) - NR.assetOffset);
+  return `<button class="btn btn-s" id="nrMoreBtn" style="width:100%;margin-top:8px" onclick="nrMoreAssets(this)">Показать ещё · осталось ${esc(_nrNum(left))}</button>`;
+}
+
+async function nrMoreAssets(btn) {
+  if (btn) btn.disabled = true;
+  try {
+    const d = await api(`/api/miniapp/niche/campaign/${Number(NR.openCampaign)}/assets?limit=60&offset=${Number(NR.assetOffset) || 0}&status=${encodeURIComponent(NR.status || '')}`);
+    const items = d.items || [];
+    NR.assetOffset = (Number(NR.assetOffset) || 0) + items.length;
+    if (btn) btn.outerHTML = items.map(_nrAssetRow).join('') + _nrMoreBtn(d);
+  } catch (e) {
+    if (btn) btn.disabled = false;
+    toast('⚠️ ' + errRu(e, 'Не удалось загрузить'));
+  }
 }
 
 function nrFilter(status) {
@@ -212,9 +240,28 @@ async function nrSkip(assetId, el) {
   try {
     await api(`/api/miniapp/niche/asset/${Number(assetId)}/skip`, {method: 'POST', body: '{}'});
     if (el && el.closest('.row')) el.closest('.row').style.opacity = '.4';
+    // На месте кнопки — «Вернуть»: ошибка исправляется тем же касанием.
+    if (el) el.outerHTML = `<button class="btn btn-s" style="flex:1;min-height:32px;font-size:13px;padding:6px" onclick="nrUnskip(${Number(assetId)}, this)">↩️ Вернуть</button>`;
     toast('Убрали из работы');
   } catch (e) {
     toast('⚠️ ' + errRu(e, 'Не удалось убрать'));
+  }
+}
+
+// «Не наше» по ошибке больше не навсегда: ресурс возвращается в работу.
+async function nrUnskip(assetId, el) {
+  try {
+    const r = await api(`/api/miniapp/niche/asset/${Number(assetId)}/unskip`, {method: 'POST', body: '{}'});
+    const row = el && el.closest('.row');
+    if (row) {
+      const st = row.querySelector('.nr-st');
+      if (st) st.textContent = r.status_ru || 'Найден';
+      row.style.opacity = '';
+    }
+    if (el) el.remove();
+    toast('↩️ Вернули в работу');
+  } catch (e) {
+    toast('⚠️ ' + errRu(e, 'Не удалось вернуть'));
   }
 }
 

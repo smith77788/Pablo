@@ -45,7 +45,10 @@ def test_presence_asks_before_acting_in_other_peoples_chats():
 
 
 def test_the_catalogue_shows_where_a_resource_came_from():
-    f = js_function("nrOpenAssets")
+    # Строка каталога собирается в _nrAssetRow: её зовут и первая страница,
+    # и «Показать ещё».
+    f = js_function("nrOpenAssets") + js_function("_nrAssetRow")
+    assert "_nrAssetRow" in js_function("nrOpenAssets")
     assert "source_ru" in f and "status_ru" in f
     assert "nrSkip(" in f, "ненужный ресурс нельзя убрать из работы"
 
