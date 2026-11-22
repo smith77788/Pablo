@@ -188,7 +188,9 @@ async function nrOpenAssets(id, status) {
     + chip(_nrNum(s.actions), 'действий') + chip(_nrNum(s.reach), 'охват');
   const items = d.items || [];
   NR.assetOffset = items.length;
-  box.innerHTML = items.length ? items.map(_nrAssetRow).join('') + _nrMoreBtn(d)
+  NR.assetItems = items.slice();
+  _nrApplyPresencePrefs();
+  box.innerHTML = items.length ? _nrCopyBtn() + items.map(_nrAssetRow).join('') + _nrMoreBtn(d)
     : empty('📋', NR.status ? 'В этом срезе пусто' : 'Каталог пуст', 'Запустите поиск — агент наберёт чаты и каналы ниши.', {label: '🔭 Искать', fn: 'nrScan(' + esc(cid) + ', null)'});
 }
 
@@ -225,6 +227,7 @@ async function nrMoreAssets(btn) {
     const d = await api(`/api/miniapp/niche/campaign/${Number(NR.openCampaign)}/assets?limit=60&offset=${Number(NR.assetOffset) || 0}&status=${encodeURIComponent(NR.status || '')}`);
     const items = d.items || [];
     NR.assetOffset = (Number(NR.assetOffset) || 0) + items.length;
+    NR.assetItems = (NR.assetItems || []).concat(items);
     if (btn) btn.outerHTML = items.map(_nrAssetRow).join('') + _nrMoreBtn(d);
   } catch (e) {
     if (btn) btn.disabled = false;
@@ -265,7 +268,43 @@ async function nrUnskip(assetId, el) {
   }
 }
 
+// Ссылки загруженной части каталога одним списком — чтобы отдать их в
+// рассылку, таблицу или другому сервису, а не открывать по одной.
+function _nrCopyBtn() {
+  return '<button class="btn btn-s" style="width:100%;margin-bottom:8px" onclick="nrCopyLinks()">📋 Скопировать ссылки показанных</button>';
+}
+
+function nrLinksText(items) {
+  const seen = {};
+  return (items || []).map(a => String((a && a.username) || '').replace(/^@/, '').trim())
+    .filter(u => /^[A-Za-z0-9_]{3,64}$/.test(u) && !seen[u.toLowerCase()] && (seen[u.toLowerCase()] = 1))
+    .map(u => 'https://t.me/' + u).join('\n');
+}
+
+function nrCopyLinks() {
+  const text = nrLinksText(NR.assetItems);
+  const n = text ? text.split('\n').length : 0;
+  copyToClipboard(text, `📋 Скопировано ссылок: ${_nrNum(n)}`);
+}
+
 // ── Присутствие ────────────────────────────────────────────────────────────
+
+// Что делать, сколько аккаунтов и действий — с прошлого запуска: обычно
+// присутствие запускают с одними и теми же настройками в каждой нише.
+function _nrSavePresencePrefs(actions, limit, accs) {
+  saveFormPrefs('niche_presence', {actions: actions.slice(), limit: limit, accs: accs});
+}
+
+function _nrApplyPresencePrefs() {
+  const p = loadFormPrefs('niche_presence');
+  if (Array.isArray(p.actions) && p.actions.length) {
+    document.querySelectorAll('#s-niche-assets .nr-act').forEach(c => { c.checked = p.actions.indexOf(c.value) >= 0; });
+  }
+  const lim = document.getElementById('nrLimit');
+  if (lim && Number(p.limit) > 0) lim.value = String(p.limit);
+  const acc = document.getElementById('nrAccCount');
+  if (acc && Number(p.accs) > 0) acc.value = String(p.accs);
+}
 
 async function nrPresence() {
   const id = NR.openCampaign;
@@ -278,6 +317,7 @@ async function nrPresence() {
   if (!await askConfirm(`Запустить присутствие в нише?\n\nЧто делаем: ${actions.map(a => names[a]).join(', ')}.\n`
       + `Аккаунтов: ${accs}, действий за проход: не больше ${limit}.\n\n`
       + 'Действия идут от ваших аккаунтов в ЧУЖИХ чатах, с паузами. Ход и остановка — в «Операциях».')) return;
+  _nrSavePresencePrefs(actions, limit, accs);
   const btn = document.getElementById('nrPresenceBtn');
   btn.disabled = true;
   try {

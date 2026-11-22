@@ -93,6 +93,7 @@ function _spcRenderList() {
       <div style="display:flex;gap:6px;width:100%;margin-top:8px">
         <button class="btn btn-p" style="flex:2;min-height:34px;font-size:13px;padding:6px" onclick="spcLaunch(${id}, this)">▶ Запустить</button>
         <button class="btn btn-s" style="flex:1;min-height:34px;font-size:13px;padding:6px" onclick="spcOpenEditor(${id})">✏️ Изменить</button>
+        <button class="btn btn-s" style="flex:0 0 auto;min-height:34px;font-size:13px;padding:6px 10px" onclick="spcDuplicate(${id})" title="Сделать копию" aria-label="Сделать копию">📋</button>
         ${Number(c.auto_days) > 0 ? `<button class="btn btn-s" style="flex:1;min-height:34px;font-size:13px;padding:6px" onclick="spcToggle(${id})">${c.status === 'active' ? '⏸ Пауза' : '▶ Авто'}</button>` : ''}
         <button class="icon-btn sm danger" style="min-width:34px;min-height:34px" onclick="spcDelete(${id}, this)" aria-label="Удалить кампанию" title="Удалить">🗑</button>
       </div>
@@ -101,6 +102,27 @@ function _spcRenderList() {
 }
 
 // ── Редактор ───────────────────────────────────────────────────────────────
+
+// Копия кампании: тот же текст, кнопка, боты, каналы и аудитория, но новая
+// кампания со своей статистикой — для нового сегмента или другого текста
+// без набора всего заново. Сохраняется только по кнопке в редакторе.
+function spcCopyPreset(c) {
+  const keep = ['target_kind', 'target_ref', 'target_url', 'body', 'button_text', 'segment',
+    'skip_target_audience', 'cooldown_days', 'auto_days'];
+  const p = {};
+  keep.forEach(k => { if (c[k] !== undefined) p[k] = c[k]; });
+  p.bot_ids = Array.isArray(c.bot_ids) ? c.bot_ids.slice() : null;
+  p.channel_ids = Array.isArray(c.channel_ids) ? c.channel_ids.slice() : [];
+  p.title = (String(c.title || 'Кампания') + ' (копия)').slice(0, 120);
+  return p;
+}
+
+function spcDuplicate(id) {
+  const c = ((SPC.data && SPC.data.campaigns) || []).find(x => Number(x.id) === Number(id));
+  if (!c) return;
+  spcOpenEditor(null, spcCopyPreset(c));
+  toast('📋 Копия в редакторе — поправьте и сохраните');
+}
 
 function spcOpenIdea(i) {
   const x = (SPC.data.ideas || [])[i];
@@ -116,7 +138,7 @@ function spcOpenEditor(id, preset) {
     skip_target_audience: true, cooldown_days: 7, auto_days: 0, body: '', button_text: '', title: '',
     target_url: ''}, preset || {});
   push('s-spc-edit');
-  txt('spcEditTitle', c ? '📣 Изменить кампанию' : '📣 Новая кампания');
+  txt('spcEditTitle', c ? '📣 Изменить кампанию' : (preset && preset.title ? '📣 Копия кампании' : '📣 Новая кампания'));
   document.getElementById('spcErr').style.display = 'none';
   document.getElementById('spcKind').value = v.target_kind;
   const seg = document.getElementById('spcSegment');
@@ -128,7 +150,7 @@ function spcOpenEditor(id, preset) {
   document.getElementById('spcAuto').value = String(v.auto_days || 0);
   document.getElementById('spcBody').value = v.body || '';
   document.getElementById('spcButton').value = v.button_text || '';
-  document.getElementById('spcName').value = c ? (v.title || '') : '';
+  document.getElementById('spcName').value = c ? (v.title || '') : ((preset && preset.title) || '');
   document.getElementById('spcUrl').value = v.target_kind === 'bot' ? '' : (v.target_url || '');
   spcCount();
   _spcFillTargets(v.target_ref);

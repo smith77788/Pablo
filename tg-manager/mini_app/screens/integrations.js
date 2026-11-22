@@ -301,7 +301,16 @@ function _igRenderWebhook(ep, items, total) {
   if (!items.length) {
     h += empty('📭', 'Доставок пока не было', 'Как только случится событие, оно появится здесь');
   }
-  h += items.map(it =>
+  _igRenderWebhook.items = items;
+  const failed = igFailedDeliveries(items);
+  if (failed.length) {
+    h += '<div style="display:flex;gap:8px;flex-wrap:wrap;margin:0 0 8px">' +
+      '<span class="chip' + (_igRenderWebhook.failedOnly ? ' on' : '') + '" role="button" tabindex="0" onclick="igToggleFailedOnly()">❌ Только неудачные (' + failed.length + ')</span>' +
+      '<button class="btn btn-s" style="padding:5px 10px;min-width:0;font-size:12px" onclick="igRedeliverFailed()">🔁 Повторить все неудачные</button>' +
+    '</div>';
+  }
+  const shown = _igRenderWebhook.failedOnly && failed.length ? failed : items;
+  h += shown.map(it =>
     '<div class="row"><div class="row-body">' +
       '<div class="row-name">' + esc(it.summary || it.event_label) + '</div>' +
       '<div class="row-val" style="color:var(--hint)">' + (_IG_STATUS[it.status] || esc(it.status)) +
@@ -381,6 +390,33 @@ async function igRedeliver(deliveryId) {
     toast('⏳ Поставлено в очередь');
     if (_igWhId) openWebhook(_igWhId);
   } catch (e) { toast('⚠️ ' + errRu(e)); }
+}
+
+// Неудачные доставки — те, что не дошли и не дойдут сами: «не доставлено» и
+// «пропущено». Раньше повторить их можно было только по одной кнопке на
+// строке; после простоя получателя это десятки касаний.
+function igFailedDeliveries(items) {
+  return (items || []).filter(it => it && (it.status === 'failed' || it.status === 'skipped'));
+}
+
+function igToggleFailedOnly() {
+  _igRenderWebhook.failedOnly = !_igRenderWebhook.failedOnly;
+  if (_igWhId) openWebhook(_igWhId);
+}
+
+async function igRedeliverFailed() {
+  const ids = igFailedDeliveries(_igRenderWebhook.items).map(it => Number(it.id)).filter(n => n > 0);
+  if (!ids.length) return;
+  if (!await askConfirm('Повторить ' + ids.length + ' ' + plural(ids.length, 'неудачную доставку', 'неудачные доставки', 'неудачных доставок') + '? Получатель получит эти события ещё раз.')) return;
+  let ok = 0, bad = 0;
+  for (const id of ids) {
+    try {
+      await api('/api/miniapp/webhook_delivery/' + id + '/retry', { method: 'POST', body: '{}' });
+      ok++;
+    } catch (e) { bad++; }
+  }
+  toast(bad ? '⏳ В очереди: ' + ok + ', не получилось: ' + bad : '⏳ Поставлено в очередь: ' + ok);
+  if (_igWhId) openWebhook(_igWhId);
 }
 
 // ── Google Sheets ──────────────────────────────────────────────────────────
