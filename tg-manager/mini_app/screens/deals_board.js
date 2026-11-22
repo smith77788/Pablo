@@ -33,6 +33,8 @@ const DK_TONE = {
 const DK_UUID = /^[0-9a-f-]{36}$/i;
 
 let _DK = null;          // ответ доски: {columns, total, reminders_7d, per_stage}
+let _DK_Q = '';         // строка быстрого поиска по доске
+let _DK_DUE = false;     // только карточки, где напоминание уже пора
 let _DK_BUSY = {};       // contact_id / 'd'+deal_id → идёт смена стадии (двойной тап не шлёт два запроса)
 
 function _dkStyles() {
@@ -83,7 +85,16 @@ function _dkScreen() {
     '</div>' +
     // Полоска вкладок модуля «CRM» (SCREEN_MODULES.crm в index.html).
     '<div class="filter-chips mod-tabs" data-module="crm" data-tab="deals" role="tablist" aria-label="Вкладки модуля «CRM»"></div>' +
-    '<div class="sub-sb"><div id="dkTop"></div><div id="dkBody">' +
+    '<div class="sub-sb"><div id="dkTop"></div>' +
+      // Быстрый отбор по доске: найти клиента по имени, компании, нику или
+      // названию сделки и показать тех, кому пора напомнить. Поле живёт вне
+      // dkTop, чтобы перерисовка доски не сбивала набор текста.
+      '<div class="dk-filter" style="display:flex;gap:6px;align-items:center;padding:0 16px 8px">' +
+        '<input type="search" id="dkQ" class="inp" style="flex:1 1 auto;min-width:0" ' +
+          'placeholder="🔍 Имя, компания, @ник или сделка" oninput="dkSetQuery(this.value)">' +
+        '<span class="chip" id="dkDueChip" role="button" tabindex="0" onclick="dkToggleDue()">⏰ Пора</span>' +
+      '</div>' +
+      '<div id="dkBody">' +
       '<div class="spin-wrap"><div class="spin"></div></div>' +
     '</div></div>';
   document.body.appendChild(el);
@@ -173,6 +184,28 @@ function _dkDealCard(d) {
   '</div>';
 }
 
+function _dkFiltering() { return !!(_DK_Q.trim() || _DK_DUE); }
+
+// Подходит ли карточка под отбор. isDeal — простая сделка: у неё нет
+// напоминания, поэтому в «⏰ Пора» она не попадает.
+function _dkMatch(c, isDeal) {
+  if (_DK_DUE && (isDeal || !c.next_reminder_at || new Date(c.next_reminder_at) > new Date())) return false;
+  const q = _DK_Q.trim().toLowerCase().replace(/^@/, '');
+  if (!q) return true;
+  const hay = (isDeal ? [c.title, c.contact] : [c.name, c.company, c.username])
+    .filter(Boolean).join(' ').toLowerCase();
+  return hay.indexOf(q) !== -1;
+}
+
+function dkSetQuery(v) { _DK_Q = String(v || ''); _dkRender(); }
+
+function dkToggleDue() {
+  _DK_DUE = !_DK_DUE;
+  const chip = document.getElementById('dkDueChip');
+  if (chip) chip.classList.toggle('on', _DK_DUE);
+  _dkRender();
+}
+
 function _dkCount(col) { return (col.count || 0) + (col.deal_count || 0); }
 
 function _dkLabel(stage) {
@@ -207,6 +240,8 @@ function _dkRender() {
     '</div>';
   body.innerHTML = '<div class="dk-board">' + cols.map(function (col) {
     col.deals = col.deals || [];
+    const cards = col.cards.filter(function (c) { return _dkMatch(c, false); });
+    const deals = col.deals.filter(function (d) { return _dkMatch(d, true); });
     const shown = col.cards.length + col.deals.length;
     const total = _dkCount(col);
     return '<div class="dk-col" data-stage="' + esc(col.stage) + '">' +
@@ -215,8 +250,8 @@ function _dkRender() {
         '<div class="dk-sum">' + _dkMoney(col.by_currency) + '</div>' +
       '</div>' +
       '<div class="dk-cards">' +
-        (shown ? col.cards.map(_dkCard).join('') + col.deals.map(_dkDealCard).join('')
-               : '<div class="dk-empty">Пусто</div>') +
+        (cards.length + deals.length ? cards.map(_dkCard).join('') + deals.map(_dkDealCard).join('')
+               : '<div class="dk-empty">' + (shown && _dkFiltering() ? 'Не подходит под отбор' : 'Пусто') + '</div>') +
         ((col.has_more || col.deals_has_more) ? '<button class="btn btn-s" style="width:100%" onclick="dkMore(\'' + esc(col.stage) + '\')">' +
           'Показать ещё · ' + num(shown) + ' из ' + num(total) + '</button>' : '') +
       '</div>' +
