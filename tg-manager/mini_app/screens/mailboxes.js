@@ -44,7 +44,7 @@ async function openMailboxes() {
       const label = document.createElement('div');
       label.className = 'li-body';
       const fails = Number(mailbox.fail_count) || 0;
-      label.textContent = mailbox.email + (mailbox.is_active
+      label.textContent = mailbox.email + mailboxAuthLabel(mailbox) + (mailbox.is_active
         ? ' · Подключён' + (fails ? ' · ошибок отправки подряд: ' + fails + ' из 3' : '')
         : ' · Выключен после ошибок отправки');
       const button = document.createElement('button');
@@ -60,6 +60,7 @@ async function openMailboxes() {
       };
       row.append(label);
       if (!mailbox.is_active) row.append(mailboxEnableButton(mailbox));
+      else if (mailboxCanCheck(mailbox)) row.append(mailboxCheckButton(mailbox));
       row.append(button);
       list.appendChild(row);
     }
@@ -159,6 +160,41 @@ function mailboxEnableButton(mailbox) {
       toast('⚠️ ' + errRu(e, 'Не удалось включить'));
       b.disabled = false;
       b.textContent = 'Включить';
+    }
+  };
+  return b;
+}
+
+// Как ящик подключён — видно в строке: от этого зависит, что делать при
+// ошибке (новый пароль приложения или повторный вход через Google).
+function mailboxAuthLabel(mailbox) {
+  return (mailbox.auth_type || 'password') === 'password' ? ' · пароль приложения' : ' · вход через Google';
+}
+
+// Проверка входа у работающего ящика — та же ручка, что «Включить»: сервер
+// входит сохранённым паролем по SMTP (письмо не отправляется) и при удаче
+// обнуляет счётчик ошибок подряд. У входа через Google сервер пароль не
+// проверяет, поэтому кнопки там нет — «Вход работает» было бы неправдой.
+function mailboxCanCheck(mailbox) {
+  return !!mailbox.is_active && (mailbox.auth_type || 'password') === 'password';
+}
+
+function mailboxCheckButton(mailbox) {
+  const b = document.createElement('button');
+  b.className = 'btn btn-s';
+  b.style.marginRight = '6px';
+  b.textContent = '🔌 Проверить';
+  b.onclick = async () => {
+    b.disabled = true;
+    b.textContent = 'Проверяю…';
+    try {
+      await api('/api/miniapp/mailboxes/' + Number(mailbox.id) + '/enable', {method: 'POST'});
+      toast('✅ Вход в ' + mailbox.email + ' работает' + (Number(mailbox.fail_count) ? ', счётчик ошибок сброшен' : ''));
+      await openMailboxes();
+    } catch (e) {
+      toast('⚠️ ' + errRu(e, 'Проверка не прошла'));
+      b.disabled = false;
+      b.textContent = '🔌 Проверить';
     }
   };
   return b;
