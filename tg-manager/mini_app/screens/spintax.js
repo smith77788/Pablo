@@ -16,7 +16,10 @@ let SPIN_TEMPLATES = [];
 function openSpintax() {
   push('s-spintax');
   SPIN_TEMPLATES = [];
-  const t = document.getElementById('spinText'); if (t) t.value='';
+  // Текст сценария помнится между заходами: раньше экран очищал поле, и
+  // за новой пачкой вариантов текст приходилось вставлять заново.
+  const t = document.getElementById('spinText');
+  if (t) { t.value = loadDraft('spintax'); t.oninput = function () { saveDraft('spintax', t.value); }; }
   txt('spinResult',''); txt('spinErr','');
   document.getElementById('spinRerollBtn').style.display='none';
 }
@@ -51,7 +54,10 @@ function _spinRender(variants) {
       ${combo}
       <div onclick="copySpinTpl(${i})" role="button" tabindex="0"
            style="font-family:monospace;font-size:12px;background:var(--bg-input);border-radius:8px;padding:8px;white-space:pre-wrap;word-break:break-word;cursor:pointer">${esc(v.template)}</div>
-      <div style="font-size:11px;color:var(--hint)">Нажмите на шаблон, чтобы скопировать его</div>
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:8px">
+        <div style="font-size:11px;color:var(--hint)">Нажмите на шаблон, чтобы скопировать его</div>
+        <button class="btn btn-s" style="padding:6px 10px;font-size:12px;flex:0 0 auto" onclick="saveSpinTpl(${i})">💾 В шаблоны</button>
+      </div>
       ${warn}
     </div>`;
   }).join('') + `<button class="btn btn-s" style="width:100%;margin-top:8px" onclick="copyAllSpinTpl()">📋 Скопировать все ${num(variants.length)} ${plural(variants.length,'шаблон','шаблона','шаблонов')}</button>`);
@@ -61,6 +67,20 @@ function copySpinTpl(i) {
   const tpl = SPIN_TEMPLATES[i];
   if (tpl==null) return;
   copyToClipboard(tpl, '📋 Шаблон скопирован');
+}
+// В шаблоны сообщений: оттуда их берут быстрые ответы Входящих, которые
+// раскрывают группы {а|б} при вставке. Раньше шаблон уходил только
+// через буфер обмена и пропадал, как только экран закрывали.
+async function saveSpinTpl(i) {
+  const tpl = SPIN_TEMPLATES[i];
+  if (tpl == null) return;
+  const src = (document.getElementById('spinText') || {}).value || '';
+  const name = ((await askPrompt('Название шаблона', {value: ('🎲 ' + (src.trim() || tpl)).slice(0, 40)})) || '').trim();
+  if (!name) return;
+  try {
+    await api('/api/miniapp/template', {method: 'POST', body: JSON.stringify({name: name, text: tpl})});
+    toast('💾 Сохранено в шаблоны');
+  } catch (e) { toast('⚠️ ' + errRu(e, 'Не удалось сохранить')); }
 }
 // Копировать по одному — это ровно столько переключений между приложениями,
 // сколько шаблонов. В рассылку их всё равно вставляют списком.
