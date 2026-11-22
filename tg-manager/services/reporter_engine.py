@@ -54,10 +54,14 @@ REPORT_REASONS = {
 
 def _get_reason(reason_key: str):
     from telethon.tl.types import (
-        InputReportReasonSpam, InputReportReasonViolence, InputReportReasonPornography,
         InputReportReasonChildAbuse,
-        InputReportReasonIllegalDrugs, InputReportReasonFake, InputReportReasonPersonalDetails,
+        InputReportReasonFake,
+        InputReportReasonIllegalDrugs,
         InputReportReasonOther,
+        InputReportReasonPersonalDetails,
+        InputReportReasonPornography,
+        InputReportReasonSpam,
+        InputReportReasonViolence,
     )
     mapping = {
         "spam":       InputReportReasonSpam(),
@@ -90,7 +94,7 @@ async def _connect(client) -> None:
             return
         except FloodWaitError:
             raise
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             last = exc
             if attempt == 2 or not _is_transient(exc):
                 raise
@@ -99,15 +103,103 @@ async def _connect(client) -> None:
         raise last
 
 
+class ReportTargetUnresolvable(Exception):
+    """Цель жалобы невозможно разрешить этим аккаунтом — с понятной причиной.
+
+    Несётся наверх в report_peer и становится честным ok=False с русским
+    текстом (а не сырым английским «Cannot find any entity …»). retryable
+    говорит, имеет ли смысл повтор другим/тем же аккаунтом.
+    """
+
+    def __init__(self, message: str, *, retryable: bool = False) -> None:
+        super().__init__(message)
+        self.user_message = message
+        self.retryable = retryable
+
+
+async def _resolve_invite_entity(client, invite_hash: str):
+    """Разрешить приватную инвайт-ссылку (t.me/+HASH, /joinchat/HASH) в сущность.
+
+    get_entity по голой ссылке/`+HASH` НЕ резолвит приватную группу — Telegram
+    отвечает «Cannot find any entity», и операция жалобы падала на каждом
+    аккаунте. Приватную группу нельзя отрепортить, не состоя в ней (у превью
+    ChatInvite нет access_hash), поэтому:
+      * вступаем через ImportChatInviteRequest — ответ содержит сам чат;
+      * если аккаунт УЖЕ состоит (ImportChatInvite падает) — берём чат через
+        CheckChatInviteRequest (ChatInviteAlready/Peek несут .chat);
+      * если это лишь превью (не состоим и вступить нельзя — ссылка требует
+        одобрения, исчерпана или закрыта) — поднимаем понятную ошибку, а не
+        сырой стектрейс.
+    """
+    from telethon.tl.functions.messages import (
+        CheckChatInviteRequest,
+        ImportChatInviteRequest,
+    )
+
+    try:
+        res = await asyncio.wait_for(
+            client(ImportChatInviteRequest(hash=invite_hash)), timeout=_ACTION_TIMEOUT)
+        chats = getattr(res, "chats", None)
+        if chats:
+            return chats[0]
+    except FloodWaitError:
+        raise
+    except Exception as exc:
+        # ImportChatInvite падает и когда аккаунт уже в группе — это не ошибка,
+        # а штатный путь к CheckChatInvite. Но сначала отсекаем окончательные
+        # отказы ссылки, чтобы не выдавать их как «внутренняя ошибка».
+        up = str(exc).upper()
+        if "INVITE_HASH_EXPIRED" in up or "INVITE_HASH_INVALID" in up:
+            raise ReportTargetUnresolvable(
+                "Инвайт-ссылка недействительна или просрочена — жалоба невозможна",
+                retryable=False)
+        if "INVITE_REQUEST_SENT" in up:
+            raise ReportTargetUnresolvable(
+                "Группа закрыта и требует одобрения на вступление — жалоба "
+                "по ссылке невозможна", retryable=False)
+
+    # Уже состоим или ImportChatInvite не дал чат — пробуем CheckChatInvite.
+    try:
+        check = await asyncio.wait_for(
+            client(CheckChatInviteRequest(hash=invite_hash)), timeout=_ACTION_TIMEOUT)
+    except FloodWaitError:
+        raise
+    except Exception as exc:
+        up = str(exc).upper()
+        if "INVITE_HASH_EXPIRED" in up or "INVITE_HASH_INVALID" in up:
+            raise ReportTargetUnresolvable(
+                "Инвайт-ссылка недействительна или просрочена — жалоба невозможна",
+                retryable=False)
+        raise ReportTargetUnresolvable(
+            "Не удалось разобрать инвайт-ссылку этим аккаунтом", retryable=True)
+
+    chat = getattr(check, "chat", None)
+    if chat is not None:
+        return chat
+    # ChatInvite (превью) без .chat — аккаунт не состоит и вступить не вышло.
+    raise ReportTargetUnresolvable(
+        "Аккаунт не состоит в приватной группе, а вступить по ссылке не удалось "
+        "— жалоба по этой группе этим аккаунтом невозможна", retryable=False)
+
+
 async def _resolve_peer(client, target_ref):
     """Устойчиво разрешить цель жалобы в сущность/InputPeer.
 
-    get_input_entity отвечает из кэша без сетевого запроса, когда аккаунт цель
-    уже видел; на промахе уходим в полное get_entity, которое РЕЗОЛВИТ не
-    виденные раньше @username/ссылки по ResolveUsername. Раньше звали только
-    get_entity — лишний сетевой запрос на каждую жалобу и лишняя точка отказа
-    там, где кэш уже знает цель. FloodWait пробрасываем — его переждёт верх.
+    Приватные инвайт-ссылки (t.me/+HASH, /joinchat/HASH, tg://join?invite=HASH)
+    резолвятся отдельным путём (_resolve_invite_entity): по голой ссылке
+    get_entity их НЕ находит, и операция падала с «Cannot find any entity».
+
+    Для публичных целей: get_input_entity отвечает из кэша без сетевого запроса,
+    когда аккаунт цель уже видел; на промахе уходим в полное get_entity, которое
+    РЕЗОЛВИТ не виденные раньше @username/ссылки по ResolveUsername. FloodWait
+    пробрасываем — его переждёт верх.
     """
+    from services.account_manager import normalize_telegram_join_ref
+
+    ref_kind, ref_value = normalize_telegram_join_ref(target_ref)
+    if ref_kind == "invite" and ref_value:
+        return await _resolve_invite_entity(client, ref_value)
+
     try:
         return await asyncio.wait_for(
             client.get_input_entity(target_ref), timeout=_ACTION_TIMEOUT)
@@ -143,8 +235,9 @@ async def report_peer(
     message_text: str = "",
 ) -> dict[str, Any]:
     """Пожаловаться на пользователя или канал (ReportPeerRequest)."""
-    from services.account_manager import _make_client
     from telethon.tl.functions.account import ReportPeerRequest
+
+    from services.account_manager import _make_client
 
     client = _make_client(session_string, _acc)
     try:
@@ -159,6 +252,11 @@ async def report_peer(
         log.debug("report_peer target=%s flood_wait=%ss", target_ref, secs)
         return {"ok": False, "error": f"Telegram попросил подождать {secs}с",
                 "flood_wait": secs, "retryable": True}
+    except ReportTargetUnresolvable as exc:
+        # Понятная причина (приватная ссылка/просрочена/закрыта) — отдаём
+        # владельцу её, а не сырой «Cannot find any entity …».
+        log.debug("report_peer target=%s unresolvable: %s", target_ref, exc.user_message)
+        return {"ok": False, "error": exc.user_message, "retryable": exc.retryable}
     except Exception as exc:
         err = str(exc)[:150]
         log.debug("report_peer target=%s error: %s", target_ref, err)
@@ -179,8 +277,9 @@ async def report_message(
     message_text: str = "",
 ) -> dict[str, Any]:
     """Пожаловаться на конкретные сообщения в канале/группе (ReportRequest)."""
-    from services.account_manager import _make_client
     from telethon.tl.functions.messages import ReportRequest
+
+    from services.account_manager import _make_client
 
     client = _make_client(session_string, _acc)
     try:
