@@ -23,6 +23,7 @@ from aiogram import F, Router
 from aiogram.types import CallbackQuery
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
+from bot.utils.paging import page_label
 from bot.callbacks import InfraCb, AccCb, WarmupCb, CleanerCb, ProxyCb, TaskCb, BmCb
 from bot.utils.picker_cap import cap_text as _cap_text, cap_text_append as _cap_text_note
 from services import infra_pressure
@@ -408,12 +409,19 @@ async def cb_infra_audit(
         )
 
     kb = InlineKeyboardBuilder()
+    nav = 0
     if page > 0:
         kb.button(text="◀️", callback_data=InfraCb(action="audit", page=page - 1))
+        nav += 1
+    lbl = page_label(page, total, _PAGE)
+    if lbl:
+        kb.button(text=lbl, callback_data=InfraCb(action="audit", page=page))
+        nav += 1
     if (page + 1) * _PAGE < total:
         kb.button(text="▶️", callback_data=InfraCb(action="audit", page=page + 1))
+        nav += 1
     kb.button(text="◀️ Назад", callback_data=InfraCb(action="menu"))
-    kb.adjust(2, 1)
+    kb.adjust(*([nav] if nav else []), 1)
 
     await callback.message.edit_text(
         "\n".join(lines),

@@ -35,6 +35,7 @@ from aiogram.types import (
 )
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
+from bot.utils.paging import page_label
 from bot.callbacks import ParserCb, BmCb
 from bot.keyboards import subscription_locked_markup
 from bot.utils.subscription import require_plan, locked_text
@@ -737,6 +738,7 @@ async def cb_parser_audience(
         lines.append(f"• {uname} — {name.strip()}{premium}")
 
     kb = InlineKeyboardBuilder()
+    nav = 0
     if page > 0:
         kb.button(
             text="◀️",
@@ -744,6 +746,14 @@ async def cb_parser_audience(
                 action="audience", run_id=run_id or 0, page=page - 1
             ),
         )
+        nav += 1
+    lbl = page_label(page, total, _PAGE_SIZE)
+    if lbl:
+        kb.button(
+            text=lbl,
+            callback_data=ParserCb(action="audience", run_id=run_id or 0, page=page),
+        )
+        nav += 1
     if (page + 1) * _PAGE_SIZE < total:
         kb.button(
             text="▶️",
@@ -751,13 +761,16 @@ async def cb_parser_audience(
                 action="audience", run_id=run_id or 0, page=page + 1
             ),
         )
+        nav += 1
     if run_id:
         kb.button(
             text="📥 Экспорт CSV",
             callback_data=ParserCb(action="export", run_id=run_id),
         )
     kb.button(text="◀️ В меню", callback_data=ParserCb(action="menu"))
-    kb.adjust(2, 1, 1)
+    # Число кнопок листания разное (на первой странице «◀️» нет), и
+    # жёсткое (2, 1, 1) ставило «▶️» в одну строку с «Экспорт CSV».
+    kb.adjust(*([nav] if nav else []), 1, 1)
 
     await callback.message.edit_text(
         "\n".join(lines),
