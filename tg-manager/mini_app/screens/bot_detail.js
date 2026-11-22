@@ -555,10 +555,12 @@ async function applyBotSeo(botId, btn) {
     const r = await api('/api/miniapp/seo/apply_bot', {method:'POST', body:JSON.stringify({bot_id:botId})});
     const parts = r.applied||[];
     const errs = (r.errors||[]).join('; ');
-    toast(parts.length ? ('✅ Применено: '+parts.join(', ')+(errs?(' · ошибки: '+errs):'')) : ('⚠️ '+(errs||'без изменений')));
+    // «⚠️ без изменений» читалось как сбой, хотя бот уже совпадал с рекомендацией.
+    toast(parts.length ? ('✅ Применено: '+parts.join(', ')+(errs?(' · ошибки: '+errs):''))
+      : (errs ? ('⚠️ Не применилось: '+errs) : 'ℹ️ Менять нечего: бот уже совпадает с рекомендацией'));
     openSeo();
   } catch(e) {
-    toast('⚠️ '+errRu(e,'Ошибка'));
+    toast('⚠️ '+errRu(e,'Не удалось применить рекомендацию'));
   } finally {
     if (btn) { btn.disabled = false; btn.textContent = 'Применить'; }
   }

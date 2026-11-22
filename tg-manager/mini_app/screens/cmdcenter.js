@@ -24,9 +24,14 @@ const CC_STATUS = {
   banned:           { c: '#ef4444', label: 'Забанены',    go: ['banned', ''] },
   deactivated:      { c: '#94a3b8', label: 'Деактив.',    go: ['dead', ''] },
   session_expired:  { c: '#a78bfa', label: 'Сессия ист.', go: ['dead', ''] },
+  // Эти статусы тоже пишутся в acc_status, а в легенде всплывали сырым
+  // английским словом («frozen»).
+  frozen:           { c: '#7dd3fc', label: 'Заморожены',  go: ['dead', ''] },
+  deleted:          { c: '#64748b', label: 'Удалены',     go: ['dead', ''] },
 };
 function _ccStatus(st) {
-  return CC_STATUS[st] || { c: '#64748b', label: st, go: null };
+  // Незнакомый статус — «Другие», а не служебное имя из базы.
+  return CC_STATUS[st] || { c: '#64748b', label: 'Другие', go: null };
 }
 
 function _ccEnsureScreen() {
@@ -168,6 +173,12 @@ function _ccBar(label, value, total, color, onclick) {
     `<div style="height:100%;width:${pct}%;background:${color};border-radius:6px"></div></div></div>`;
 }
 
+// Полоска прокси открывает парк сразу на своём срезе («Мёртвые» — мёртвые),
+// а не общий экран прокси, где срез ещё надо искать.
+function _ccPool(filter) {
+  return (typeof openProxyPool === 'function') ? "openProxyPool('" + filter + "')" : 'openProxies()';
+}
+
 function _ccRender(d) {
   const accounts = d.accounts || [];
   const prx = d.proxies || {};
@@ -224,10 +235,10 @@ function _ccRender(d) {
   // ── Прокси-пул ──
   const pt = prx.total || 0;
   const prxCard = _ccCard('🌐 Прокси-пул',
-    _ccBar('Живые', prx.alive || 0, pt, '#3bb6a6', 'openProxies()') +
-    _ccBar('Мёртвые', prx.dead || 0, pt, '#ef4444', 'openProxies()') +
-    _ccBar('Назначены аккаунтам', prx.assigned || 0, pt, '#38bdf8', 'openProxies()') +
-    _ccBar('Резервные', prx.backup || 0, pt, '#f59e0b', 'openProxies()') +
+    _ccBar('Живые', prx.alive || 0, pt, '#3bb6a6', _ccPool('alive')) +
+    _ccBar('Мёртвые', prx.dead || 0, pt, '#ef4444', _ccPool('dead')) +
+    _ccBar('Назначены аккаунтам', prx.assigned || 0, pt, '#38bdf8', _ccPool('all')) +
+    _ccBar('Резервные', prx.backup || 0, pt, '#f59e0b', _ccPool('backup')) +
     '<div style="font-size:11px;color:var(--hint);margin-top:6px">Всего прокси: ' +
     `<b>${pt}</b> · нажмите на строку, чтобы открыть пул</div>`);
 
@@ -236,7 +247,7 @@ function _ccRender(d) {
   const hTotal = (hl.good || 0) + (hl.warn || 0) + (hl.bad || 0);
   const gcol = avg >= 70 ? '#3bb6a6' : avg >= 40 ? '#f59e0b' : '#ef4444';
   const gauge = _ccDonut([{ value: avg, color: gcol }, { value: 100 - avg, color: 'rgba(0,0,0,0)' }],
-                         String(avg), 'trust');
+                         String(avg), 'доверие');
   const healthCard = _ccCard('❤️ Здоровье сетки',
     '<div style="display:flex;align-items:center;gap:12px">' +
     '<div onclick="openHealth()" role="button" tabindex="0" style="cursor:pointer">' + gauge + '</div>' +
