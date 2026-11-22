@@ -66,7 +66,7 @@ function _edRender(p) {
       'В режиме «Только советует» появляется подсказка, а публиковать можно как есть. ' +
       'В режимах с блокировкой брак в канал не уходит — публикация останавливается автоматически.' +
       (p.configured ? '' : '<br><br>Сейчас действуют правила по умолчанию: только проверка на повтор.') +
-    '</div>' +
+    '</div>' + _edChannelActions(p) +
     '<div class="sec">Режим администратора</div>' +
     '<div class="lst" style="padding:14px">' +
       '<div class="field"><label>Что редактор делает с браком</label>' +
@@ -127,6 +127,43 @@ function _edRender(p) {
     '</div>';
 }
 
+// У канала: взять общие правила за основу (форма заполняется, сохраняет
+// владелец) или снять свои правила и вернуться к общим.
+function _edChannelActions(p) {
+  if (!_edChannel) return '';
+  return '<div id="edChannelAct" style="display:flex;flex-direction:column;gap:6px;margin:0 16px 8px">' +
+    (p.configured
+      ? '<button class="btn btn-s" onclick="edResetToGeneral()">↩️ Вернуться к общим правилам</button>'
+      : '<button class="btn btn-s" onclick="edCopyGeneral()">📋 Взять общие правила за основу</button>') +
+    '</div>';
+}
+
+async function edCopyGeneral() {
+  try {
+    const d = await api('/api/miniapp/editorial/policy');
+    const g = d.policy || {};
+    if (!g.configured) { toast('Общие правила ещё не заданы'); return; }
+    // Форма — это правила канала; помечаем как «свои», чтобы кнопка
+    // сменилась на возврат к общим только после сохранения.
+    document.getElementById('s-editorial-body').innerHTML = _edRender(Object.assign({}, g, {configured: false}));
+    toast('📋 Общие правила в форме — поправьте и сохраните');
+  } catch (e) {
+    toast('⚠️ ' + errRu(e, 'Не удалось загрузить общие правила'));
+  }
+}
+
+async function edResetToGeneral() {
+  if (!_edChannel) return;
+  if (!await askConfirm('Снять свои правила этого канала? Дальше для него будут действовать общие правила.')) return;
+  try {
+    await api(_edPath(), {method: 'DELETE'});
+    toast('↩️ Канал снова живёт по общим правилам');
+    openEditorialRules(_edChannel);
+  } catch (e) {
+    toast('⚠️ ' + errRu(e, 'Не удалось вернуть общие правила'));
+  }
+}
+
 function _edWords(id) {
   return (document.getElementById(id).value || '')
     .split(/[,\n]/).map(function (s) { return s.trim(); }).filter(Boolean);
@@ -153,6 +190,10 @@ async function saveEditorialRules() {
   try {
     const d = await api(_edPath(), { method: 'PUT', body: JSON.stringify(payload) });
     _edPolicy = d.policy || _edPolicy;
+    if (_edChannel && _edPolicy.configured) {
+      const box = document.getElementById('edChannelAct');
+      if (box) box.outerHTML = _edChannelActions(_edPolicy);
+    }
     tg.HapticFeedback?.notificationOccurred('success');
     toast('✅ Правила редактора сохранены');
   } catch (e) {

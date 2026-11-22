@@ -340,3 +340,18 @@ async def save_profile(
     except Exception:
         log.debug("channel_brain_store.save_profile failed owner=%s", owner_id, exc_info=True)
         return None
+
+
+async def delete_profile(pool, owner_id: int, channel_key: str) -> bool:
+    """Снять СВОИ правила канала: дальше для него действуют общие правила.
+
+    Общую политику владельца (OWNER_DEFAULT_KEY) так не удалить — у массовой
+    публикации нет другой. Возвращает, была ли строка.
+    """
+    if channel_key == OWNER_DEFAULT_KEY:
+        return False
+    res = await pool.execute(
+        "DELETE FROM va_channel_brain WHERE owner_id=$1 AND channel_key=$2",
+        owner_id, channel_key,
+    )
+    return res != "DELETE 0"

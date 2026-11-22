@@ -21,6 +21,7 @@ DELETE /api/miniapp/crm/deal/{deal_id}
 DELETE /api/miniapp/deeplink/{link_id}
 DELETE /api/miniapp/dm_campaign/{campaign_id}
 DELETE /api/miniapp/ecosystem/{eco_id}
+DELETE /api/miniapp/editorial/policy
 DELETE /api/miniapp/experiment/{exp_id}
 DELETE /api/miniapp/funnel/step/{step_id}
 DELETE /api/miniapp/ghost/{profile_id}
