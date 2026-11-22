@@ -668,8 +668,8 @@ def setup_routes(app: web.Application, pool) -> None:
                 "ON a.id=mc.acc_id AND a.owner_id=mc.owner_id WHERE " + where)
         rows = await _safe_fetch(pool,
             "SELECT mc.channel_id AS chat_id, mc.acc_id, mc.title, mc.username, "
-            "mc.member_count AS members, COALESCE(NULLIF(a.first_name,''), a.phone) AS acc_label "
-            + base + f" ORDER BY mc.member_count DESC NULLS LAST, mc.channel_id LIMIT {_CAMPAIGN_CHATS_LIMIT}",
+            "mc.members_count AS members, COALESCE(NULLIF(a.first_name,''), a.phone) AS acc_label "
+            + base + f" ORDER BY mc.members_count DESC NULLS LAST, mc.channel_id LIMIT {_CAMPAIGN_CHATS_LIMIT}",
             *args)
         total = await _safe_count(pool, "SELECT COUNT(*) " + base, *args)
         return _json_resp({"chats": [dict(r) for r in rows], "total": int(total or 0),
