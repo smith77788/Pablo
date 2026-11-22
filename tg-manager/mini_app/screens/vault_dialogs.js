@@ -251,3 +251,28 @@ function vaultBubblesHtml(msgs, prevIso) {
     return sep + vaultBubble(m);
   }).join('');
 }
+
+// Папка «Непрочитанные»: одна кнопка вместо долгого нажатия на каждом чате.
+// Отмечаем по одному тем же запросом, что и меню строки, — сервер ничего
+// нового не знает, а если часть не прошла, остальные уже прочитаны.
+function vaultReadAllBar(chats) {
+  if (VAULT_FOLDER !== 'unread' || VAULT_READ_ONLY) return '';
+  const n = (chats || []).filter(c => c.unread).length;
+  if (!n) return '';
+  return `<div class="vread-all"><button class="btn btn-s" onclick="vaultReadAll()">👁 Прочитать все (${n})</button></div>`;
+}
+
+async function vaultReadAll() {
+  const ids = (_VAULT_CHATS || []).filter(c => c.unread).map(c => c.chat_id);
+  if (!ids.length) return;
+  let ok = 0, bad = 0;
+  for (const cid of ids) {
+    try {
+      await api(vaultPath('/api/miniapp/vault/chat/' + cid + '/state'),
+                {method: 'POST', body: JSON.stringify({read: true})});
+      ok++;
+    } catch (e) { bad++; }
+  }
+  toast(bad ? `👁 Прочитано: ${ok}, не получилось: ${bad}` : `👁 Прочитано: ${ok}`);
+  try { await reloadVaultDialogs(); } catch (e) { toast('⚠️ ' + errRu(e, 'Не удалось обновить список')); }
+}
