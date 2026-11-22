@@ -43,7 +43,7 @@ async function openFloodGuard(botId) {
   } catch (e) {
     // errHtml всегда даёт кнопку выхода; своя вёрстка ошибки оставляла
     // экран без единой кнопки, а таббар на подэкране скрыт.
-    body.innerHTML = errHtml((e && e.message) || 'Ошибка', 'openFloodGuard(' + JSON.stringify(botId) + ')');
+    body.innerHTML = errHtml(errRu(e, 'Настройки защиты не загрузились'), 'openFloodGuard(' + JSON.stringify(botId) + ')');
   }
 }
 
@@ -121,7 +121,9 @@ function _fgRender(d) {
     'Слишком низкий порог → под подозрение попадёт живой рост; слишком высокий → ' +
     'часть накрутки проскочит. Начните с 30 и подстройте по факту.</div></div>';
 
-  h += '<button class="btn btn-p" style="width:100%;margin:6px 0 18px" onclick="fgSave()">💾 Сохранить настройки</button>';
+  h += '<button class="btn btn-p" style="width:100%;margin:6px 0 6px" onclick="fgSave()">💾 Сохранить настройки</button>';
+  h += '<button class="btn btn-s" style="width:100%;margin:0 0 4px" onclick="fgApplyAll()">📋 Применить эти настройки ко всем ботам</button>';
+  h += '<div style="font-size:12px;color:var(--hint);padding:0 2px 18px">Тот же режим и порог встанут на каждого вашего бота — не нужно открывать их по одному.</div>';
 
   // Быстрые действия
   h += '<div class="sec">3. Быстрая очистка и блок</div>';
@@ -142,15 +144,12 @@ function _fgRender(d) {
 }
 
 async function fgSave() {
-  const modeEl = document.querySelector('input[name="fg_mode"]:checked');
-  const mode = modeEl ? modeEl.value : 'off';
-  const threshold = parseInt((document.getElementById('fg_threshold') || {}).value || '30', 10) || 30;
   try {
     await api('/api/miniapp/flood/' + _fgBotId,
-      { method: 'PATCH', body: JSON.stringify({ mode: mode, threshold_per_min: threshold }) });
+      { method: 'PATCH', body: JSON.stringify(_fgFormValues()) });
     toast('Сохранено ✅');
     openFloodGuard(_fgBotId);
-  } catch (e) { toast(e.message || 'Ошибка'); }
+  } catch (e) { toast('⚠️ ' + errRu(e, 'Не получилось, попробуйте ещё раз')); }
 }
 
 async function fgFlagRecent() {
@@ -163,7 +162,7 @@ async function fgFlagRecent() {
       { method: 'POST', body: JSON.stringify({ minutes: minutes }) });
     toast('Помечено: ' + (r.flagged || 0));
     openFloodGuard(_fgBotId);
-  } catch (e) { toast(e.message || 'Ошибка'); }
+  } catch (e) { toast('⚠️ ' + errRu(e, 'Не получилось, попробуйте ещё раз')); }
 }
 
 async function fgPurge(hard) {
@@ -176,7 +175,7 @@ async function fgPurge(hard) {
       { method: 'POST', body: JSON.stringify({ hard: !!hard }) });
     toast('Обработано: ' + (r.purged || 0));
     openFloodGuard(_fgBotId);
-  } catch (e) { toast(e.message || 'Ошибка'); }
+  } catch (e) { toast('⚠️ ' + errRu(e, 'Не получилось, попробуйте ещё раз')); }
 }
 
 async function fgUnflag() {
@@ -185,5 +184,39 @@ async function fgUnflag() {
     const r = await api('/api/miniapp/flood/' + _fgBotId + '/unflag', { method: 'POST', body: '{}' });
     toast('Снято флагов: ' + (r.unflagged || 0));
     openFloodGuard(_fgBotId);
-  } catch (e) { toast(e.message || 'Ошибка'); }
+  } catch (e) { toast('⚠️ ' + errRu(e, 'Не получилось, попробуйте ещё раз')); }
+}
+
+// Режим и порог настраивались на каждого бота по отдельности: при десятке
+// ботов владелец открывал экран десять раз. Здесь те же значения уходят на все
+// боты через тот же проверенный по владельцу PATCH.
+function _fgFormValues() {
+  const modeEl = document.querySelector('input[name="fg_mode"]:checked');
+  return {
+    mode: modeEl ? modeEl.value : 'off',
+    threshold_per_min: parseInt((document.getElementById('fg_threshold') || {}).value || '30', 10) || 30,
+  };
+}
+
+async function fgApplyAll() {
+  const v = _fgFormValues();
+  let bots = [];
+  try { const d = await api('/api/miniapp/bots'); bots = (d && d.bots) || d || []; }
+  catch (e) { toast('⚠️ ' + errRu(e, 'Боты не загрузились')); return; }
+  if (!Array.isArray(bots) || !bots.length) { toast('Нет ботов'); return; }
+  const label = (FG_MODES.find(m => m[0] === v.mode) || ['', v.mode])[1];
+  if (!await askConfirm('Поставить «' + label + '», порог ' + v.threshold_per_min +
+      '/мин на всех ботов (' + bots.length + ')?')) return;
+  let ok = 0, fail = 0;
+  for (const b of bots) {
+    const id = b.bot_id != null ? b.bot_id : b.id;
+    if (id == null) { fail++; continue; }
+    try {
+      await api('/api/miniapp/flood/' + encodeURIComponent(id),
+        { method: 'PATCH', body: JSON.stringify(v) });
+      ok++;
+    } catch (_) { fail++; }
+  }
+  toast(fail ? ('Готово: ' + ok + ', не получилось: ' + fail) : ('Применено ко всем ботам: ' + ok + ' ✅'));
+  openFloodGuard(_fgBotId);
 }
