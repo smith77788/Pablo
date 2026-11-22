@@ -10780,13 +10780,26 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                    GROUP BY 1 ORDER BY 1""", uid, days)
 
             # ── Топ каналов по операционной активности (реально) ──────────────
+            # Журнал сворачивается по цели ОДИН раз, и каналы соединяются с
+            # готовыми счётчиками. Раньше счёт стоял коррелированным
+            # подзапросом на каждый канал: каналы × строки журнала, то есть на
+            # флоте в 5000 каналов экран ждал секунды уже на двух тысячах
+            # строк журнала и упирался в таймаут на реальном объёме. Второе
+            # соединение (по id) не берёт канал, у которого ник совпал с id
+            # текстом, — иначе одна строка журнала посчиталась бы дважды, а
+            # старый `ник = цель OR id = цель` считал её один раз.
             top_rows = await _safe_fetch(pool,
-                """SELECT mc.title, mc.username, mc.channel_id,
-                          (SELECT COUNT(*) FROM operation_audit oa
-                           WHERE oa.owner_id=$1 AND oa.target IS NOT NULL
-                             AND (oa.target = mc.username OR oa.target = mc.channel_id::text)
-                          ) AS activity
-                   FROM managed_channels mc WHERE mc.owner_id=$1
+                """WITH act AS (
+                       SELECT oa.target, COUNT(*) AS c FROM operation_audit oa
+                       WHERE oa.owner_id=$1 AND oa.target IS NOT NULL
+                       GROUP BY oa.target)
+                   SELECT mc.title, mc.username, mc.channel_id,
+                          COALESCE(by_name.c, 0) + COALESCE(by_id.c, 0) AS activity
+                   FROM managed_channels mc
+                   LEFT JOIN act by_name ON by_name.target = mc.username
+                   LEFT JOIN act by_id ON by_id.target = mc.channel_id::text
+                        AND mc.username IS DISTINCT FROM mc.channel_id::text
+                   WHERE mc.owner_id=$1
                    ORDER BY activity DESC, mc.added_at DESC LIMIT 10""", uid)
             top_channels = [{
                 "name": r["title"] or r["username"] or str(r["channel_id"]),
