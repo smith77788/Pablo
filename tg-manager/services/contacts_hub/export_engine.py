@@ -1,5 +1,6 @@
 from __future__ import annotations
 from services.security import safe_csv_writer  # выгрузка без формул
+import asyncio
 import io
 import json
 import logging
@@ -10,17 +11,27 @@ import asyncpg
 log = logging.getLogger(__name__)
 
 
-async def export_csv(pool, owner_id: int, contact_ids: list = None) -> str:
+async def _rows(pool, owner_id: int, contact_ids: list | None) -> list:
     if contact_ids:
         placeholders = ','.join([f'${i+2}' for i in range(len(contact_ids))])
         params = [owner_id] + contact_ids
-        rows = await pool.fetch(
+        return await pool.fetch(
             f'SELECT * FROM unified_contacts WHERE owner_id=$1 AND id IN ({placeholders}) ORDER BY first_name',
             *params)
-    else:
-        rows = await pool.fetch(
-            'SELECT * FROM unified_contacts WHERE owner_id=$1 ORDER BY first_name', owner_id)
+    return await pool.fetch(
+        'SELECT * FROM unified_contacts WHERE owner_id=$1 ORDER BY first_name', owner_id)
 
+
+# Сборка выгрузки — чистый Python по всем контактам владельца (на 30 000
+# контактов CSV ~1,4 с). В цикле событий она останавливала весь процесс —
+# бот, экраны, исполнитель операций, — поэтому идёт в потоке.
+
+async def export_csv(pool, owner_id: int, contact_ids: list = None) -> str:
+    rows = await _rows(pool, owner_id, contact_ids)
+    return await asyncio.to_thread(_csv_text, rows)
+
+
+def _csv_text(rows) -> str:
     output = io.StringIO()
     writer = safe_csv_writer(output)
     writer.writerow(['ID', 'Telegram User ID', 'Username', 'First Name', 'Last Name',
@@ -79,16 +90,11 @@ async def export_csv(pool, owner_id: int, contact_ids: list = None) -> str:
 
 
 async def export_vcf(pool, owner_id: int, contact_ids: list = None) -> str:
-    if contact_ids:
-        placeholders = ','.join([f'${i+2}' for i in range(len(contact_ids))])
-        params = [owner_id] + contact_ids
-        rows = await pool.fetch(
-            f'SELECT * FROM unified_contacts WHERE owner_id=$1 AND id IN ({placeholders}) ORDER BY first_name',
-            *params)
-    else:
-        rows = await pool.fetch(
-            'SELECT * FROM unified_contacts WHERE owner_id=$1 ORDER BY first_name', owner_id)
+    rows = await _rows(pool, owner_id, contact_ids)
+    return await asyncio.to_thread(_vcf_text, rows)
 
+
+def _vcf_text(rows) -> str:
     lines = []
     for r in rows:
         d = dict(r)
@@ -155,16 +161,11 @@ async def export_vcf(pool, owner_id: int, contact_ids: list = None) -> str:
 
 
 async def export_json(pool, owner_id: int, contact_ids: list = None) -> str:
-    if contact_ids:
-        placeholders = ','.join([f'${i+2}' for i in range(len(contact_ids))])
-        params = [owner_id] + contact_ids
-        rows = await pool.fetch(
-            f'SELECT * FROM unified_contacts WHERE owner_id=$1 AND id IN ({placeholders}) ORDER BY first_name',
-            *params)
-    else:
-        rows = await pool.fetch(
-            'SELECT * FROM unified_contacts WHERE owner_id=$1 ORDER BY first_name', owner_id)
+    rows = await _rows(pool, owner_id, contact_ids)
+    return await asyncio.to_thread(_json_text, rows)
 
+
+def _json_text(rows) -> str:
     result = []
     for r in rows:
         d = dict(r)
