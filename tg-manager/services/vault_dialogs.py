@@ -146,9 +146,19 @@ def waiting_reason(d: dict) -> str | None:
         return "archived"
     if d.get("muted"):
         return "muted"
-    if is_closing_message(d.get("_live_text"), d.get("live_media_type")):
+    if is_closing_message(_live_text(d), d.get("live_media_type")):
         return "closing"
     return None
+
+
+def _live_text(d: dict) -> str | None:
+    """Текст последнего живого входящего — расшифровывается, только когда
+    понадобился (у всех прочих причин он не нужен), и запоминается в строке."""
+    if "_live_text" not in d:
+        enc = d.get("live_text_enc")
+        d["_live_text"] = (decrypt_token(enc)
+                           if d.get("live_direction") == "in" and enc else None)
+    return d["_live_text"]
 
 
 async def purchased_chats(pool, owner_id: int, chat_ids: list[int]) -> set[int]:
@@ -183,12 +193,11 @@ async def purchased_chats(pool, owner_id: int, chat_ids: list[int]) -> set[int]:
 
 async def _rows(pool, owner_id: int, chat_id: int | None = None) -> list[dict]:
     rows = await pool.fetch(_DIALOGS_SQL, owner_id, chat_id)
-    out = []
-    for r in rows:
-        d = dict(r)
-        d["_live_text"] = (decrypt_token(r["live_text_enc"])
-                           if r["live_direction"] == "in" and r["live_text_enc"] else None)
-        out.append(d)
+    # Расшифровка — десятки микросекунд на строку, а строк столько, сколько
+    # диалогов (на 30 000 диалогов список шёл ~10 с только из-за неё). Текст
+    # живого входящего раскрывается лениво (`_live_text`), превью — только у
+    # того, что попадёт на экран (`_with_preview`).
+    out = [dict(r) for r in rows]
     bought = await purchased_chats(
         pool, owner_id, [d["chat_id"] for d in out if not d.get("purchased_at")])
     for d in out:
@@ -208,7 +217,9 @@ def _ui(d: dict) -> dict:
         "unread": int(d["unread"] or 0),
         "first_date": _iso(d["first_date"]),
         "last_date": _iso(d["last_date"]),
-        "last_preview": _preview(d["text_enc"], d["media_type"]),
+        # Превью ставит `_with_preview` — только тем, кого покажем.
+        "_text_enc": d["text_enc"],
+        "_media_type": d["media_type"],
         "last_direction": d["last_direction"],
         "last_deleted": bool(d["last_deleted"]),
         "pinned": bool(d["pinned"]),
@@ -223,6 +234,13 @@ def _ui(d: dict) -> dict:
         # видно, почему чат не попал в ждущие.
         "not_waiting_reason": reason,
     }
+
+
+def _with_preview(c: dict) -> dict:
+    """Строка списка с превью последнего сообщения (и без служебных полей)."""
+    if "_text_enc" in c:
+        c["last_preview"] = _preview(c.pop("_text_enc"), c.pop("_media_type", None))
+    return c
 
 
 def _matches(c: dict, q: str) -> bool:
@@ -262,7 +280,8 @@ async def dialogs(pool, owner_id: int, *, folder: str = "all", q: str = "",
     else:
         view = [c for c in items if not c["archived"]]
     if q:
-        view = [c for c in view if _matches(c, q.strip())]
+        # Поиск смотрит и в превью — здесь оно нужно всему срезу.
+        view = [c for c in view if _matches(_with_preview(c), q.strip())]
     view.sort(key=lambda c: (c["last_date"] or ""), reverse=True)
     if folder == "waiting":
         # Ждущие — по давности ожидания: дольше всех ждёт тот, кто выше.
@@ -271,7 +290,8 @@ async def dialogs(pool, owner_id: int, *, folder: str = "all", q: str = "",
         view.sort(key=lambda c: not c["pinned"])
     lim = max(1, min(int(limit), 500))
     off = max(0, int(offset))
-    return {"chats": view[off:off + lim], "counts": counts, "total": len(view)}
+    return {"chats": [_with_preview(c) for c in view[off:off + lim]],
+            "counts": counts, "total": len(view)}
 
 
 async def waiting_chats(pool, owner_id: int, days: int = 7) -> list[dict]:
@@ -384,7 +404,7 @@ async def dialog_info(pool, owner_id: int, chat_id: int) -> dict | None:
     if not rows:
         return None
     d = rows[0]
-    base = _ui(d)
+    base = _with_preview(_ui(d))
     agg = await pool.fetchrow(
         """SELECT COUNT(*) FILTER (WHERE direction='in')  AS incoming,
                   COUNT(*) FILTER (WHERE direction='out') AS outgoing,
