@@ -318,3 +318,34 @@ def test_proxies_bulk_keeps_assigned_ones(app, pool):
     assert [r["id"] for r in left] == [p2]
     st, _ = _call(app, "POST", "/api/miniapp/proxies/bulk", {"op": "delete", "proxy_ids": [p2]}, uid=OTHER)
     assert _run(pool.fetchval("SELECT COUNT(*) FROM user_proxies WHERE id=$1", p2)) == 1
+
+
+def test_active_saved_view_is_highlighted():
+    """Чипы сохранённых видов выглядели одинаково: не понять, какой применён."""
+    import json as _json
+    import re as _re
+    import subprocess as _sp
+    from pathlib import Path as _P
+    src = (_P(__file__).resolve().parents[1] / "mini_app/screens/fleet_tools.js").read_text(encoding="utf-8")
+
+    def fn(name):
+        m = _re.search(r"\nfunction " + name + r"\([\s\S]*?\n}\n", src)
+        assert m, name
+        return m.group(0)
+
+    js = (
+        "let BOT_FILTER='problem', BOT_SEARCH='';"
+        "const FLEET_SORT={bots:{sort:'default',dir:''}};"
+        "function _fxSortState(k){return FLEET_SORT[k]}"
+        "const FLEET_VIEW_IO={bots:{get:()=>({filter:BOT_FILTER,q:BOT_SEARCH})}};"
+        + fn("_fxNormView") + fn("_fxViewIsActive")
+        + "const v={params:{filter:'problem',q:'',sort:'default',dir:''}};"
+        "const a=_fxViewIsActive('bots',v); BOT_SEARCH='x'; const b=_fxViewIsActive('bots',v);"
+        "BOT_SEARCH=''; const c=_fxViewIsActive('bots',{params:{filter:'problem'}});"
+        "FLEET_SORT.bots={sort:'name',dir:'asc'}; const d=_fxViewIsActive('bots',v);"
+        "console.log(JSON.stringify([a,b,c,d]))"
+    )
+    out = _sp.run(["node", "-e", js], check=False, capture_output=True, text=True, timeout=30)
+    assert out.returncode == 0, out.stderr
+    assert _json.loads(out.stdout) == [True, False, True, False]
+    assert 'data-view="${v.id}"' in src
