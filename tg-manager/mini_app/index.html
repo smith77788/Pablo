@@ -14374,7 +14374,7 @@ async function openChannels() {
     CH_OFFSET = CUR_CHANNELS.length;
     CH_TOTAL = (d.total!=null?d.total:CUR_CHANNELS.length);
     CH_COUNTS = d.counts || null;
-    txt('ch-cnt', ((CH_COUNTS && CH_COUNTS.all!=null) ? CH_COUNTS.all : CH_TOTAL)+' каналов');
+    txt('ch-cnt', _chCountLabel());
     renderChFilterChips();
     if (!CUR_CHANNELS.length) { txt('chList', empty('📡','Нет каналов','Создайте сеть каналов или импортируйте существующие',
       {label:'📡 Фабрика каналов', fn:'openChannelFactory()'})); renderChLoadMore(0); return; }
@@ -14402,7 +14402,7 @@ async function loadMoreChannels() {
       CH_OFFSET += more.length;
       if (d.total!=null) CH_TOTAL = d.total;
     }
-    txt('ch-cnt', ((CH_COUNTS && CH_COUNTS.all!=null) ? CH_COUNTS.all : CH_TOTAL)+' каналов');
+    txt('ch-cnt', _chCountLabel());
     renderChFilterChips();
     renderChannels();
     if (CH_SEL_MODE) updateChSelBar();
@@ -14428,7 +14428,7 @@ async function reloadChannels() {
     CH_OFFSET = CUR_CHANNELS.length;
     CH_TOTAL = (d.total != null ? d.total : CUR_CHANNELS.length);
     if (d.counts) CH_COUNTS = d.counts;
-    txt('ch-cnt', ((CH_COUNTS && CH_COUNTS.all!=null) ? CH_COUNTS.all : CH_TOTAL)+' каналов');
+    txt('ch-cnt', _chCountLabel());
     renderChFilterChips();
     renderChannels();
     if (CH_SEL_MODE) updateChSelBar();
@@ -18226,7 +18226,7 @@ async function loadCfPoolStatus() {
       // префилл только если пользователь не трогал (=дефолт 10) и есть кому раздать
       if (cntEl && need > 0 && (cntEl.value==='10' || cntEl.value==='')) cntEl.value = need;
       hint.textContent = need > 0
-        ? `💡 Рекомендуем ${need} воркер(ов) — по числу аккаунтов без прокси. Всего активных: ${act}. Оставьте 0/пусто = авто. ⚠️ Cloudflare даёт общий IP на пул (не 1:1) — для уникального IP на аккаунт нужны прокси.`
+        ? `💡 Рекомендуем ${need} ${plural(need,'воркер','воркера','воркеров')} — по числу аккаунтов без прокси. Всего активных: ${act}. Оставьте 0/пусто = авто. ⚠️ Cloudflare даёт общий IP на пул (не 1:1) — для уникального IP на аккаунт нужны прокси.`
         : `Все ${act} активных аккаунтов уже с прокси — релей не требуется.`;
     }
   } catch(e) { el.textContent = '—'; }
@@ -18274,7 +18274,7 @@ async function deployCfPool() {
   const raw = document.getElementById('cfPoolCount').value.trim();
   const count = raw==='' ? 0 : (parseInt(raw)||0);  // 0/пусто → авто (по числу аккаунтов)
   const label = count>0 ? `${count}` : 'авто (по числу аккаунтов)';
-  if (!await askConfirm(`Задеплоить ${label} Cloudflare Worker(ов) и раздать аккаунтам без прокси? Деплой идёт в фоне (~несколько минут для больших пулов).`)) return;
+  if (!await askConfirm(`Развернуть Cloudflare-воркеры (${label}) и раздать аккаунтам без прокси? Деплой идёт в фоне (~несколько минут для больших пулов).`)) return;
   const btn = document.getElementById('cfDeployBtn');
   btn.disabled=true; btn.textContent='☁️ Запускаю…';
   try {
@@ -18335,7 +18335,7 @@ async function checkProxyIsolation() {
       }
     }
     if (typeof r.on_relay==='number' && r.on_relay) {
-      h += `<div style="color:var(--orange)">☁️ На CF-релее: ${r.on_relay} аккаунт(ов) — Cloudflare даёт <b>общий</b> IP на пул, это <b>не</b> уникальный IP на аккаунт. Считать изолированными нельзя; для 1:1 — прокси.</div>`;
+      h += `<div style="color:var(--orange)">☁️ На CF-релее: ${r.on_relay} ${plural(r.on_relay,'аккаунт','аккаунта','аккаунтов')} — Cloudflare даёт <b>общий</b> IP на пул, это <b>не</b> уникальный IP на аккаунт. Считать изолированными нельзя; для 1:1 — прокси.</div>`;
     }
     if ((r.relay_shared_groups||[]).length) {
       h += `<div style="color:var(--orange);margin-top:4px">☁️ Один воркер на несколько аккаунтов (слабее изоляция — задеплойте пул ≥ числу аккаунтов):</div>`;
@@ -18812,7 +18812,7 @@ async function loadAutoregPro() {
     txt('arp-success', num(success));
     txt('arp-pending', num(pending));
     txt('arp-failed', num(failed));
-    txt('m-autoreg-val', total+' аккаунтов');
+    txt('m-autoreg-val', total+' '+plural(total, 'аккаунт', 'аккаунта', 'аккаунтов'));
     renderAutoregProBars(accounts);
     renderAutoregProList(accounts);
     renderAutoregProHistory(accounts.slice(0,20));
@@ -18888,7 +18888,7 @@ async function submitAutoregPro() {
   const count = parseInt(document.getElementById('arp-count').value)||10;
   const country = document.getElementById('arp-country').value;
   if (count<1||count>50) { errEl.textContent='Количество: от 1 до 50'; errEl.style.display='block'; return; }
-  if (!await askConfirm(`Зарегистрировать ${count} аккаунт(ов) через SMS-сервис? Списываются средства сервиса за номера.`)) return;
+  if (!await askConfirm(`Зарегистрировать ${count} ${plural(count,'аккаунт','аккаунта','аккаунтов')} через SMS-сервис? Списываются средства сервиса за номера.`)) return;
   const btn = document.getElementById('arp-btn');
   btn.disabled=true; btn.textContent='Запускаю…';
   try {
@@ -20941,7 +20941,7 @@ async function loadVaultAnalytics() {
         <div style="font-size:10px;color:var(--hint)">${l}</div></div>`;
     const un = a.unanswered_dialogs || 0;
     const unRow = un > 0
-      ? `<div style="margin-top:6px;font-size:12px;color:var(--amber,#f59e0b);text-align:center">⚠ ${un} диалог(ов) без ответа</div>`
+      ? `<div style="margin-top:6px;font-size:12px;color:var(--amber,#f59e0b);text-align:center">⚠ ${un} ${plural(un,'диалог','диалога','диалогов')} без ответа</div>`
       : '';
     const peers = (a.top_peers || []).slice(0, 3);
     const peersRow = peers.length
@@ -24518,6 +24518,7 @@ function bfAccAll(on) {
 }
 function bfSetMode(mode) {
   _BF_MODE = (mode === 'token') ? 'token' : 'new';
+  if (typeof _bfSavePrefs === 'function') _bfSavePrefs();
   const isNew = _BF_MODE === 'new';
   const nf = document.getElementById('bfNewFields');
   const tf = document.getElementById('bfTokenField');
@@ -32570,7 +32571,7 @@ async function openGraph() {
         <div class="row-val" style="color:var(--hint)">пары, где аудитория совпадает больше чем на десятую часть — список ниже</div></div>
         <div class="row-right" style="color:${(st.strong_overlaps||0)?'var(--orange,#f59e0b)':'var(--hint)'}">${num(st.strong_overlaps||0)}</div></div>
     `);
-    document.getElementById('m-graph-val').textContent = (st.nodes||0)+' каналов';
+    document.getElementById('m-graph-val').textContent = (st.nodes||0)+' '+plural(st.nodes||0, 'канал', 'канала', 'каналов');
     if (!ov.length) { txt('graphOverlaps', empty('🕸','Пересечений не найдено',
       'Граф строится по вашим каналам и их аудиториям; пересечения появятся, когда каналов станет больше одного',
       {label:'📢 К каналам', fn:"goTab('channels')"})); return; }
@@ -34659,6 +34660,11 @@ function num(v) {
 // объявление стиля или пустую строку (тогда число берёт обычный цвет текста).
 function kpiTone(n, tone) { return Number(n) > 0 ? 'color:var(--' + tone + ')' : ''; }
 
+// Счётчик над списком каналов: «1 каналов» и «3 каналов» не склонялись.
+function _chCountLabel() {
+  const n = (CH_COUNTS && CH_COUNTS.all!=null) ? CH_COUNTS.all : CH_TOTAL;
+  return n + ' ' + plural(n, 'канал', 'канала', 'каналов');
+}
 function plural(n, one, few, many) {
   n = Math.abs(Math.trunc(Number(n) || 0));
   const d = n % 10, h = n % 100;
