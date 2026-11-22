@@ -1971,6 +1971,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 /* Список диалогов в стиле Telegram */
 .vfolders{display:flex;gap:4px;overflow-x:auto;padding:2px 0 8px;border-bottom:1px solid var(--sep);margin-bottom:2px;scrollbar-width:none}
 .vfolders::-webkit-scrollbar{display:none}
+.vread-all{display:flex;justify-content:flex-end;padding:6px 0}
 .vfold{flex:0 0 auto;font-size:14px;font-weight:600;padding:7px 12px;border-radius:16px;color:var(--hint);cursor:pointer;white-space:nowrap}
 .vfold.on{color:var(--accent);background:var(--bg2)}
 .vfold-n{display:inline-block;min-width:18px;padding:0 5px;border-radius:9px;background:var(--hint);color:var(--bg);font-size:11px;line-height:18px;text-align:center;margin-left:2px}
@@ -21040,7 +21041,7 @@ function renderVaultChats(list) {
     txt('vaultList', empty(msg[0], msg[1], msg[2]));
     return;
   }
-  txt('vaultList', _VAULT_CHATS.map(vaultRowHtml).join(''));
+  txt('vaultList', vaultReadAllBar(_VAULT_CHATS) + _VAULT_CHATS.map(vaultRowHtml).join(''));
   vaultBindLongPress(document.getElementById('vaultList'));
 }
 
