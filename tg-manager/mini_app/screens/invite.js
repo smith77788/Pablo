@@ -230,7 +230,7 @@ async function _invLoadAccs(q) {
     </div>`).join('');
     const flagged = accs.filter(a=>a.health_status==='quarantine'||a.health_status==='at_risk').length;
     if (flagged) {
-      wrap.insertAdjacentHTML('afterbegin', `<div style="font-size:12px;color:var(--hint);padding:2px 4px 6px;border-bottom:1px solid var(--sep);margin-bottom:4px">🛡 ${flagged} аккаунт(ов) под риск-пульсом — их пропустят для защиты от бана</div>`);
+      wrap.insertAdjacentHTML('afterbegin', `<div style="font-size:12px;color:var(--hint);padding:2px 4px 6px;border-bottom:1px solid var(--sep);margin-bottom:4px">🛡 ${flagged} ${plural(flagged, 'аккаунт', 'аккаунта', 'аккаунтов')} под риск-пульсом — их пропустят для защиты от бана</div>`);
     }
   } else {
     wrap.innerHTML = '<div style="font-size:12px;color:var(--hint);padding:4px">'
@@ -251,6 +251,7 @@ async function openMassInvite() {
   ['massInviteRights','massInviteListPreview','massInviteReadiness'].forEach(id=>{const e=document.getElementById(id); if(e) e.innerHTML='';});
   INV_IMPORT_OK = 0;
   INV_FILE_REFS = null; INV_FILE_PHONES = null;
+  _invApplyPrefs();
   massInviteSrcToggle();
   massInviteMethodToggle();
   INV_RESERVE_ORDER = [];
@@ -297,6 +298,34 @@ async function openMassInvite() {
     }).join(''));
   } else {
     txt('massInviteHistory', empty('⚠️','Ошибка',opsD.reason?.message||'', {label:'↺ Повторить',fn:retryCall('openMassInvite')}));
+  }
+}
+
+// Темп, способ, режим объёма, лимиты и текст ссылки — с прошлого УДАЧНОГО
+// запуска: обычно инвайт гоняют с одними и теми же безопасными настройками,
+// а лимит на аккаунт, не заданный по забывчивости, — главный риск бана.
+// Рискованные переключатели («один проход», «взять рисковые», «повторный
+// инвайт») не запоминаются НАМЕРЕННО: каждый раз это осознанный выбор.
+const _INV_PREF_FIELDS = {pace: 'massInvitePace', invite_method: 'massInviteMethod',
+  volume_mode: 'massInviteVolMode', batch_size: 'massInviteBatch',
+  per_account_limit: 'massInvitePerAcc', link_message: 'massInviteLinkMsg'};
+
+function _invSavePrefs(body) {
+  const o = {};
+  for (const k in _INV_PREF_FIELDS) o[k] = body[k] == null ? '' : String(body[k]);
+  saveFormPrefs('mass_invite', o);
+}
+
+function _invApplyPrefs() {
+  const p = loadFormPrefs('mass_invite');
+  for (const k in _INV_PREF_FIELDS) {
+    if (p[k] == null) continue;
+    const el = document.getElementById(_INV_PREF_FIELDS[k]);
+    if (!el) continue;
+    // Значение, которого в списке больше нет, не подставляем — иначе select
+    // молча покажет пустоту.
+    if (el.tagName === 'SELECT' && ![...el.options].some(o => o.value === p[k])) continue;
+    el.value = p[k];
   }
 }
 
@@ -620,7 +649,7 @@ async function loadInvitePreflight(audience) {
     const passLine = (audience && d.est_passes)
       ? (d.one_pass
           ? '<span style="color:var(--green)">✅ Уйдёт за один проход</span>'
-          : `<span style="color:var(--orange,#e6a100)">🔁 ~${d.est_passes} прохода(ов)</span> (суточный лимит флота ~${num(d.per_pass||0)})`)
+          : `<span style="color:var(--orange,#e6a100)">🔁 ~${d.est_passes} ${plural(d.est_passes, 'проход', 'прохода', 'проходов')}</span> (суточный лимит флота ~${num(d.per_pass||0)})`)
       : '';
     const parts = [];
     parts.push(`🛡 Пригодно аккаунтов: <b>${num(d.usable||0)}</b> из ${num(a.total||0)}`);
@@ -704,7 +733,7 @@ async function submitMassInvite() {
         // списку», но пустой catch давал стартовать именно по нему: проверка
         // упала — и запуск шёл дальше, как будто список разобран. Не смогли
         // проверить — не запускаем.
-        errEl.textContent = 'Не удалось проверить список: ' + (e.message||'ошибка связи')
+        errEl.textContent = 'Не удалось проверить список: ' + errRu(e, 'ошибка связи')
           + '. Запуск не начат — повторите.';
         return;
       }
@@ -790,8 +819,9 @@ async function submitMassInvite() {
   try {
     const r = await api('/api/miniapp/mass_invite',{method:'POST',body:JSON.stringify(body)});
     toast(`📨 Инвайт запущен (#${r.op_id})`);
+    _invSavePrefs(body);
     errEl.textContent='';
     openMassInvite();
-  } catch(e) { errEl.textContent=e.message||'Ошибка'; }
+  } catch(e) { errEl.textContent=errRu(e, 'Не удалось запустить инвайт'); }
   finally { btn.disabled=false; btn.textContent='🚀 Запустить инвайт'; }
 }

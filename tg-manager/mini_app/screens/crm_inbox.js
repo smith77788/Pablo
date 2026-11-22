@@ -200,6 +200,13 @@ async function openInboxThread(i) {
       out += '<button class="btn btn-s" style="flex:1;font-size:12px;padding:10px 6px" onclick="openContactTimeline(\'' + esc(cid) + '\')">📇 Карточка клиента</button>';
     }
     out += '</div>';
+    // Разбор очереди «ждут ответа» подряд: из разговора — сразу к следующему
+    // ждущему, без возврата в список и поиска глазами.
+    const nx = inboxNextWaiting(_ibRows, i);
+    if (nx >= 0) {
+      out += '<div style="padding:0 16px 16px"><button class="btn btn-s" style="width:100%" onclick="openInboxThread(' + nx + ')">' +
+        '⏭ Следующий ждущий ответа</button></div>';
+    }
     if (!canRelay) {
       out += '<div style="margin:0 16px 16px;font-size:11px;color:var(--hint);line-height:1.4">' +
         'Ответить отсюда можно, только если человек писал в релей бота. Аккаунт флота в это время держит слушатель, ' +
@@ -362,6 +369,16 @@ async function inboxSaveTpl() {
   } catch (e) { toast('⚠️ ' + errRu(e, 'Не удалось сохранить')); }
 }
 
+// Индекс следующего ждущего ответа разговора после from (по кругу), -1 — нет.
+function inboxNextWaiting(rows, from) {
+  const n = (rows || []).length;
+  for (let k = 1; k < n; k++) {
+    const j = (from + k) % n;
+    if (rows[j] && rows[j].waiting) return j;
+  }
+  return -1;
+}
+
 async function sendInboxReply() {
   const t = _ibPeer;
   const el = _ibEl('ibReplyText');
@@ -373,6 +390,9 @@ async function sendInboxReply() {
       method: 'POST', body: JSON.stringify({text: text, bot_id: relay.bot_id || 0})});
     toast('✅ Отправлено');
     clearDraft(_ibDraftKey(t));
+    // Ответили — разговор больше не ждёт; без этого «Следующий ждущий»
+    // из соседнего разговора вёл бы обратно сюда.
+    t.waiting = false;
     const i = _ibRows.indexOf(t);
     if (i >= 0) openInboxThread(i);
   } catch (e) {
