@@ -353,98 +353,122 @@ def get_error_patterns(account_id: int) -> dict[str, list[str]]:
 # ── Персистентность в БД ──────────────────────────────────────────────────────
 
 
+_ACCOUNT_UPSERT = """INSERT INTO infra_memory_accounts
+       (account_id, action_type, successes, failures,
+        last_success_at, last_failure_at, last_errors,
+        avg_duration_s, updated_at)
+   VALUES ($1, $2, $3, $4,
+       to_timestamp($5), to_timestamp($6),
+       $7, $8, NOW())
+   ON CONFLICT (account_id, action_type)
+   DO UPDATE SET
+       -- ПРИБАВЛЯЕМ прирост, а не перезаписываем абсолютом:
+       -- иначе вторая реплика затирает инкременты первой.
+       -- $3/$4 здесь — дельта с прошлого флаша.
+       successes = infra_memory_accounts.successes + EXCLUDED.successes,
+       failures = infra_memory_accounts.failures + EXCLUDED.failures,
+       last_success_at = GREATEST(infra_memory_accounts.last_success_at, EXCLUDED.last_success_at),
+       last_failure_at = GREATEST(infra_memory_accounts.last_failure_at, EXCLUDED.last_failure_at),
+       last_errors = EXCLUDED.last_errors,
+       avg_duration_s = CASE
+           WHEN EXCLUDED.avg_duration_s > 0 THEN EXCLUDED.avg_duration_s
+           ELSE infra_memory_accounts.avg_duration_s
+       END,
+       updated_at = NOW()"""
+
+_PROXY_UPSERT = """INSERT INTO infra_memory_proxies
+       (proxy_url, action_type, successes, failures,
+        avg_latency_ms, last_success_at, last_failure_at, updated_at)
+   VALUES ($1, $2, $3, $4, $5,
+       to_timestamp($6), to_timestamp($7), NOW())
+   ON CONFLICT (proxy_url, action_type)
+   DO UPDATE SET
+       -- Прирост, а не абсолют (см. infra_memory_accounts).
+       successes = infra_memory_proxies.successes + EXCLUDED.successes,
+       failures = infra_memory_proxies.failures + EXCLUDED.failures,
+       avg_latency_ms = EXCLUDED.avg_latency_ms,
+       last_success_at = GREATEST(infra_memory_proxies.last_success_at, EXCLUDED.last_success_at),
+       last_failure_at = GREATEST(infra_memory_proxies.last_failure_at, EXCLUDED.last_failure_at),
+       updated_at = NOW()"""
+
+_FLUSH_CHUNK = 500
+
+
+async def _flush_batch(pool, sql, batch, dirty, label) -> None:
+    """Записать пачку; запись, которая не легла, остаётся dirty целиком.
+
+    Кусок идёт одним executemany (атомарно). Упал кусок — его записи пробуются
+    поштучно, чтобы одна битая запись не держала в долгу весь флот.
+    """
+    for i in range(0, len(batch), _FLUSH_CHUNK):
+        chunk = batch[i:i + _FLUSH_CHUNK]
+        try:
+            await pool.executemany(sql, [args for *_, args in chunk])
+            done = chunk
+        except Exception as e:
+            log.warning("infra_memory flush batch of %d failed, retrying one by one: %s",
+                        len(chunk), type(e).__name__)
+            done = []
+            for item in chunk:
+                try:
+                    await pool.execute(sql, *item[-1])
+                    done.append(item)
+                except Exception as e1:
+                    log.warning("infra_memory flush %s: %s", label(item[0]), type(e1).__name__)
+                    # Отметку НЕ двигаем: при повторе прирост уйдёт целиком.
+                    dirty.add(item[0])
+        for _key, rec, succ, fail, _args in done:
+            # Прирост записан — фиксируем отметку на снятом значении. БЕЗ этого
+            # следующий флаш прибавил бы те же значения ещё раз.
+            rec.flushed_successes = succ
+            rec.flushed_failures = fail
+
+
 async def flush_to_db(pool: asyncpg.Pool) -> None:
     """Записать dirty-записи в БД. Вызывается фоновой задачей каждые 60 секунд."""
-    # Аккаунты
-    dirty_accounts = list(_dirty_account_keys)
+    # Одна пачка на таблицу (executemany атомарен), а не запрос на запись:
+    # на широком флоте за минуту набегают тысячи пар «аккаунт × действие», и
+    # поштучный флаш держал соединение пула всё это время. Отметки «записано»
+    # двигаются на СНЯТЫЕ до записи значения: прирост, пришедший во время
+    # await, остаётся долгом следующего флаша, а не теряется.
+    dirty_accounts = sorted(_dirty_account_keys, key=lambda k: (k[0], k[1]))
     _dirty_account_keys.clear()
-
+    acc_batch = []
     for key in dirty_accounts:
         rec = _account_memory.get(key)
         if not rec:
             continue
-        try:
-            await pool.execute(
-                """INSERT INTO infra_memory_accounts
-                       (account_id, action_type, successes, failures,
-                        last_success_at, last_failure_at, last_errors,
-                        avg_duration_s, updated_at)
-                   VALUES ($1, $2, $3, $4,
-                       to_timestamp($5), to_timestamp($6),
-                       $7, $8, NOW())
-                   ON CONFLICT (account_id, action_type)
-                   DO UPDATE SET
-                       -- ПРИБАВЛЯЕМ прирост, а не перезаписываем абсолютом:
-                       -- иначе вторая реплика затирает инкременты первой.
-                       -- $3/$4 здесь — дельта с прошлого флаша.
-                       successes = infra_memory_accounts.successes + EXCLUDED.successes,
-                       failures = infra_memory_accounts.failures + EXCLUDED.failures,
-                       last_success_at = GREATEST(infra_memory_accounts.last_success_at, EXCLUDED.last_success_at),
-                       last_failure_at = GREATEST(infra_memory_accounts.last_failure_at, EXCLUDED.last_failure_at),
-                       last_errors = EXCLUDED.last_errors,
-                       avg_duration_s = CASE
-                           WHEN EXCLUDED.avg_duration_s > 0 THEN EXCLUDED.avg_duration_s
-                           ELSE infra_memory_accounts.avg_duration_s
-                       END,
-                       updated_at = NOW()""",
-                rec.account_id,
-                rec.action_type,
-                max(0, rec.successes - rec.flushed_successes),
-                max(0, rec.failures - rec.flushed_failures),
-                rec.last_success_at if rec.last_success_at > 0 else None,
-                rec.last_failure_at if rec.last_failure_at > 0 else None,
-                rec.last_errors,
-                rec.avg_duration_s if rec.avg_duration_s > 0 else 0.0,
-            )
-            # Прирост записан — фиксируем отметку. БЕЗ этого следующий флаш
-            # прибавил бы те же значения ещё раз и счётчики бы раздувались.
-            rec.flushed_successes = rec.successes
-            rec.flushed_failures = rec.failures
-        except Exception as e:
-            log.warning("infra_memory flush account %s/%s: %s", key[0], key[1], e)
-            _dirty_account_keys.add(key)  # вернуть в dirty для повтора
-            # Отметку НЕ двигаем: при повторе прирост уйдёт целиком.
+        acc_batch.append((key, rec, rec.successes, rec.failures, (
+            rec.account_id,
+            rec.action_type,
+            max(0, rec.successes - rec.flushed_successes),
+            max(0, rec.failures - rec.flushed_failures),
+            rec.last_success_at if rec.last_success_at > 0 else None,
+            rec.last_failure_at if rec.last_failure_at > 0 else None,
+            list(rec.last_errors),
+            rec.avg_duration_s if rec.avg_duration_s > 0 else 0.0,
+        )))
+    await _flush_batch(pool, _ACCOUNT_UPSERT, acc_batch, _dirty_account_keys,
+                       lambda key: f"account {key[0]}/{key[1]}")
 
-    # Прокси
-    dirty_proxies = list(_dirty_proxy_keys)
+    dirty_proxies = sorted(_dirty_proxy_keys, key=lambda k: (k[0], k[1]))
     _dirty_proxy_keys.clear()
-
+    proxy_batch = []
     for key in dirty_proxies:
         rec = _proxy_memory.get(key)
         if not rec:
             continue
-        try:
-            await pool.execute(
-                """INSERT INTO infra_memory_proxies
-                       (proxy_url, action_type, successes, failures,
-                        avg_latency_ms, last_success_at, last_failure_at, updated_at)
-                   VALUES ($1, $2, $3, $4, $5,
-                       to_timestamp($6), to_timestamp($7), NOW())
-                   ON CONFLICT (proxy_url, action_type)
-                   DO UPDATE SET
-                       -- Прирост, а не абсолют (см. infra_memory_accounts).
-                       successes = infra_memory_proxies.successes + EXCLUDED.successes,
-                       failures = infra_memory_proxies.failures + EXCLUDED.failures,
-                       avg_latency_ms = EXCLUDED.avg_latency_ms,
-                       last_success_at = GREATEST(infra_memory_proxies.last_success_at, EXCLUDED.last_success_at),
-                       last_failure_at = GREATEST(infra_memory_proxies.last_failure_at, EXCLUDED.last_failure_at),
-                       updated_at = NOW()""",
-                rec.proxy_url,
-                rec.action_type,
-                max(0, rec.successes - rec.flushed_successes),
-                max(0, rec.failures - rec.flushed_failures),
-                rec.avg_latency_ms,
-                rec.last_success_at if rec.last_success_at > 0 else None,
-                rec.last_failure_at if rec.last_failure_at > 0 else None,
-            )
-            rec.flushed_successes = rec.successes      # см. account-ветку выше
-            rec.flushed_failures = rec.failures
-        except Exception as e:
-            log.warning(
-                "infra_memory flush proxy fingerprint=%s action=%s: %s",
-                key[0][:12], key[1], type(e).__name__,
-            )
-            _dirty_proxy_keys.add(key)
+        proxy_batch.append((key, rec, rec.successes, rec.failures, (
+            rec.proxy_url,
+            rec.action_type,
+            max(0, rec.successes - rec.flushed_successes),
+            max(0, rec.failures - rec.flushed_failures),
+            rec.avg_latency_ms,
+            rec.last_success_at if rec.last_success_at > 0 else None,
+            rec.last_failure_at if rec.last_failure_at > 0 else None,
+        )))
+    await _flush_batch(pool, _PROXY_UPSERT, proxy_batch, _dirty_proxy_keys,
+                       lambda key: f"proxy fingerprint={key[0][:12]} action={key[1]}")
 
     if dirty_accounts or dirty_proxies:
         log.debug(
