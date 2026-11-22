@@ -54,6 +54,19 @@ log = logging.getLogger(__name__)
 router = Router()
 
 
+def _op_name(op_type) -> str:
+    """Название операции по-русски (реестр operation_bus) вместо кода
+    «mass_invite»: владелец английского не читает."""
+    from services import operation_bus as _ob
+    meta = _ob.OP_REGISTRY.get(str(op_type or ""), {})
+    return meta.get("description") or "Операция"
+
+
+def _ost_label(status) -> str:
+    from services import op_status as _os
+    return _os.label(status)
+
+
 # ── Timing options ──────────────────────────────────────────────────────────
 
 _TIMING_OPTIONS = [
@@ -1007,7 +1020,7 @@ async def cb_op_detail(
                      "failed": "❌", "cancelled": "🚫"}
     _LOG_ICONS = {"ok": "✅", "skip": "⏭", "error": "❌"}
     icon = _STATUS_ICONS.get(op["status"], "❓")
-    op_type_label = html.escape(op["op_type"])
+    op_type_label = html.escape(_op_name(op["op_type"]))
     done = op["done_items"] or 0
     total = op["total_items"] or 0
     created = op["created_at"].strftime("%d.%m.%Y %H:%M") if op["created_at"] else "—"
@@ -1015,7 +1028,7 @@ async def cb_op_detail(
 
     lines = [
         f"🔍 <b>Детали операции #{op_id}</b>",
-        f"{icon} <b>{op_type_label}</b>  [{op['status']}]",
+        f"{icon} <b>{op_type_label}</b>  [{html.escape(_ost_label(op['status']))}]",
         f"Прогресс: {done}/{total}  ·  Создана: {created}",
     ]
     if op["finished_at"]:
@@ -1254,7 +1267,7 @@ async def cb_queue(
     failed_count = 0
     for i, r in enumerate(rows, offset + 1):
         icon = _STATUS_ICONS.get(r["status"], "❓")
-        op_type_label = html.escape(r["op_type"])
+        op_type_label = html.escape(_op_name(r["op_type"]))
         status = r["status"]
         done = r["done_items"] or 0
         total = r["total_items"] or 0
