@@ -115,7 +115,7 @@ def test_dashboard_opens_on_problems_first():
 
 def test_analytics_renders_data_it_already_receives():
     """account_health / seo / geo приходили в ответе и не рисовались."""
-    m = re.search(r"function _udRenderAnalytics\(d\)\s*\{(.*?)\n\}", DASH, re.S)
+    m = re.search(r"function _udRenderAnalytics\(d(?:, rng)?\)\s*\{(.*?)\n\}", DASH, re.S)
     assert m, "рендер аналитики не найден"
     body = m.group(1)
     for key in ("account_health", "seo", "geo"):
