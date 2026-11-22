@@ -125,7 +125,9 @@ def test_there_is_one_export_path():
 
 def test_the_vcard_keeps_the_fields_the_deleted_one_had():
     """Свести две реализации в одну нельзя за счёт потери полей."""
-    fn = py_function("services/contacts_hub/export_engine.py", "export_vcf")
+    # Сборка визитки вынесена из export_vcf в _vcf_text (идёт в потоке) —
+    # поля проверяются там, где их пишут.
+    fn = py_function("services/contacts_hub/export_engine.py", "_vcf_text")
     assert "URL:" in fn, "сайты пропали из визитки"
     assert "BDAY:" in fn, "день рождения пропал из визитки"
 
