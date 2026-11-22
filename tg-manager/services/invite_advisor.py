@@ -24,33 +24,10 @@
 
 from __future__ import annotations
 
-import asyncio
 import logging
 
 log = logging.getLogger(__name__)
 
-# Сколько проверок аккаунтов делаем одновременно. Разбор запрашивается из
-# интерактивного экрана, а проверок ровно две на аккаунт (карантин + остаток
-# лимита) — последовательно это 400 round-trip'ов на флоте в 200 аккаунтов, то
-# есть секунды ожидания на ровном месте. Потолок держим ниже размера пула
-# соединений: разбор — вспомогательный экран и не вправе занять пул целиком.
-_PROBE_CONCURRENCY = 8
-
-
-async def _map_bounded(items, fn):
-    """Применить асинхронную fn ко всем items с ограничением параллелизма.
-
-    Порядок результатов совпадает с порядком items — рекомендации перечисляют
-    аккаунты, и переставленный порядок сбивал бы оператора при сравнении с
-    предыдущим открытием экрана.
-    """
-    sem = asyncio.Semaphore(_PROBE_CONCURRENCY)
-
-    async def _one(it):
-        async with sem:
-            return await fn(it)
-
-    return await asyncio.gather(*[_one(i) for i in items])
 
 # Ниже этой конверсии за неделю аудиторию есть смысл пересобрать, а не долбить.
 _POOR_CONVERSION = 0.5
@@ -204,9 +181,10 @@ async def build_advice(pool, owner_id: int, *, audience_size: int = 0) -> dict:
         try:
             from services import infra_memory as _im
 
-            _flags = await _map_bounded(
-                weak, lambda r: _im.is_account_quarantined(pool, r["id"]))
-            quarantined = [r for r, flag in zip(weak, _flags) if flag]
+            # Одним запросом на весь флот: поштучная проверка стоила запроса
+            # на аккаунт (2500 запросов на флоте в 2500 рабочих аккаунтов).
+            _held = await _im.quarantined_accounts(pool, [r["id"] for r in weak])
+            quarantined = [r for r in weak if int(r["id"]) in _held]
             if quarantined and len(quarantined) == len(weak):
                 advice.append({
                     "severity": "danger",
@@ -271,12 +249,11 @@ async def build_advice(pool, owner_id: int, *, audience_size: int = 0) -> dict:
     checked.append("запас суточных лимитов")
     capacity, per_acc = 0, []
     try:
-        from services.flood_engine import recommended_daily_limit
+        from services.flood_engine import recommended_daily_limits
 
-        _infos = await _map_bounded(
-            weak, lambda r: recommended_daily_limit(pool, int(r["id"])))
-        for r, info in zip(weak, _infos):
-            rem = int((info or {}).get("remaining") or 0)
+        _infos = await recommended_daily_limits(pool, [int(r["id"]) for r in weak])
+        for r in weak:
+            rem = int((_infos.get(int(r["id"])) or {}).get("remaining") or 0)
             capacity += rem
             per_acc.append((r, rem))
     except Exception:
