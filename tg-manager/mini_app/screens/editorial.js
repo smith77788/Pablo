@@ -112,11 +112,13 @@ function _edRender(p) {
     '<div class="sec">Рубрики канала</div>' +
     '<div class="lst" style="padding:14px">' +
       '<div class="field"><label>Одна рубрика на строку, доля через двоеточие</label>' +
-        '<textarea id="edPillars" rows="4" placeholder="Новости: 3&#10;Полезное: 2&#10;Реклама: 1">' +
+        '<textarea id="edPillars" rows="4" oninput="edPillarsPreview()" placeholder="Новости: 3&#10;Полезное: 2&#10;Реклама: 1">' +
           esc((p.pillars || []).map(function (x) { return x.name + ': ' + x.weight; }).join('\n')) +
         '</textarea>' +
         '<div class="field-note">Доля — от 1 до 10: «Новости: 3, Реклама: 1» значит новостей втрое больше. ' +
-          'Редактор подскажет, какую рубрику публиковать следующей, и не даст поставить три рекламы подряд. До 12 рубрик.</div></div>' +
+          'Редактор подскажет, какую рубрику публиковать следующей, и не даст поставить три рекламы подряд. До 12 рубрик.</div>' +
+        '<div id="edPillarsPrev" style="font-size:12px;line-height:1.5;margin-top:6px">' +
+          _edPillarsHtml((p.pillars || []).map(function (x) { return x.name + ': ' + x.weight; }).join('\n')) + '</div></div>' +
       '<button class="btn btn-p" onclick="saveEditorialRules()" style="width:100%">💾 Сохранить правила</button>' +
     '</div>' +
     '<div class="sec">Проверить текст</div>' +
@@ -125,6 +127,45 @@ function _edRender(p) {
       '<button class="btn btn-s" id="edTryBtn" onclick="tryEditorialReview()" style="width:100%">✍️ Проверить</button>' +
       '<div id="edTryOut" style="margin-top:10px;font-size:13px;line-height:1.5"></div>' +
     '</div>';
+}
+
+// Доли рубрик в процентах — сразу при наборе, тем же разбором, что и сервер
+// (channel_brain_store.validate_pillars): «Название: доля», доля 1…10,
+// без доли — 1, двоеточие без числа — часть названия. «Новости: 3,
+// Реклама: 1» читается как вес, а не процент, и без подсказки это неочевидно.
+function _edPillarShares(text) {
+  const items = [], errors = [], seen = {};
+  String(text || '').split('\n').forEach(function (line) {
+    if (!line.trim()) return;
+    const i = line.lastIndexOf(':');
+    let name = line, w = '';
+    if (i > 0 && /^-?\d+$/.test(line.slice(i + 1).trim())) { name = line.slice(0, i); w = line.slice(i + 1).trim(); }
+    name = name.split(/\s+/).filter(Boolean).join(' ');
+    if (!name) return;
+    if (seen[name.toLowerCase()]) { errors.push('«' + name + '» указана дважды'); return; }
+    const weight = w === '' ? 1 : parseInt(w, 10);
+    if (!(weight >= 1 && weight <= 10)) { errors.push('«' + name + '»: доля от 1 до 10'); return; }
+    seen[name.toLowerCase()] = 1;
+    items.push({name: name, weight: weight});
+  });
+  if (items.length > 12) errors.push('Рубрик не больше 12, сейчас ' + items.length);
+  const sum = items.reduce(function (a, x) { return a + x.weight; }, 0);
+  items.forEach(function (x) { x.pct = sum ? Math.round(x.weight * 100 / sum) : 0; });
+  return {items: items, errors: errors};
+}
+
+function _edPillarsHtml(text) {
+  const r = _edPillarShares(text);
+  if (!r.items.length && !r.errors.length) return '';
+  return (r.items.length ? '<div style="color:var(--hint)">Выйдет: ' +
+      r.items.map(function (x) { return esc(x.name) + ' ' + x.pct + '%'; }).join(' · ') + '</div>' : '') +
+    r.errors.map(function (e) { return '<div style="color:var(--red)">⚠️ ' + esc(e) + '</div>'; }).join('');
+}
+
+function edPillarsPreview() {
+  const box = document.getElementById('edPillarsPrev');
+  const ta = document.getElementById('edPillars');
+  if (box && ta) box.innerHTML = _edPillarsHtml(ta.value);
 }
 
 // У канала: взять общие правила за основу (форма заполняется, сохраняет
@@ -197,7 +238,7 @@ async function saveEditorialRules() {
     tg.HapticFeedback?.notificationOccurred('success');
     toast('✅ Правила редактора сохранены');
   } catch (e) {
-    errEl.textContent = (e && e.message) || 'Не удалось сохранить';
+    errEl.textContent = errRu(e, 'Не удалось сохранить');
     errEl.style.display = 'block';
     tg.HapticFeedback?.notificationOccurred('error');
   } finally {
@@ -226,7 +267,7 @@ async function tryEditorialReview() {
     out.innerHTML = editorialAdviceHtml(r) ||
       '<span style="color:var(--green)">✅ Замечаний нет: не похоже на недавние посты и правила соблюдены.</span>';
   } catch (e) {
-    out.innerHTML = errHtml('Не удалось проверить: ' + ((e && e.message) || ''), 'tryEditorialReview()');
+    out.innerHTML = errHtml(errRu(e, 'Не удалось проверить'), 'tryEditorialReview()');
   } finally {
     btn.disabled = false;
   }
