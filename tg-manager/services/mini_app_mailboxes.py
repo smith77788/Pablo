@@ -10,7 +10,7 @@ import ssl
 
 from aiohttp import web
 
-from services.token_vault import encrypt_token
+from services.token_vault import decrypt_token, encrypt_token
 
 log = logging.getLogger(__name__)
 
@@ -122,6 +122,48 @@ def setup_routes(app: web.Application, pool) -> None:
             uid, email, provider[1], provider[2], encrypted)
         return _json_resp({'ok': True, 'email': email})
 
+    # Ящик, на котором отправка трижды подряд сорвалась, выключается сам
+    # (strike_engine). Вернуть его можно было только повторным вводом пароля
+    # или удалением. Теперь — одной кнопкой: пароль уже сохранён, вход по нему
+    # проверяется заново, и только удачная проверка включает ящик.
+    async def mailbox_enable(request):
+        uid = _get_uid(request)
+        if not uid:
+            return _err('Unauthorized', 401)
+        try:
+            mailbox_id = int(request.match_info['mailbox_id'])
+            if not 0 < mailbox_id < 2**63:
+                raise ValueError
+        except (KeyError, ValueError):
+            return _err('Неверный ящик', 400)
+        row = await pool.fetchrow(
+            'SELECT id, email, smtp_host, smtp_port, smtp_pass, auth_type '
+            'FROM strike_email_accounts WHERE id=$1 AND owner_id=$2', mailbox_id, uid)
+        if not row:
+            return _err('Ящик не найден', 404)
+        if (row['auth_type'] or 'password') == 'password':
+            password = decrypt_token(row['smtp_pass'] or '')
+            if not password:
+                return _err('Пароль ящика не читается. Подключите ящик заново.', 409)
+            if slots.locked():
+                return _err('Проверки почты заняты. Повторите через минуту.', 429)
+            try:
+                async with slots:
+                    await asyncio.wait_for(asyncio.to_thread(
+                        check_credentials, row['smtp_host'], int(row['smtp_port']),
+                        row['email'], password), 35)
+            except smtplib.SMTPAuthenticationError:
+                return _err('Почта отклонила вход: пароль приложения больше не подходит. '
+                            'Подключите ящик заново с новым паролем.', 400)
+            except (OSError, smtplib.SMTPException, TimeoutError) as exc:
+                log.warning('mailbox enable check failed owner=%s kind=%s', uid, type(exc).__name__)
+                return _err('Почтовый сервер недоступен по SMTP, ящик остаётся выключенным. '
+                            'Повторите позже.', 422)
+        await pool.execute(
+            'UPDATE strike_email_accounts SET is_active=TRUE, fail_count=0 '
+            'WHERE id=$1 AND owner_id=$2', mailbox_id, uid)
+        return _json_resp({'ok': True})
+
     async def mailbox_delete(request):
         uid = _get_uid(request)
         if not uid:
@@ -142,4 +184,5 @@ def setup_routes(app: web.Application, pool) -> None:
     app.router.add_get("/api/miniapp/mailboxes", mailbox_list)
     app.router.add_post("/api/miniapp/mailboxes", mailbox_connect)
     app.router.add_delete("/api/miniapp/mailboxes/{mailbox_id}", mailbox_delete)
+    app.router.add_post("/api/miniapp/mailboxes/{mailbox_id}/enable", mailbox_enable)
     app.router.add_post("/api/miniapp/mailboxes/oauth/{provider}", mailbox_oauth_start)
