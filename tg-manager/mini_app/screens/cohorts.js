@@ -59,6 +59,7 @@ function _coCell(v, max) {
 
 function coSetMetric(m) {
   _coMetric = m;
+  saveFormPrefs('cohorts', {metric: m});
   _coRender();
 }
 
@@ -137,6 +138,7 @@ function _coRender() {
       (c[_coMetric] || []).map(function (v) { return _coCell(v, max); }).join('') + '</tr>';
   }).join('');
   out += '</tbody></table></div>';
+  out += '<div style="margin:8px 16px 0"><button class="btn btn-s" style="width:100%" onclick="coExportCsv()">⬇️ Выгрузить таблицу (CSV)</button></div>';
   out += '<div style="margin:6px 16px 0;font-size:11px;color:var(--hint);line-height:1.45">' +
     (_coMetric === 'ltv' ? 'Накопленная выручка на одного человека когорты к этому периоду.'
       : _coMetric === 'active' ? 'Доля когорты, которая в этом периоде написала или купила.'
@@ -167,7 +169,12 @@ function _coRender() {
 }
 
 async function openCohorts(grain) {
+  // Шаг и показатель помнятся между заходами, а не только до перезагрузки.
+  const pref = loadFormPrefs('cohorts');
+  if (grain === undefined) grain = pref.grain;
+  if (CO_METRICS.some(function (m) { return m[0] === pref.metric; })) _coMetric = pref.metric;
   _coGrain = grain === 'week' ? 'week' : (grain === 'month' ? 'month' : _coGrain);
+  saveFormPrefs('cohorts', {grain: _coGrain});
   const el = _coScreen('s-cohorts', '👤 CRM', 'openCohorts(_coGrain)',
     '<div class="filter-chips mod-tabs" data-module="crm" data-tab="cohorts" role="tablist" aria-label="Вкладки модуля «CRM»"></div>');
   if (!el.querySelector('.co-cur')) {
@@ -268,5 +275,43 @@ async function msSave() {
     if (_coData) _coLoad();
   } catch (e) {
     toast('⚠️ ' + errRu(e, 'Не удалось сохранить'));
+  }
+}
+
+// Таблица когорт в CSV — для своей отчётности или таблицы инвестору. Раньше
+// цифры можно было только переписать с экрана. Все три показателя сразу:
+// LTV в деньгах, «Активны» и «Покупали» — в процентах.
+function coCsv(d, grain) {
+  const periods = Number((d && d.periods) || 0);
+  const head = ['Пришли', 'Людей', 'Показатель'];
+  for (let k = 0; k < periods; k++) head.push(k === 0 ? (grain === 'week' ? 'Неделя прихода' : 'Месяц прихода') : '+' + k);
+  const lines = [head];
+  const names = {ltv: 'LTV, ' + ((d.money && d.money.currency) || ''), active: 'Активны, %', buyers: 'Покупали, %'};
+  (d.cohorts || []).forEach(function (c) {
+    CO_METRICS.forEach(function (m) {
+      const vals = (c[m[0]] || []).map(function (v) {
+        if (v == null) return '';
+        return m[0] === 'ltv' ? String(Math.round(Number(v) * 100) / 100) : String(Math.round(Number(v) * 1000) / 10);
+      });
+      lines.push([c.label, c.size, names[m[0]]].concat(vals));
+    });
+  });
+  return lines.map(function (r) {
+    return r.map(function (c) { return '"' + String(c == null ? '' : c).replace(/"/g, '""') + '"'; }).join(',');
+  }).join('\n');
+}
+
+function coExportCsv() {
+  if (!_coData || !(_coData.cohorts || []).length) { toast('Выгружать пока нечего'); return; }
+  try {
+    const blob = new Blob(['\ufeff' + coCsv(_coData, _coGrain)], {type: 'text/csv;charset=utf-8'});
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = 'cohorts_' + _coGrain + '_' + new Date().toISOString().slice(0, 10) + '.csv';
+    a.click();
+    URL.revokeObjectURL(a.href);
+    toast('⬇️ Выгружено когорт: ' + _coData.cohorts.length);
+  } catch (e) {
+    toast('⚠️ Не удалось выгрузить');
   }
 }
