@@ -15358,6 +15358,9 @@ function _opsQuery(offset, limit) {
 }
 
 let OPS_SEARCH = '';
+// Счётчики по всей очереди владельца с последней загрузки (null — неизвестны
+// или открыт журнал проекта): ими «Очистить завершённые» называет число.
+let OPS_LAST_COUNTS = null;
 let OPS_TYPE = '', OPS_DAYS = '';
 let OPS_SEL_MODE = false;
 const OPS_SEL = new Set();
@@ -15522,6 +15525,7 @@ async function loadOps() {
     // Пустой объект счётчиков = агрегат на сервере не отработал. Считать его
     // за «всего 0» нельзя: на экране в этот момент лежат строки.
     const c = (d.counts && Object.keys(d.counts).length) ? d.counts : null;
+    OPS_LAST_COUNTS = (c && !OPS_PROJECT_ID) ? c : null;
     const cnt = k => c ? (c[k]||0) : OPS_ROWS.filter(o=>o.status===k).length;
     const running = cnt('running'), pending = cnt('pending'), paused = cnt('paused');
     const failed  = cnt('failed'),  done    = cnt('done');
@@ -16077,13 +16081,16 @@ async function clearDoneOps() {
   // Раньше слали cancel по каждой done-операции — cancel работает только для
   // pending/running, поэтому завершённые НЕ удалялись, а тост врал числом
   // выбранных. Теперь реальный DELETE терминальных (готово/ошибки/отменённые).
-  if (!(await askConfirm('Удалить из очереди все завершённые операции (готово, ошибки, отменённые)? Активные не тронем.'))) return;
+  const c = OPS_LAST_COUNTS;
+  const fin = c ? ['done','failed','cancelled'].reduce((a,k)=>a+(Number(c[k])||0),0) : null;
+  const what = fin ? (num(fin)+' '+plural(fin,'завершённую операцию','завершённые операции','завершённых операций')) : 'все завершённые операции';
+  if (!(await askConfirm('Удалить из очереди '+what+' (готово, ошибки, отменённые)? Активные не тронем.'))) return;
   try {
     const d = await api('/api/miniapp/operations/clear', {method:'POST'});
     const n = d.deleted||0;
     toast(n ? ('🗑 Удалено: '+n) : 'Нет завершённых операций для удаления');
     loadOps();
-  } catch(e) { toast('⚠️ '+errRu(e,'Ошибка')); }
+  } catch(e) { toast('⚠️ '+errRu(e,'Не удалось очистить очередь')); }
 }
 
 function filterOps(status, btn) {
