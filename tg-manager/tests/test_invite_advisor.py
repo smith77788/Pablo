@@ -151,10 +151,10 @@ def test_warmed_account_string_level_does_not_crash_or_flag_as_cold():
 # ── хватит ли флота ──────────────────────────────────────────────────────────
 
 def test_capacity_shortfall_is_reported(monkeypatch):
-    async def _limit(pool, acc_id):
-        return {"limit": 10, "used_today": 0, "remaining": 10, "basis": "тест"}
+    async def _limit(pool, acc_ids):
+        return {int(a): {"limit": 10, "used_today": 0, "remaining": 10, "basis": "тест"} for a in acc_ids}
     from services import flood_engine
-    monkeypatch.setattr(flood_engine, "recommended_daily_limit", _limit)
+    monkeypatch.setattr(flood_engine, "recommended_daily_limits", _limit)
 
     res = _advise(_Pool(week=[_stat()], accounts=[_acc(), _acc(id=2)]), audience_size=100)
     short = [a for a in res["advice"] if "хватит" in a["title"]]
@@ -163,10 +163,10 @@ def test_capacity_shortfall_is_reported(monkeypatch):
 
 
 def test_capacity_is_not_guessed_without_audience(monkeypatch):
-    async def _limit(pool, acc_id):
-        return {"limit": 10, "used_today": 0, "remaining": 10, "basis": "тест"}
+    async def _limit(pool, acc_ids):
+        return {int(a): {"limit": 10, "used_today": 0, "remaining": 10, "basis": "тест"} for a in acc_ids}
     from services import flood_engine
-    monkeypatch.setattr(flood_engine, "recommended_daily_limit", _limit)
+    monkeypatch.setattr(flood_engine, "recommended_daily_limits", _limit)
 
     res = _advise(_Pool(week=[_stat()], accounts=[_acc()]))
     assert not [a for a in res["advice"] if "хватит" in a["title"]], (
@@ -175,10 +175,10 @@ def test_capacity_is_not_guessed_without_audience(monkeypatch):
 
 
 def test_exhausted_accounts_are_explained(monkeypatch):
-    async def _limit(pool, acc_id):
-        return {"limit": 10, "used_today": 10, "remaining": 0, "basis": "тест"}
+    async def _limit(pool, acc_ids):
+        return {int(a): {"limit": 10, "used_today": 10, "remaining": 0, "basis": "тест"} for a in acc_ids}
     from services import flood_engine
-    monkeypatch.setattr(flood_engine, "recommended_daily_limit", _limit)
+    monkeypatch.setattr(flood_engine, "recommended_daily_limits", _limit)
 
     res = _advise(_Pool(week=[_stat()], accounts=[_acc()]))
     exh = [a for a in res["advice"] if "исчерпал" in a["title"]]
@@ -311,9 +311,9 @@ def test_no_usable_accounts_is_the_first_thing_said():
 
 def test_all_accounts_quarantined_is_a_blocker(monkeypatch):
     from services import infra_memory
-    async def _quar(pool, acc_id):
-        return True
-    monkeypatch.setattr(infra_memory, "is_account_quarantined", _quar)
+    async def _quar(pool, acc_ids):
+        return {int(a) for a in acc_ids}
+    monkeypatch.setattr(infra_memory, "quarantined_accounts", _quar)
     res = _advise(_Pool(week=[_stat()], accounts=[_acc(), _acc(id=2)]))
     q = [a for a in _sev(res, "danger") if "риск-пульс" in a["title"]]
     assert q, "если пропустят всех — инвайт не сделает ничего, это надо сказать заранее"
@@ -321,9 +321,9 @@ def test_all_accounts_quarantined_is_a_blocker(monkeypatch):
 
 def test_partial_quarantine_is_a_warning_not_a_blocker(monkeypatch):
     from services import infra_memory
-    async def _quar(pool, acc_id):
-        return int(acc_id) == 1
-    monkeypatch.setattr(infra_memory, "is_account_quarantined", _quar)
+    async def _quar(pool, acc_ids):
+        return {int(a) for a in acc_ids if int(a) == 1}
+    monkeypatch.setattr(infra_memory, "quarantined_accounts", _quar)
     res = _advise(_Pool(week=[_stat()], accounts=[_acc(), _acc(id=2)]))
     q = [a for a in _sev(res, "warn") if "риск-пульс" in a["title"]]
     assert q, "частичный карантин снижает ёмкость — предупредить стоит"
@@ -332,9 +332,9 @@ def test_partial_quarantine_is_a_warning_not_a_blocker(monkeypatch):
 
 def test_quarantine_failure_does_not_break_the_advisor(monkeypatch):
     from services import infra_memory
-    async def _boom(pool, acc_id):
+    async def _boom(pool, acc_ids):
         raise RuntimeError("нет пульса")
-    monkeypatch.setattr(infra_memory, "is_account_quarantined", _boom)
+    monkeypatch.setattr(infra_memory, "quarantined_accounts", _boom)
     res = _advise(_Pool(week=[_stat()], accounts=[_acc()]))
     assert isinstance(res["advice"], list), "сбой проверки не имеет права ронять разбор"
 

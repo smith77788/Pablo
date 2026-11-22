@@ -12,7 +12,10 @@ X за 5 дней»), планировщик считает по РЕАЛЬНО�
 """
 from __future__ import annotations
 
+import logging
 import math
+
+log = logging.getLogger(__name__)
 
 # Доля приглашённых, кто реально становится участником, по методу инвайта.
 # direct — часть режет приватность; admin (промоут-трюк) — почти все; link —
@@ -93,10 +96,11 @@ async def plan(pool, owner_id: int, goal_count: int, deadline_days: int,
     acc_ids = [int(r["id"]) for r in (accs or [])]
     daily = 0
     from services import flood_engine
-    for aid in acc_ids:
-        try:
-            d = await flood_engine.recommended_daily_limit(pool, aid)
-            daily += int(d.get("limit", 0) or 0)
-        except Exception:
-            pass
+    # Пакетом: поштучно это два последовательных запроса на аккаунт, то есть
+    # десять тысяч запросов подряд на флоте в 5000 аккаунтов.
+    try:
+        limits = await flood_engine.recommended_daily_limits(pool, acc_ids)
+        daily = sum(int((d or {}).get("limit", 0) or 0) for d in limits.values())
+    except Exception:
+        log.debug("campaign_planner: лимиты флота не посчитаны owner=%s", owner_id, exc_info=True)
     return compute_plan(goal_count, deadline_days, daily, len(acc_ids), method)
