@@ -8,6 +8,7 @@ import logging
 import aiohttp
 import asyncpg
 from aiogram import F, Router
+from bot.utils.paging import page_label
 from bot.utils.subscription import locked_text
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message
@@ -638,12 +639,16 @@ def _bots_source_kb(bots: list[asyncpg.Record], page: int = 0) -> object:
         nav.button(
             text="◀️", callback_data=BotFactCb(action="clone_src_page", page=page - 1)
         )
+    lbl = page_label(page, len(bots), PAGE_SIZE)
+    if lbl:
+        nav.button(text=lbl, callback_data=BotFactCb(action="clone_src_page", page=page))
     if start + PAGE_SIZE < len(bots):
         nav.button(
             text="▶️", callback_data=BotFactCb(action="clone_src_page", page=page + 1)
         )
     nav.button(text="❌ Отмена", callback_data=BotFactCb(action="menu"))
-    nav.adjust(2, 1)
+    _n = int(page > 0) + int(bool(lbl)) + int(start + PAGE_SIZE < len(bots))
+    nav.adjust(*([_n] if _n else []), 1)
     kb.attach(nav)
     return kb.as_markup()
 
@@ -683,6 +688,9 @@ def _bots_targets_kb(
         nav.button(
             text="◀️", callback_data=BotFactCb(action="clone_tgt_page", page=page - 1)
         )
+    lbl = page_label(page, len(bots), PAGE_SIZE)
+    if lbl:
+        nav.button(text=lbl, callback_data=BotFactCb(action="clone_tgt_page", page=page))
     if start + PAGE_SIZE < len(bots):
         nav.button(
             text="▶️", callback_data=BotFactCb(action="clone_tgt_page", page=page + 1)
@@ -691,7 +699,8 @@ def _bots_targets_kb(
         text="✅ Продолжить", callback_data=BotFactCb(action="clone_targets_done")
     )
     nav.button(text="❌ Отмена", callback_data=BotFactCb(action="menu"))
-    nav.adjust(2, 1, 1)
+    _n = int(page > 0) + int(bool(lbl)) + int(start + PAGE_SIZE < len(bots))
+    nav.adjust(*([_n] if _n else []), 1, 1)
     kb.attach(nav)
     return kb.as_markup()
 
