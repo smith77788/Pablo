@@ -48,7 +48,7 @@ def test_csv_has_every_metric_per_cohort_in_plain_units():
                 "  {label: 'Окт \"25', size: 10, ltv: [12.345, 20], active: [0.5, 0.1234], buyers: [0.2, null]}]};\n"
                 "console.log(JSON.stringify(coCsv(d, 'month').split('\\n')));")
     assert got[0] == '"Пришли","Людей","Показатель","Месяц прихода","+1"'
-    assert got[1] == '"Окт ""25","10","LTV, RUB","12.35","20"'
+    assert got[1] == '"Окт ""25","10","Выручка на человека, RUB","12.35","20"'
     assert got[2] == '"Окт ""25","10","Активны, %","50","12.3"'
     assert got[3] == '"Окт ""25","10","Покупали, %","20",""'
 

@@ -286,7 +286,7 @@ function coCsv(d, grain) {
   const head = ['Пришли', 'Людей', 'Показатель'];
   for (let k = 0; k < periods; k++) head.push(k === 0 ? (grain === 'week' ? 'Неделя прихода' : 'Месяц прихода') : '+' + k);
   const lines = [head];
-  const names = {ltv: 'LTV, ' + ((d.money && d.money.currency) || ''), active: 'Активны, %', buyers: 'Покупали, %'};
+  const names = {ltv: 'Выручка на человека, ' + ((d.money && d.money.currency) || ''), active: 'Активны, %', buyers: 'Покупали, %'};
   (d.cohorts || []).forEach(function (c) {
     CO_METRICS.forEach(function (m) {
       const vals = (c[m[0]] || []).map(function (v) {
