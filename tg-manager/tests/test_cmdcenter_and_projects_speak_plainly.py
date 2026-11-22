@@ -44,3 +44,9 @@ def test_empty_projects_explain_themselves():
 def test_seo_nothing_to_change_is_not_a_warning():
     assert "'⚠️ '+(errs||'без изменений')" not in BD
     assert "ℹ️ Менять нечего" in BD
+
+
+def test_mesh_unknown_status_is_not_a_raw_code():
+    mesh = (SCREENS / "bot_mesh.js").read_text(encoding="utf-8")
+    for raw in ("t.status||''", "d.status||''", "h.outcome||''"):
+        assert raw not in mesh, raw
