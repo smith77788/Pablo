@@ -90,6 +90,30 @@ async function submitOsint() {
 // Ссылки последнего открытого результата: в onclick уходит индекс, а не
 // сама ссылка (апостроф в адресе порвал бы разметку атрибута).
 let _osLinks = [];
+// Что искали в открытом результате — для «Искать снова».
+let _osLastQuery = '';
+
+// Запрос берётся из подписи операции («Поиск по нику: johndoe»).
+function _osQueryOf(label) {
+  const s = String(label || '');
+  const i = s.indexOf(': ');
+  return i >= 0 ? s.slice(i + 2).trim() : '';
+}
+
+// Найденные профили одним списком — в отчёт или заметку. Раньше каждую
+// ссылку приходилось открывать и копировать по одной.
+function osintCopyLinks() {
+  if (!_osLinks.length) return;
+  copyToClipboard(_osLinks.join('\n'), '🔗 Скопировано ссылок: ' + _osLinks.length);
+}
+
+// Повтор поиска: через время у человека появляются новые аккаунты.
+function osintRepeat() {
+  if (!_osLastQuery) return;
+  back();
+  const inp = document.getElementById('osintInput');
+  if (inp) { inp.value = _osLastQuery; inp.focus(); }
+}
 
 function _osOpenLink(i) {
   const url = String(_osLinks[Number(i)] || '');
@@ -137,11 +161,11 @@ async function openOsintResult(opId) {
     }
     const lg = await api('/api/miniapp/operation/' + Number(opId) + '/log?status=ok&limit=1000');
     const rows = (lg.logs || []).filter(function (r) { return r.target; });
+    _osLinks = rows.map(function (r) { return String(r.target); });
     if (!rows.length) {
       out += o.error_msg ? '' : empty('🕵️', 'Аккаунтов не найдено', 'Попробуйте другой ник или почту');
     } else {
       out += '<div class="sec">Найдено профилей: ' + num(rows.length) + '</div><div class="lst" style="margin:0 16px">';
-      _osLinks = rows.map(function (r) { return String(r.target); });
       out += rows.map(function (r, i) {
         const url = _osLinks[i];
         return '<div class="row tap" role="button" tabindex="0" onclick="_osOpenLink(' + i + ')">' +
@@ -151,8 +175,11 @@ async function openOsintResult(opId) {
       }).join('');
       out += '</div>';
     }
-    out += '<div style="display:flex;gap:8px;padding:12px 16px 20px">' +
-      '<button class="btn btn-s" style="flex:1" onclick="openOpDetail(' + Number(opId) + ')">📋 Детали операции</button>' +
+    _osLastQuery = _osQueryOf(o.label);
+    out += '<div style="display:flex;flex-wrap:wrap;gap:8px;padding:12px 16px 20px">' +
+      (rows.length ? '<button class="btn btn-s" style="flex:1 1 45%" onclick="osintCopyLinks()">🔗 Скопировать ссылки</button>' : '') +
+      (_osLastQuery ? '<button class="btn btn-s" style="flex:1 1 45%" onclick="osintRepeat()">🔁 Искать снова</button>' : '') +
+      '<button class="btn btn-s" style="flex:1 1 45%" onclick="openOpDetail(' + Number(opId) + ')">📋 Детали операции</button>' +
       '</div>';
     body.innerHTML = out;
   } catch (e) {
