@@ -108,7 +108,7 @@ async function _udLoad() {
       body.innerHTML = _udRenderAnalytics(d);
     }
   } catch (e) {
-    _udError((e && e.message) || 'Ошибка');
+    _udError(errRu(e, 'Не удалось загрузить сводку'));
   }
 }
 
@@ -139,7 +139,8 @@ async function _udAct(idx) {
   const it = _UD_ITEMS[idx];
   if (!it || !it.action) return;
   const a = it.action;
-  if (a.screen) { const go = _UD_SCREENS[a.screen]; if (go) go(); return; }
+  // Неизвестный экран — сказать, а не молчать: немая кнопка выглядит сломанной.
+  if (a.screen) { const go = _UD_SCREENS[a.screen]; if (go) go(); else toast('⚠️ Раздел недоступен'); return; }
   if (!a.endpoint) return;
   const btn = document.getElementById('udBtn' + idx);
   if (btn) { btn.disabled = true; btn.textContent = '…'; }
@@ -151,7 +152,7 @@ async function _udAct(idx) {
                                   : (r && r.op_id ? 'Операция #' + r.op_id : 'Готово')));
     if (a.reload) _udLoad();
   } catch (e) {
-    toast('⚠️ ' + ((e && e.message) || 'Не получилось'));
+    toast('⚠️ ' + errRu(e, 'Не получилось'));
     if (btn) { btn.disabled = false; btn.textContent = a.label; }
   }
 }

@@ -60,7 +60,7 @@ async function reauthAccount(id) {
     const r = await api(`/api/miniapp/account/${id}/action/reauth`, {method:'POST'});
     // Переавторизация интерактивна (код из Telegram) → показываем инструкцию, ведущую в бота.
     await askConfirm(errRu(r,'Переавторизация выполняется в боте: Аккаунты → 🔄 Переавторизатор → Релог.'));
-  } catch(e) { toast('⚠️ '+errRu(e,'Ошибка').substring(0,80)); }
+  } catch(e) { toast('⚠️ '+errRu(e,'Ошибка')); }
 }
 
 async function loadAccounts() {
@@ -75,8 +75,8 @@ async function loadAccounts() {
     ACC_OFFSET = CUR_ACCS.length;
     // Истинное число из серверной агрегации (страница ограничена LIMIT)
     const cnt = (ad.stats && ad.stats.total!=null) ? ad.stats.total : CUR_ACCS.length;
-    document.getElementById('acc-cnt').textContent = cnt ? cnt+' аккаунтов' : '';
-    txt('m-acc-cnt', cnt+' аккаунтов');
+    document.getElementById('acc-cnt').textContent = cnt ? cnt+' '+plural(cnt, 'аккаунт', 'аккаунта', 'аккаунтов') : '';
+    txt('m-acc-cnt', cnt+' '+plural(cnt, 'аккаунт', 'аккаунта', 'аккаунтов'));
     updateAccKpi(CUR_ACCS, ad.stats);
     renderStageChips(ad.stats && ad.stats.by_stage);
     renderAccounts(CUR_ACCS);
@@ -99,7 +99,8 @@ async function loadAccounts() {
       list.forEach(c => { if (!known.has(String(c.channel_id))) CUR_CHANNELS.push(c); });
     }
     // Истинное число каналов из cd.total (список ограничен) — иначе подпись врала
-    txt('m-ch-cnt', (cd.total!=null?cd.total:list.length)+' каналов');
+    const chN = (cd.total!=null?cd.total:list.length);
+    txt('m-ch-cnt', chN+' '+plural(chN, 'канал', 'канала', 'каналов'));
     renderChPreview(list, cd.total);
   }).catch(() => {
     txt('chPreview', '');
@@ -630,7 +631,7 @@ function renderAccSurvival(d) {
   if (pd.outages) {
     lines.push('<div style="color:var(--hint)">Простой из-за прокси за 30 дней: ' + pd.account_hours +
       ' аккаунто-часов, отказов прокси — ' + pd.outages +
-      (pd.open_now ? '. Сейчас стоят ' + pd.accounts_now + ' аккаунт(ов) на ' + pd.open_now + ' мёртвых прокси' : '') + '</div>');
+      (pd.open_now ? '. Сейчас стоят ' + pd.accounts_now + ' ' + plural(pd.accounts_now, 'аккаунт', 'аккаунта', 'аккаунтов') + ' на ' + pd.open_now + ' мёртвых прокси' : '') + '</div>');
   }
   if (v.text) lines.push('<div style="margin-top:4px;color:' + tone + '">' + esc(v.text) + '</div>');
   return lines.join('');

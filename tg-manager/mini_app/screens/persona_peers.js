@@ -28,7 +28,7 @@ async function savePeerNotes(pid, peer, btn) {
   try {
     await api(`/api/miniapp/persona/${Number(pid)}/peer/${Number(peer)}`, {method: 'PUT', body: JSON.stringify({notes})});
     toast('💾 Заметка сохранена');
-  } catch (e) { toast('⚠️ ' + errRu(e, 'Ошибка').substring(0, 80)); }
+  } catch (e) { toast('⚠️ ' + errRu(e,'Ошибка')); }
   finally { if (btn) btn.disabled = false; }
 }
 
@@ -38,5 +38,5 @@ async function forgetPeer(pid, peer) {
     await api(`/api/miniapp/persona/${Number(pid)}/peer/${Number(peer)}`, {method: 'DELETE'});
     toast('🧽 Забыто');
     openPersonaMemory(pid);
-  } catch (e) { toast('⚠️ ' + errRu(e, 'Ошибка').substring(0, 80)); }
+  } catch (e) { toast('⚠️ ' + errRu(e,'Ошибка')); }
 }

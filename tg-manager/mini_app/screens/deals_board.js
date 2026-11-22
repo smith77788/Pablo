@@ -400,7 +400,7 @@ async function dkMore(stage) {
     }
     _dkRender();
   } catch (e) {
-    toast('⚠️ ' + errRu(e, 'Не удалось загрузить').substring(0, 60));
+    toast('⚠️ ' + errRu(e, 'Не удалось загрузить'));
   }
 }
 
@@ -466,7 +466,7 @@ async function dkMove(cid, stage) {
     card.stage = prevStage;
     shift(to, from);
     try { tg.HapticFeedback?.notificationOccurred('error'); } catch (_) {}
-    toast('⚠️ ' + errRu(e, 'Стадия не сохранилась').substring(0, 60));
+    toast('⚠️ ' + errRu(e, 'Стадия не сохранилась'));
   } finally {
     delete _DK_BUSY[cid];
     _dkRender();
@@ -554,7 +554,7 @@ async function dkMoveDeal(id, stage) {
     deal.stage = prevStage;
     shift(to, from);
     try { tg.HapticFeedback?.notificationOccurred('error'); } catch (_) {}
-    toast('⚠️ ' + errRu(e, 'Стадия не сохранилась').substring(0, 60));
+    toast('⚠️ ' + errRu(e, 'Стадия не сохранилась'));
   } finally {
     delete _DK_BUSY[key];
     _dkRender();
@@ -571,6 +571,6 @@ async function dkDeleteDeal(id, el) {
     toast('✅ Сделка удалена');
     loadDealsBoard();
   } catch (e) {
-    toast('⚠️ ' + errRu(e, 'Не удалось удалить').substring(0, 60));
+    toast('⚠️ ' + errRu(e, 'Не удалось удалить'));
   }
 }

@@ -10,6 +10,11 @@
 // index.html — переносить объявления нельзя, их читает код, который
 // грузится раньше.
 
+// «1 ботов», «3 ботов» — счётчик над списком не склонялся.
+function _botsCountLabel(n) {
+  return n ? n + ' ' + plural(n, 'бот', 'бота', 'ботов') : '';
+}
+
 async function loadBots() {
   fleetToolsInit('bots');
   try {
@@ -20,7 +25,7 @@ async function loadBots() {
     BOT_OFFSET = BOTS.length;
     BOT_TOTAL = (d.total!=null?d.total:BOTS.length);
     const cntEl = document.getElementById('bots-cnt');
-    if (cntEl) cntEl.textContent = BOT_TOTAL ? BOT_TOTAL+' ботов' : '';
+    if (cntEl) cntEl.textContent = _botsCountLabel(BOT_TOTAL);
     renderBotFilterChips();
     renderBots();
   } catch(e) {
@@ -51,12 +56,12 @@ async function loadMoreBots() {
       if (d.total!=null) BOT_TOTAL = d.total;
     }
     const cntEl = document.getElementById('bots-cnt');
-    if (cntEl) cntEl.textContent = BOT_TOTAL ? BOT_TOTAL+' ботов' : '';
+    if (cntEl) cntEl.textContent = _botsCountLabel(BOT_TOTAL);
     renderBotFilterChips();
     renderBots();
     if (BOT_SEL_MODE) updateBotSelBar();
   } catch(e) {
-    toast('⚠️ '+(errRu(e,'Ошибка').substring(0,60)));
+    toast('⚠️ '+(errRu(e,'Ошибка')));
     // Не оставляем застрявшую крутилку: у сценария всегда есть видимый выход.
     if (box) box.innerHTML = '<button class="btn btn-s" onclick="loadMoreBots()" style="width:100%;font-size:13px;padding:10px">↺ Повторить загрузку</button>';
   } finally { BOT_LOADING = false; }

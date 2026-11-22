@@ -42,7 +42,7 @@ async function _shLoadBody() {
   try {
     t = await api('/api/miniapp/check_owned_restrictions/targets');
   } catch (e) {
-    body.innerHTML = errHtml('Не удалось посчитать сущности: ' + ((e && e.message) || ''), 'openShieldCheck()');
+    body.innerHTML = errHtml(errRu(e, 'Не удалось посчитать, что проверять'), 'openShieldCheck()');
     return;
   }
   // Гео-бан — отдельная проверка (нужны аккаунты в разных странах). Считаем её
@@ -96,6 +96,34 @@ function _shMonFmtInterval(min) {
 function _shHourPlural(n) { const a = n % 10, b = n % 100; if (a === 1 && b !== 11) return 'час'; if (a >= 2 && a <= 4 && (b < 10 || b >= 20)) return 'часа'; return 'часов'; }
 function _shDayPlural(n) { const a = n % 10, b = n % 100; if (a === 1 && b !== 11) return 'день'; if (a >= 2 && a <= 4 && (b < 10 || b >= 20)) return 'дня'; return 'дней'; }
 
+// Интервал в списке был всегда «12 часов»: включённый на сутки мониторинг
+// показывал рядом «каждые 12 часов», и следующий «Включить» молча ставил
+// не тот темп. Теперь список стоит на интервале уже включённой проверки,
+// иначе — на последнем выбранном владельцем, и только потом на 12 часах.
+const _SH_MON_INTERVALS = [
+  [720, 'каждые 12 часов'], [1440, 'каждые сутки'], [4320, 'каждые 3 дня'], [10080, 'каждую неделю'],
+];
+function _shMonSavedInterval() {
+  const p = (typeof loadFormPrefs === 'function') ? (loadFormPrefs('shield_monitor') || {}) : {};
+  const v = Number(p.interval_min);
+  return Number.isFinite(v) && v > 0 ? v : null;
+}
+function _shMonInitialInterval(monitors, saved) {
+  const on = ['health', 'restrictions', 'geoban']
+    .map(k => monitors && monitors[k])
+    .find(it => it && it.enabled && Number(it.interval_min) > 0);
+  if (on) return Number(on.interval_min);
+  if (Number(saved) > 0) return Number(saved);
+  return 720;
+}
+function _shMonIntervalOptions(selected) {
+  const opts = _SH_MON_INTERVALS.slice();
+  // Интервал, заданный не из этого списка (через бота), не теряем: иначе
+  // список показал бы первый пункт и выдал его за текущий.
+  if (!opts.some(o => o[0] === selected)) opts.push([selected, _shMonFmtInterval(selected)]);
+  return opts.map(o => '<option value="' + o[0] + '"' + (o[0] === selected ? ' selected' : '') + '>' + esc(o[1]) + '</option>').join('');
+}
+
 function _shMonRender(mon) {
   if (!mon || !mon.monitors) return '';
   const m = mon.monitors;
@@ -125,10 +153,7 @@ function _shMonRender(mon) {
       '<div style="display:flex;align-items:center;gap:8px;margin-bottom:4px">' +
         '<span style="font-size:13px;color:var(--hint)">Интервал:</span>' +
         '<select id="shMonInterval" class="sel" style="flex:1 1 auto;padding:8px;font-size:13px">' +
-          '<option value="720" selected>каждые 12 часов</option>' +
-          '<option value="1440">каждые сутки</option>' +
-          '<option value="4320">каждые 3 дня</option>' +
-          '<option value="10080">каждую неделю</option>' +
+          _shMonIntervalOptions(_shMonInitialInterval(m, _shMonSavedInterval())) +
         '</select>' +
       '</div>' +
       rows +
@@ -139,6 +164,7 @@ async function shMonToggle(kind, enabled) {
   let interval = 720;
   const sel = document.getElementById('shMonInterval');
   if (sel && enabled) { const v = parseInt(sel.value, 10); if (Number.isFinite(v)) interval = v; }
+  if (enabled && typeof saveFormPrefs === 'function') saveFormPrefs('shield_monitor', { interval_min: interval });
   try {
     await api('/api/miniapp/monitor/toggle', { method: 'POST', body: JSON.stringify({ kind: kind, enabled: enabled, interval_min: interval }) });
     tg.HapticFeedback?.notificationOccurred('success');
@@ -146,7 +172,7 @@ async function shMonToggle(kind, enabled) {
     _shLoadBody();
   } catch (e) {
     tg.HapticFeedback?.notificationOccurred('error');
-    toast((e && e.message) || 'Не удалось изменить мониторинг');
+    toast('⚠️ ' + errRu(e, 'Не удалось изменить мониторинг'));
   }
 }
 
@@ -215,6 +241,9 @@ function shAddProxy() {
 
 async function runBotGeoban() {
   const btn = document.getElementById('shGeoBtn');
+  // После сбоя кнопка возвращает СВОЮ подпись со счётчиком, а не урезанную
+  // «Проверить по странам»: иначе владелец теряет, сколько ресурсов уйдёт.
+  const label = btn ? btn.textContent : '';
   if (btn) { btn.disabled = true; btn.textContent = '⏳ Ставлю в очередь…'; }
   try {
     const d = await api('/api/miniapp/check_bot_geoban', { method: 'POST', body: JSON.stringify({}) });
@@ -227,8 +256,8 @@ async function runBotGeoban() {
     }
   } catch (e) {
     tg.HapticFeedback?.notificationOccurred('error');
-    toast((e && e.message) || 'Не удалось запустить проверку гео-доступности');
-    if (btn) { btn.disabled = false; btn.textContent = '🌍 Проверить по странам'; }
+    toast('⚠️ ' + errRu(e, 'Не удалось запустить проверку гео-доступности'));
+    if (btn) { btn.disabled = false; btn.textContent = label; }
   }
 }
 
@@ -281,6 +310,7 @@ function _shBotPlural(n) {
 
 async function runShieldCheck() {
   const btn = document.getElementById('shRunBtn');
+  const label = btn ? btn.textContent : '';
   if (btn) { btn.disabled = true; btn.textContent = '⏳ Ставлю в очередь…'; }
   try {
     const d = await api('/api/miniapp/check_owned_restrictions', { method: 'POST', body: JSON.stringify({}) });
@@ -295,8 +325,8 @@ async function runShieldCheck() {
     }
   } catch (e) {
     tg.HapticFeedback?.notificationOccurred('error');
-    toast((e && e.message) || 'Не удалось запустить проверку');
-    if (btn) { btn.disabled = false; btn.textContent = '🛡 Проверить'; }
+    toast('⚠️ ' + errRu(e, 'Не удалось запустить проверку'));
+    if (btn) { btn.disabled = false; btn.textContent = label; }
   }
 }
 
@@ -329,7 +359,7 @@ async function loadShieldOps() {
       ? '<div class="li tap" onclick="openOps()"><div class="li-body"><div class="li-name">Вся история проверок — ' + opsTotal + '</div></div><span class="chev">›</span></div>'
       : '');
   } catch (e) {
-    box.innerHTML = errHtml('Не удалось загрузить проверки: ' + ((e && e.message) || ''), 'loadShieldOps()');
+    box.innerHTML = errHtml(errRu(e, 'Не удалось загрузить проверки'), 'loadShieldOps()');
   }
 }
 

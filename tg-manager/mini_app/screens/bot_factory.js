@@ -3,8 +3,29 @@
 // Вынесено из index.html без изменения поведения. Обычный классический
 // скрипт, грузится после основного блока и делит с ним глобальную область.
 
+// Фабрика забывала всё между запусками: режим («создать новых» / «по
+// токену»), сколько ботов на аккаунт и как их называть. Владелец, который
+// всегда добавляет по токену, каждый раз переключал режим заново.
+function _bfRestorePrefs() {
+  const p = (typeof loadFormPrefs === 'function') ? (loadFormPrefs('bot_factory') || {}) : {};
+  if (p.mode === 'new' || p.mode === 'token') _BF_MODE = p.mode;
+  const cnt = document.getElementById('bfCount');
+  const c = parseInt(p.count, 10);
+  if (cnt && c >= 1 && c <= 10) cnt.value = String(c);
+  const nm = document.getElementById('bfNameMode');
+  if (nm && (p.name_mode === 'keywords' || p.name_mode === 'num')) nm.value = p.name_mode;
+}
+function _bfSavePrefs(extra) {
+  if (typeof saveFormPrefs === 'function') saveFormPrefs('bot_factory', Object.assign({ mode: _BF_MODE }, extra || {}));
+}
+function _bfBotsWord(n) { return plural(n, 'бот', 'бота', 'ботов'); }
+
 async function openBotFactory() {
+  // Повторный вызов после создания — обновление на месте: настройки, что
+  // владелец только что выставил, не перетираем сохранёнными.
+  const refresh = STACK.length && STACK[STACK.length - 1] === 's-botfactory';
   push('s-botfactory');
+  if (!refresh) _bfRestorePrefs();
   txt('botFactoryStats','<div class="spin-wrap"><div class="spin"></div></div>');
   txt('botFactoryRecent','');
   bfSetMode(_BF_MODE);
@@ -38,7 +59,7 @@ async function openBotFactory() {
       <div class="kpi-card"><div class="kpi-val">${d.total||0}</div><div class="kpi-lbl">Всего ботов</div></div>
       <div class="kpi-card"><div class="kpi-val" style="${kpiTone(d.active,'green')}">${d.active||0}</div><div class="kpi-lbl">Активных</div></div>
     `);
-    { const _v=`${d.total||0} ботов · ${d.active||0} активных`;
+    { const _v=`${d.total||0} ${_bfBotsWord(d.total||0)} · ${d.active||0} ${plural(d.active||0,'активный','активных','активных')}`;
       txt('m-botfactory-val',_v); txt('m-botfactory-val-2',_v); }
     const recent = d.recent||[];
     // Созданный бот открывается тапом: строка была просто текстом, и к
@@ -52,7 +73,7 @@ async function openBotFactory() {
         </div>
         <span class="chev">›</span>
       </div>
-    `).join('') : empty('🤖','Нет ботов','Добавьте первый бот'));
+    `).join('') : empty('🤖','Нет ботов','Добавьте первого бота'));
   } catch(e) {
     txt('botFactoryStats','');
     txt('botFactoryRecent', empty('⚠️','Ошибка',errRu(e), {label:'↺ Повторить',fn:retryCall('openBotFactory')}));
@@ -77,15 +98,16 @@ async function submitBotFactory() {
     const cnt = Math.max(1, parseInt(document.getElementById('bfCount').value) || 1);
     if (!accts.length) { errEl.textContent = 'Выберите хотя бы один аккаунт для @BotFather'; return; }
     const total = accts.length * cnt;
-    if (!await askConfirm(`Создать ${total} бот(ов) через @BotFather на ${accts.length} ${plural(accts.length,'аккаунте','аккаунтах','аккаунтах')}? Операция необратима — боты будут зарегистрированы в Telegram.`)) return;
+    if (!await askConfirm(`Создать ${total} ${_bfBotsWord(total)} через @BotFather на ${accts.length} ${plural(accts.length,'аккаунте','аккаунтах','аккаунтах')}? Операция необратима — боты будут зарегистрированы в Telegram.`)) return;
     btn.disabled = true; btn.textContent = '⏳ Ставлю в очередь...';
     try {
       const bfNameMode = document.getElementById('bfNameMode')?.value || 'keywords';
+      _bfSavePrefs({ count: cnt, name_mode: bfNameMode });
       const r = await api('/api/miniapp/bot_factory/create_new', {method:'POST', body:JSON.stringify({
         account_ids: accts, count: cnt, name_template: name, uname_template: username, name_mode: bfNameMode,
       })});
       tg.HapticFeedback?.notificationOccurred('success');
-      toast(`🏭 Создание ${r.count || total} бот(ов) запущено · операция #${r.op_id}`);
+      toast(`🏭 Создание ${r.count || total} ${_bfBotsWord(r.count || total)} запущено · операция #${r.op_id}`);
       if (r.op_id) pollOpResult(r.op_id, 'Фабрика ботов');
       openBotFactory();
     } catch(e) {

@@ -40,7 +40,7 @@ async function openEditorialRules(channelId) {
     _edPolicy = d.policy || {};
     body.innerHTML = _edRender(_edPolicy);
   } catch (e) {
-    body.innerHTML = errHtml('Не удалось загрузить правила: ' + ((e && e.message) || ''), 'openEditorialRules()');
+    body.innerHTML = errHtml(errRu(e, 'Не удалось загрузить правила'), 'openEditorialRules()');
   }
 }
 
