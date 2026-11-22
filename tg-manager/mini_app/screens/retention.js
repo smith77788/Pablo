@@ -47,7 +47,10 @@ function _rtPeriods() {
 }
 
 async function openRetention(days) {
-  _rtDays = Number(days) || 30;
+  // Период помнится: раньше каждый заход сбрасывал его на 30 дней.
+  if (days === undefined) days = loadFormPrefs('retention').days;
+  _rtDays = RT_PERIODS.some(function (p) { return p[0] === Number(days); }) ? Number(days) : 30;
+  saveFormPrefs('retention', {days: _rtDays});
   _rtScreen('s-retention');
   push('s-retention');
   const body = document.getElementById('s-retention-body');
@@ -68,12 +71,17 @@ async function openRetention(days) {
     const rows = d.by_chat || [];
     if (rows.length) {
       out += '<div class="sec">Откуда уходят</div><div class="lst" style="margin:0 16px">';
+      const total = Number(d.left) || 0;
       out += rows.map(function (r) {
         const nm = r.title || ('Чат ' + r.chat_id);
-        return '<div class="row"><div class="row-body">' +
+        const share = total ? Math.round(100 * (Number(r.left) || 0) / total) : 0;
+        // Строка открывает сам чат: правила и приветствие правятся там (/guard).
+        return '<div class="row" role="button" tabindex="0" onclick="rtOpenChat(\'' + esc(String(r.chat_id)) + '\')">' +
+          '<div class="row-body">' +
           '<div class="row-name">' + esc(nm) + '</div>' +
-          '<div class="row-val" style="color:var(--red)">ушло ' + num(r.left) + '</div>' +
-          '</div></div>';
+          '<div class="row-val" style="color:var(--red)">ушло ' + num(r.left) +
+            (share && rows.length > 1 ? ' · ' + share + '% оттока' : '') + '</div>' +
+          '</div><div class="row-right">›</div></div>';
       }).join('');
       out += '</div>';
       out += '<div style="margin:8px 16px 0;font-size:11px;color:var(--hint);line-height:1.4">' +
@@ -91,4 +99,17 @@ async function openRetention(days) {
   } catch (e) {
     body.innerHTML = errHtml(errRu(e), 'openRetention(' + _rtDays + ')');
   }
+}
+
+// Ссылка на супергруппу по id: t.me/c/<id без -100>. Работает для участника
+// чата, а владелец модерируемого чата в нём состоит.
+function rtChatUrl(chatId) {
+  const m = /^-100(\d+)$/.exec(String(chatId || '').trim());
+  return m ? 'https://t.me/c/' + m[1] + '/999999999' : '';
+}
+function rtOpenChat(chatId) {
+  const url = rtChatUrl(chatId);
+  if (!url) { toast('⚠️ Этот чат не открыть по ссылке — найдите его в Telegram'); return; }
+  try { if (tg && tg.openTelegramLink) { tg.openTelegramLink(url); return; } } catch (_) {}
+  try { window.open(url, '_blank'); } catch (_) { copyToClipboard(url, 'Ссылка скопирована'); }
 }

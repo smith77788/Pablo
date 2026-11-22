@@ -119,7 +119,7 @@ def test_pulse_action_routes_retention():
     появился 04.10.2026 (mini_app/screens/retention.js), и подсказка ведёт туда.
     Подпись кнопки — по-русски: в ней оставалось английское «welcome»."""
     html = open(os.path.join(ROOT, "mini_app", "index.html"), encoding="utf-8").read()
-    assert "if (k==='retention') return openRetention(30);" in html
+    assert "if (k==='retention') return openRetention();" in html
     assert "retention:'Удержание приглашённых'" in html
     assert "welcome'" not in html.split("function pulseActionLabel")[1][:900]
     # Запрет на возврат к прежнему ответу: подсказка про отток не должна снова
