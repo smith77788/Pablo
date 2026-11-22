@@ -131,6 +131,14 @@ log = logging.getLogger(__name__)
 router = Router()
 
 
+def _op_name(op_type) -> str:
+    """Название операции по-русски (реестр operation_bus) вместо кода
+    «mass_invite»: владелец английского не читает."""
+    from services import operation_bus as _ob
+    meta = _ob.OP_REGISTRY.get(str(op_type or ""), {})
+    return meta.get("description") or "Операция"
+
+
 def _friendly_join_error(error_str: str) -> str:
     """Translate raw Telethon/Telegram join errors into user-friendly Russian messages."""
     e = error_str.lower()
@@ -597,7 +605,7 @@ async def cmd_report(message: Message, pool: asyncpg.Pool) -> None:
     else:
         for op in ops:
             icon = _icons.get(op["status"], "❓")
-            otype = _html.escape(op["op_type"])
+            otype = _html.escape(_op_name(op["op_type"]))
             done = op["done_items"] or 0
             total = op["total_items"] or 0
             lines.append(f"{icon} <b>{otype}</b> #{op['id']}  [{done}/{total}]")

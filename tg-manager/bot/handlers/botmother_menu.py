@@ -143,6 +143,14 @@ log = logging.getLogger(__name__)
 
 router = Router()
 
+
+def _op_name(op_type) -> str:
+    """Название операции по-русски (реестр operation_bus) вместо кода
+    «mass_invite»: владелец английского не читает."""
+    from services import operation_bus as _ob
+    meta = _ob.OP_REGISTRY.get(str(op_type or ""), {})
+    return meta.get("description") or "Операция"
+
 def _lock(user_plan: str, required: str) -> str:
     from bot.utils.subscription import PLAN_LEVELS, coerce_plan
 
@@ -932,7 +940,7 @@ async def cb_ops_dashboard(
         failed_count = 0
         for op in recent_ops:
             icon = _ost.icon(op["status"])
-            otype = html.escape(op["op_type"])
+            otype = html.escape(_op_name(op["op_type"]))
             done = op["done_items"] or 0
             total = op["total_items"] or 0
             created = op["created_at"].strftime("%d.%m %H:%M") if op["created_at"] else "—"
@@ -2407,7 +2415,7 @@ async def cb_op_reports(
         status = op["status"]
         emoji = _ost.icon(status)
         dt = op["created_at"].strftime("%d.%m %H:%M")
-        otype = html.escape(op["op_type"])
+        otype = html.escape(_op_name(op["op_type"]))
         total_i = op["total_items"] or 0
         done_i = op["done_items"] or 0
         duration = ""
