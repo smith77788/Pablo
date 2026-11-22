@@ -18,7 +18,7 @@ DASH = (SCREENS / "dashboard.js").read_text(encoding="utf-8")
 
 # Экраны, где сырой e.message ещё живёт. Список только сокращается: новый
 # экран с `(e && e.message) ||` краснит этот тест.
-RAW_MESSAGE_LEFT = {"contact_invite_link.js", "editorial.js", "sales_manager.js", "va_admin.js"}
+RAW_MESSAGE_LEFT = {"contact_invite_link.js", "sales_manager.js", "va_admin.js"}
 
 
 def _fn(src, name):
@@ -37,7 +37,7 @@ def _run(js):
 
 
 def test_no_raw_error_message_in_toasts():
-    for name in ("shield_check.js", "dashboard.js"):
+    for name in ("shield_check.js", "dashboard.js", "editorial.js"):
         src = (SCREENS / name).read_text(encoding="utf-8")
         assert "e.message" not in src, name
 
