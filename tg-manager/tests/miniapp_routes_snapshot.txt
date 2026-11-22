@@ -1056,6 +1056,7 @@ POST /api/miniapp/networks/{net_id}/nodes
 POST /api/miniapp/next_actions/apply
 POST /api/miniapp/next_actions/feedback
 POST /api/miniapp/niche/asset/{aid}/skip
+POST /api/miniapp/niche/asset/{aid}/unskip
 POST /api/miniapp/niche/campaign
 POST /api/miniapp/niche/campaign/{cid}/delete
 POST /api/miniapp/niche/campaign/{cid}/presence

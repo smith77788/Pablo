@@ -9,6 +9,10 @@ from __future__ import annotations
 
 from aiohttp import web
 
+# Причина ручного пропуска: по ней «Вернуть» отличает решение владельца от
+# пропуска по правилам радара.
+_MANUAL_SKIP = "убрано вручную"
+
 
 def setup_routes(app: web.Application, pool) -> None:
     from services import niche_radar as nr
@@ -184,11 +188,36 @@ def setup_routes(app: web.Application, pool) -> None:
         except (KeyError, ValueError):
             return _err("Неверный идентификатор", 400)
         res = await pool.execute(
-            "UPDATE niche_assets SET status='skipped', skip_reason='убрано вручную' "
-            "WHERE id=$1 AND owner_id=$2", aid, uid)
+            "UPDATE niche_assets SET status='skipped', skip_reason=$3 "
+            "WHERE id=$1 AND owner_id=$2", aid, uid, _MANUAL_SKIP)
         if res == "UPDATE 0":
             return _err("Ресурс не найден", 404)
         return _json_resp({"ok": True})
+
+    async def niche_asset_unskip(request: web.Request) -> web.Response:
+        """Вернуть в работу ресурс, убранный вручную («Не наше» по ошибке).
+
+        Раньше «Не наше» было необратимым. Возвращается только то, что убрал
+        сам владелец: пропуск по правилам радара (мало участников и т.п.)
+        отсюда не снимается. Статус — тот, что был бы без пропуска: если флот
+        уже вступал, «Вступили», иначе «Найден».
+        """
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            aid = int(request.match_info["aid"])
+        except (KeyError, ValueError):
+            return _err("Неверный идентификатор", 400)
+        row = await pool.fetchrow(
+            "UPDATE niche_assets SET skip_reason='', "
+            "status=CASE WHEN joined_at IS NOT NULL THEN 'joined' ELSE 'found' END "
+            "WHERE id=$1 AND owner_id=$2 AND status='skipped' AND skip_reason=$3 "
+            "RETURNING status", aid, uid, _MANUAL_SKIP)
+        if not row:
+            return _err("Этот ресурс не убирали вручную — возвращать нечего", 404)
+        return _json_resp({"ok": True, "status": row["status"],
+                           "status_ru": nr.STATUS_RU.get(row["status"], row["status"])})
 
     async def niche_delete(request: web.Request) -> web.Response:
         uid = _get_uid(request)
@@ -210,3 +239,4 @@ def setup_routes(app: web.Application, pool) -> None:
     app.router.add_post("/api/miniapp/niche/campaign/{cid}/presence", niche_presence)
     app.router.add_post("/api/miniapp/niche/campaign/{cid}/delete", niche_delete)
     app.router.add_post("/api/miniapp/niche/asset/{aid}/skip", niche_asset_skip)
+    app.router.add_post("/api/miniapp/niche/asset/{aid}/unskip", niche_asset_unskip)
