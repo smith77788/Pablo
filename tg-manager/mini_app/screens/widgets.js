@@ -31,7 +31,38 @@ async function openWidgets() {
   _wgRenderTpls();
   wgPickTpl(WG.tpl && (WG.tpl === 'html' || WG.tpls.some(t => t.id === WG.tpl)) ? WG.tpl : (WG.tpls[0] || {}).id);
   _wgLoadBots();
+  _wgApplyWhere();
   wgLoadList(false);
+}
+
+// Куда слали в прошлый раз (себе или в группу, и какую) — с прошлой удачной
+// отправки: виджеты обычно шлют в одно и то же место.
+function _wgApplyWhere() {
+  const p = loadFormPrefs('widgets');
+  const where = document.getElementById('wgWhere');
+  if (where && (p.where === 'me' || p.where === 'chat')) where.value = p.where;
+  const chat = document.getElementById('wgChat');
+  if (chat && p.chat && !chat.value) chat.value = p.chat;
+  if (where) wgWhereToggle();
+}
+
+// «Отправить ещё раз»: тот же шаблон с теми же текстами — новым виджетом
+// (своими голосами), а не правкой старого. Свой HTML-код сервер в списке не
+// отдаёт, поэтому повтор — только для шаблонов.
+function wgCanReuse(w) {
+  return !!(w && w.template && w.template !== 'html' && WG.tpls && WG.tpls.some(t => t.id === w.template));
+}
+
+function wgReuse(id) {
+  const w = (WG.items || []).find(x => Number(x.id) === Number(id));
+  if (!wgCanReuse(w)) return;
+  WG.edit = null;
+  _wgModeLabels();
+  wgPickTpl(w.template);
+  _wgRenderFields(_wgTpl(w.template), w.data || {});
+  wgPreview();
+  document.getElementById('s-widgets').querySelector('.sub-sb').scrollTo({top: 0, behavior: 'smooth'});
+  toast('🔁 Тексты подставлены — проверьте и отправьте');
 }
 
 function _wgModeLabels() {
@@ -231,6 +262,9 @@ async function _wgLoadBots() {
     sel.innerHTML = '';
     if (!bots.length) sel.add(new Option('Нет активных ботов — добавьте бота в разделе «Боты»', ''));
     for (const b of bots) sel.add(new Option('@' + (b.username || b.first_name || b.bot_id), String(b.bot_id)));
+    // Бот с прошлой отправки — если он ещё активен.
+    const last = String(loadFormPrefs('widgets').bot || '');
+    if (last && bots.some(b => String(b.bot_id) === last)) sel.value = last;
   } catch (e) {
     sel.innerHTML = '';
     sel.add(new Option('Не удалось загрузить ботов', ''));
@@ -269,6 +303,9 @@ async function wgSend() {
     const d = await api('/api/miniapp/widgets/send', {method: 'POST', body: JSON.stringify(body)});
     tg.HapticFeedback?.notificationOccurred('success');
     toast(d.warning ? '⚠️ ' + d.warning : (where === 'me' ? '✅ Виджет у вас в личке с ботом' : '✅ Виджет отправлен'));
+    // saveFormPrefs дописывает поля: группа из прошлого раза не стирается
+    // отправкой «себе».
+    saveFormPrefs('widgets', Object.assign({bot: String(bot_id), where: where}, where === 'chat' ? {chat: chat} : {}));
     wgLoadList(false);
   } catch (e) {
     fail(errRu(e, 'Не удалось отправить виджет'));
@@ -322,6 +359,7 @@ function _wgRow(w) {
     </div>
     <div style="display:flex;gap:6px;width:100%;margin-top:8px">
       ${w.editable ? `<button class="btn btn-s" style="flex:1;min-height:32px;font-size:13px;padding:6px" onclick="wgOpenEdit(${Number(w.id)})">✏️ Изменить</button>` : ''}
+      ${wgCanReuse(w) ? `<button class="btn btn-s" style="flex:1;min-height:32px;font-size:13px;padding:6px" onclick="wgReuse(${Number(w.id)})">🔁 Ещё раз</button>` : ''}
       ${w.shared ? `<button class="btn btn-s" style="flex:1;min-height:32px;font-size:13px;padding:6px" onclick="wgBroadcast(${Number(w.id)})">📣 Подписчикам</button>` : ''}
       <button class="btn btn-s" style="flex:1;min-height:32px;font-size:13px;padding:6px" onclick="wgDelete(${Number(w.id)}, this)">🗑 Удалить</button>
     </div>

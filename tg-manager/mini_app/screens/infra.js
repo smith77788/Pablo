@@ -411,11 +411,36 @@ function _iaRender() {
       {label: 'Показать всё за 30 дней', fn: "iaReset()"}));
     return;
   }
-  txt('iaList', IA.rows.map((a, i) => infraAuditRowHtml(a, 'a' + i)).join('')
+  txt('iaList', `<button class="btn btn-s" style="width:calc(100% - 32px);margin:4px 16px 8px" onclick="iaExportCsv()">⬇️ Выгрузить показанные в CSV · ${num(IA.rows.length)}</button>`
+    + IA.rows.map((a, i) => infraAuditRowHtml(a, 'a' + i)).join('')
     + (IA.rows.length < IA.total
       ? `<button class="btn btn-s" style="width:calc(100% - 32px);margin:8px 16px" onclick="loadInfraAudit(false)">Показать ещё (${num(IA.total - IA.rows.length)})</button>`
       : `<div style="text-align:center;font-size:12px;color:var(--hint);padding:10px">Показаны все ${num(IA.total)}</div>`));
 }
+// Журнал с теми же отборами — в таблицу: разбор сбоев с поддержкой или
+// по пулам удобнее в таблице, чем листая строки на телефоне. Причина —
+// по-русски, рядом исходный текст ошибки.
+function iaCsv(rows) {
+  const head = ['Когда', 'Действие', 'Итог', 'Аккаунт', 'Пул', 'Объект', 'Причина', 'Ошибка как есть', 'Пауза Telegram, с', 'Операция'];
+  const q = v => '"' + String(v == null ? '' : v).replace(/"/g, '""').replace(/\s+/g, ' ') + '"';
+  return [head].concat((rows || []).map(a => [
+    a.occurred_at || '', a.action_ru || auditRu(a.action), a.result_ru || a.result || '',
+    a.account_label || '', a.account_pool ? infraPoolLabel(a.account_pool) : '', a.target || '',
+    a.error_ru || '', a.error_raw || '', a.flood_wait_s || '', a.operation_id || '',
+  ])).map(r => r.map(q).join(';')).join('\r\n');
+}
+
+function iaExportCsv() {
+  if (!IA.rows.length) { toast('Нечего выгружать'); return; }
+  const blob = new Blob(['\ufeff' + iaCsv(IA.rows)], {type: 'text/csv;charset=utf-8'});
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'zhurnal_infrastruktury_' + new Date().toISOString().slice(0, 10) + '.csv';
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+  toast('⬇️ Выгружено записей: ' + num(IA.rows.length));
+}
+
 function iaReset() {
   IA.result = 'all'; IA.period = '30d'; IA.action = ''; IA.pool = ''; IA.q = '';
   const qi = document.getElementById('iaSearch');
