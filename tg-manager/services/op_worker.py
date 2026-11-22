@@ -15358,7 +15358,8 @@ async def _exec_content_clone(
     # гейт, fail-open (все в карантине → не обнуляем op, берём исходный список).
     accounts, _ = await _filter_quarantined_accounts(pool, op_id, accounts)
 
-    acc = dict(accounts[0])
+    _acc_pos = 0
+    acc = dict(accounts[_acc_pos])
 
     # Если msg_ids не переданы — получаем последние msg_count сообщений
     if not msg_ids:
@@ -15410,10 +15411,37 @@ async def _exec_content_clone(
                 pool, "UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1",
                 op_id)
             continue
-        try:
-            res = await clone_to_channel(
-                acc["session_str"], acc, source_ref, target_ref, msg_ids, mode,
-            )
+        # Ротация аккаунтов. Раньше операция захватывала ВСЕ выбранные
+        # аккаунты, а работала только первым: стоило ему поймать peer flood
+        # или долгий FloodWait — операция обрывалась «аккаунт ограничен», хотя
+        # остальные аккаунты стояли свободными. Теперь упёршийся во флуд
+        # аккаунт откладывается, и та же цель повторяется следующим.
+        while True:
+            try:
+                res = await clone_to_channel(
+                    acc["session_str"], acc, source_ref, target_ref, msg_ids, mode,
+                )
+            except Exception as exc:
+                log.warning("content_clone op=%d target=%s: %s", op_id, target_ref, exc)
+                fail_count += 1
+                await _log_tgt(idx, str(target_ref), False, str(exc)[:200])
+                break
+            _fw = int(res.get("flood_wait") or 0)
+            _limited = bool(res.get("peer_flood")) or _fw > _FLOOD_INLINE_MAX_S
+            if _fw or res.get("peer_flood"):
+                try:
+                    from services.flood_engine import record_flood
+
+                    await record_flood(
+                        pool, acc["id"], _fw or 3600, "content_clone", op_id)
+                except Exception:
+                    log_exc_swallow(log, "content_clone: record_flood failed")
+            if _limited and res["ok"] <= 0 and _acc_pos + 1 < len(accounts):
+                _acc_pos += 1
+                log.info("content_clone op=%d: аккаунт %s упёрся во флуд — дальше аккаунтом %s",
+                         op_id, acc.get("id"), accounts[_acc_pos].get("id"))
+                acc = dict(accounts[_acc_pos])
+                continue
             if res["ok"] > 0:
                 ok_count += 1
                 cloned_to.append(target_ref)
@@ -15424,43 +15452,35 @@ async def _exec_content_clone(
                                "; ".join(str(e) for e in (res.get("errors") or [])[:2]))
                 log.warning(
                     "content_clone op=%d target=%s: ok=0 errors=%s",
-                    op_id, target_ref, res["errors"][:2],
+                    op_id, target_ref, (res.get("errors") or [])[:2],
                 )
-            # Аккаунт упёрся во флуд — идти следующей целью ТЕМ ЖЕ аккаунтом
-            # значит гарантированно получить флуд снова и приблизить бан.
-            # Ставим cooldown и либо откладываем операцию, либо останавливаемся.
-            _fw = int(res.get("flood_wait") or 0)
-            if _fw or res.get("peer_flood"):
-                try:
-                    from services.flood_engine import record_flood
-
-                    await record_flood(
-                        pool, acc["id"], _fw or 3600, "content_clone", op_id)
-                except Exception:
-                    log_exc_swallow(log, "content_clone: record_flood failed")
-                if res.get("peer_flood"):
-                    return {
-                        "status": "failed",
-                        "ok": ok_count,
-                        "failed": fail_count + (total - idx),
-                        "summary": (
-                            f"🚫 Аккаунт ограничен Telegram (peer flood) на {idx}/{total}.\n"
-                            f"✅ Успели: {ok_count}"
-                        ),
-                    }
-                if _fw > _FLOOD_INLINE_MAX_S:
-                    # Тот же контракт, что у остальных исполнителей: откладывает
-                    # операцию сам _run_op_task по defer_s, освобождая слот и флот.
-                    return {
-                        "status": "requeue",
-                        "defer_s": _fw,
-                        "reason": f"content_clone: FloodWait {_fw}s на {idx}/{total}",
-                    }
+            if _limited and _acc_pos + 1 < len(accounts):
+                # Цель частично прошла, но аккаунт исчерпан — следующие цели
+                # ведёт уже следующий аккаунт.
+                _acc_pos += 1
+                acc = dict(accounts[_acc_pos])
+                break
+            if res.get("peer_flood"):
+                return {
+                    "status": "failed",
+                    "ok": ok_count,
+                    "failed": fail_count + (total - idx),
+                    "summary": (
+                        f"🚫 Все аккаунты ограничены Telegram (peer flood) на {idx}/{total}.\n"
+                        f"✅ Успели: {ok_count}"
+                    ),
+                }
+            if _fw > _FLOOD_INLINE_MAX_S:
+                # Тот же контракт, что у остальных исполнителей: откладывает
+                # операцию сам _run_op_task по defer_s, освобождая слот и флот.
+                return {
+                    "status": "requeue",
+                    "defer_s": _fw,
+                    "reason": f"content_clone: FloodWait {_fw}s на {idx}/{total}",
+                }
+            if _fw:
                 await bounded_flood_sleep(_fw, "content_clone")
-        except Exception as exc:
-            log.warning("content_clone op=%d target=%s: %s", op_id, target_ref, exc)
-            fail_count += 1
-            await _log_tgt(idx, str(target_ref), False, str(exc)[:200])
+            break
 
         await _safe_execute(
                 pool,"UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1", op_id)

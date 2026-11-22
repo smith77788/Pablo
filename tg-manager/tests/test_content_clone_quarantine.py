@@ -15,6 +15,6 @@ from services import op_worker
 def test_clone_filters_quarantine_before_account_pick():
     src = inspect.getsource(op_worker._exec_content_clone)
     filt = src.index("_filter_quarantined_accounts")
-    pick = src.index("acc = dict(accounts[0])")
+    pick = src.index("acc = dict(accounts[_acc_pos])")
     clone = src.index("clone_to_channel(")
     assert filt < pick < clone, "quarantine-гейт должен быть до выбора аккаунта и клонирования"
