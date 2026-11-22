@@ -58,3 +58,12 @@ def test_bot_commands_and_subscribers_are_spelled_out():
     clear = BD[BD.index("async function clearBotCommands"):BD.index("async function openBotStats")]
     assert "if (!n) { toast('ℹ️ У бота нет команд'); return; }" in clear
     assert "Меню команд у бота в Telegram опустеет." in clear
+
+
+def test_currency_list_names_every_main_currency():
+    from services import owner_currency
+    co = (SCREENS / "cohorts.js").read_text(encoding="utf-8")
+    block = co[co.index("const MS_CUR_NAME"):co.index("function _msCurLabel")]
+    for code in owner_currency.MAIN_CURRENCIES:
+        assert code + ":" in block, code
+    assert "esc(_msCurLabel(c))" in co
