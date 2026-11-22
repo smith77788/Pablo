@@ -57,8 +57,21 @@ function _mfPct(v) {
   return v == null ? '—' : (Math.round(v * 1000) / 10) + '%';
 }
 
+// Период запоминается: вход из меню всегда открывал «30 дней», и владелец,
+// смотрящий квартал, переключал его каждый раз заново.
+function _mfPickDays(days) {
+  const ok = d => MF_PERIODS.some(p => p[0] === d);
+  const d = Number(days);
+  if (ok(d)) {
+    if (typeof saveFormPrefs === 'function') saveFormPrefs('money_funnel', {days: d});
+    return d;
+  }
+  const saved = Number(((typeof loadFormPrefs === 'function' && loadFormPrefs('money_funnel')) || {}).days);
+  return ok(saved) ? saved : (_mfDays || 30);
+}
+
 async function openMoneyFunnel(days) {
-  _mfDays = Number(days) || _mfDays || 30;
+  _mfDays = _mfPickDays(days);
   _mfScreen();
   push('s-moneyfunnel');
   const body = document.getElementById('s-moneyfunnel-body');
@@ -98,7 +111,9 @@ async function openMoneyFunnel(days) {
       body.innerHTML = out;
       return;
     }
-    out += '<div class="sec">По кампаниям</div><div class="lst" style="margin:0 16px">';
+    out += '<div class="sec-row"><div class="sec">По кампаниям</div>' +
+      '<span class="sec-btn" onclick="mfExportCsv()" role="button" tabindex="0">⬇️ CSV</span></div>' +
+      '<div class="lst" style="margin:0 16px">';
     out += _mfRows.map(function (r, i) {
       const s = r.steps || {};
       let sig = '';
@@ -154,4 +169,45 @@ async function mfEditSpend(i) {
   } catch (e) {
     toast('⚠️ ' + errRu(e, 'Не удалось сохранить'));
   }
+}
+
+// Таблица кампаний в CSV — для отчёта и сведения с расходами вне продукта.
+// Деньги по валютам не складываем, как и на экране: каждая валюта — своя
+// запись в ячейке.
+function _mfCsvMoney(list) {
+  return (list || []).map(function (r) {
+    const v = r.total_cents != null ? r.total_cents / 100 : r.amount;
+    return Math.round(v) + ' ' + (r.currency || '');
+  }).join(' + ');
+}
+
+function mfCsv(rows, days) {
+  const q = v => '"' + String(v == null ? '' : v).replace(/"/g, '""') + '"';
+  const head = ['Кампания', 'Доставлено', 'Подписались', 'Ответили', 'Купили', 'Выручка',
+                'Расход', 'Цена лида', 'Окупаемость, %'];
+  const lines = [q('Воронка денег за ' + days + ' дней'), head.map(q).join(';')];
+  for (const r of rows || []) {
+    const s = r.steps || {};
+    const real = r.campaign_id !== 0;
+    lines.push([
+      r.name, real ? (s.reached || 0) : '', s.subscribed || 0, s.replied || 0, s.bought || 0,
+      _mfCsvMoney(r.revenue),
+      r.spend ? r.spend.amount + ' ' + (r.spend.currency || '') : '',
+      r.cost_per_lead != null ? Math.round(r.cost_per_lead) : '',
+      r.romi != null ? Math.round(r.romi * 100) : '',
+    ].map(q).join(';'));
+  }
+  return lines.join('\r\n');
+}
+
+function mfExportCsv() {
+  if (!_mfRows.length) { toast('Нечего выгружать'); return; }
+  const blob = new Blob(['\ufeff' + mfCsv(_mfRows, _mfDays)], {type: 'text/csv;charset=utf-8'});
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'voronka-deneg-' + _mfDays + 'd.csv';
+  document.body.appendChild(a);
+  a.click();
+  setTimeout(function () { URL.revokeObjectURL(a.href); a.remove(); }, 0);
+  toast('⬇️ Таблица выгружена');
 }
