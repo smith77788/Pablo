@@ -51,7 +51,7 @@ def test_design_system_wired():
 
 
 def test_screen_reads_summary_endpoint_and_uses_components():
-    assert "api('/api/miniapp/summary?days=7')" in SUMMARY_JS
+    assert "api('/api/miniapp/summary?days=' + days)" in SUMMARY_JS
     assert "UI.stats(" in SUMMARY_JS and "UI.alert(" in SUMMARY_JS
     # Ручных стилей на экране нет: вид живёт в ui_kit.css.
     assert 'style="' not in SUMMARY_JS
