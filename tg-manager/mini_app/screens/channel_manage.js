@@ -173,7 +173,8 @@ function openChAutopost(ids) {
   _cmModal('mo-ch-autopost', `
     <div class="modal-title">🔁 Автопостинг</div>
     <div style="font-size:12px;color:var(--hint);margin-bottom:10px">Пост будет публиковаться в ${esc(_cmWhat(ids))} по расписанию. Spintax {A|B} даёт каждому каналу и каждому кругу свой вариант текста.</div>
-    <textarea id="capText" rows="5" placeholder="Текст поста… Spintax: {Привет|Здравствуйте}!" style="width:100%;box-sizing:border-box;padding:10px;border-radius:var(--radius);background:var(--bg3);color:var(--text);border:1px solid var(--border-input);font-size:14px;resize:vertical"></textarea>
+    <textarea id="capText" rows="5" oninput="_capOnInput()" placeholder="Текст поста… Spintax: {Привет|Здравствуйте}!" style="width:100%;box-sizing:border-box;padding:10px;border-radius:var(--radius);background:var(--bg3);color:var(--text);border:1px solid var(--border-input);font-size:14px;resize:vertical"></textarea>
+    <div id="capLen" style="font-size:12px;color:var(--hint);text-align:right;margin-top:2px"></div>
     <div class="field">
       <label style="font-size:13px;color:var(--hint)">Как часто</label>
       <select id="capEvery" class="sel">
@@ -210,7 +211,24 @@ function openChAutopost(ids) {
     <button class="btn btn-p" id="capBtn" onclick="submitChAutopost()" style="width:100%;margin-top:8px">🔁 Запустить автопостинг</button>
     <div id="capActive" style="margin-top:12px"></div>`);
   showModal('mo-ch-autopost');
+  // Ритм и черновик — с прошлого раза: обычно ставят одно и то же расписание,
+  // а случайно закрытое окно не должно стирать набранный текст.
+  applyFormPrefs('ch_autopost', {every: 'capEvery', start: 'capStart', count: 'capCount'});
+  const ta = document.getElementById('capText');
+  if (ta && !ta.value) ta.value = loadDraft('ch_autopost');
+  _capOnInput();
   loadChAutoposts(ids.length === 1 ? ids[0] : null, 'capActive');
+}
+
+const _CAP_MAX = 4096;
+function _capOnInput() {
+  const ta = document.getElementById('capText');
+  const v = ta ? ta.value : '';
+  saveDraft('ch_autopost', v);
+  const el = document.getElementById('capLen');
+  if (!el) return;
+  el.textContent = v.length ? `${v.length} / ${_CAP_MAX}` : '';
+  el.style.color = v.length > _CAP_MAX ? 'var(--red)' : 'var(--hint)';
 }
 
 function _cmSelLabel(id) {
@@ -222,7 +240,7 @@ async function submitChAutopost() {
   const errEl = document.getElementById('capErr'); if (errEl) errEl.textContent = '';
   const text = (document.getElementById('capText')?.value || '').trim();
   if (!text) { if (errEl) errEl.textContent = 'Введите текст поста'; return; }
-  if (text.length > 4096) { if (errEl) errEl.textContent = 'Текст длиннее 4096 символов'; return; }
+  if (text.length > _CAP_MAX) { if (errEl) errEl.textContent = 'Текст длиннее 4096 символов'; return; }
   const every = parseInt(document.getElementById('capEvery')?.value || '0', 10) || 0;
   const start = parseInt(document.getElementById('capStart')?.value || '0', 10) || 0;
   const count = parseInt(document.getElementById('capCount')?.value || '', 10) || 0;
@@ -236,6 +254,8 @@ async function submitChAutopost() {
   try {
     await api('/api/miniapp/mass_publish', {method: 'POST', body: JSON.stringify(payload)});
     toast('🔁 Автопостинг запущен');
+    saveFormPrefs('ch_autopost', {every: String(every), start: String(start), count: count ? String(count) : ''});
+    clearDraft('ch_autopost');
     closeModal('mo-ch-autopost');
     _cmAfterBulk();
     if (ids.length === 1 && document.getElementById('chdAutoposts')) loadChAutoposts(ids[0], 'chdAutoposts');
