@@ -616,8 +616,9 @@ async def _lever_context(pool, owner_id: int, g: dict, p: dict) -> dict:
     if kind == "channel" and acc_ids:
         try:
             from services import flood_engine
-            for a in acc_ids:
-                cap += int((await flood_engine.recommended_daily_limit(pool, a)).get("limit") or 0)
+            # Пакетом: поштучно это два запроса на аккаунт, до 400 на экран.
+            limits = await flood_engine.recommended_daily_limits(pool, acc_ids)
+            cap = sum(int((lim or {}).get("limit") or 0) for lim in limits.values())
         except Exception:
             log.warning("growth_plan: ёмкость флота не посчитана owner=%s", oid, exc_info=True)
     ctx["daily_capacity"] = cap

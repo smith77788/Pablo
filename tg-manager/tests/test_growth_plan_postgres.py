@@ -220,12 +220,12 @@ def _run(body):
         root = await asyncpg.connect(DSN)
         await root.execute(f'CREATE DATABASE "{name}"')
         pool = None
-        orig = flood_engine.recommended_daily_limit
+        orig = flood_engine.recommended_daily_limits
 
-        async def fake_limit(pool_, account_id):
-            return {"limit": 40}
+        async def fake_limits(pool_, account_ids):
+            return {int(a): {"limit": 40} for a in account_ids}
 
-        flood_engine.recommended_daily_limit = fake_limit
+        flood_engine.recommended_daily_limits = fake_limits
         try:
             pool = await asyncpg.create_pool(_db(name), min_size=1, max_size=3)
             for ddl in _SCHEMA:
@@ -243,7 +243,7 @@ def _run(body):
                 [(OWNER, CH, "Наш канал", "our_news", 1200), (STRANGER, ALIEN_CH, "Чужой", "alien", 50)])
             return await body(pool)
         finally:
-            flood_engine.recommended_daily_limit = orig
+            flood_engine.recommended_daily_limits = orig
             if pool is not None:
                 await pool.close()
             await root.execute(f'DROP DATABASE "{name}" WITH (FORCE)')
