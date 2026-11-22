@@ -119,16 +119,29 @@ async def _owner_channels(pool, owner_id: int, limit: int = 200) -> list[dict]:
         return []
 
 
-async def _series(pool, owner_id: int, channel_id: int, days: int = 45) -> list[dict]:
+async def _series_many(pool, owner_id: int, channel_ids: list[int],
+                       days: int = 45) -> dict[int, list[dict]]:
+    """Ряды подписчиков нескольких каналов ОДНИМ запросом.
+
+    Сводка организма (её читают «Пульс» и «Дайджест» на каждом открытии) и
+    редкий проход читали ряд каждого канала отдельным запросом — до 200 запросов
+    подряд на одно открытие экрана. Отбор и порядок — те же, что были у поштучного.
+    """
+    out: dict[int, list[dict]] = {int(c): [] for c in channel_ids}
+    if not channel_ids:
+        return out
     try:
         rows = await pool.fetch(
-            "SELECT captured_on, members_count FROM channel_member_history "
-            "WHERE owner_id=$1 AND channel_id=$2 "
+            "SELECT channel_id, captured_on, members_count FROM channel_member_history "
+            "WHERE owner_id=$1 AND channel_id = ANY($2::bigint[]) "
             "AND captured_on > CURRENT_DATE - ($3::int) "
-            "ORDER BY captured_on ASC", owner_id, channel_id, days)
-        return [dict(r) for r in (rows or [])]
+            "ORDER BY channel_id, captured_on ASC", owner_id, list(out), days)
     except Exception:
-        return []
+        return out
+    for r in rows or []:
+        out.setdefault(int(r["channel_id"]), []).append(
+            {"captured_on": r["captured_on"], "members_count": r["members_count"]})
+    return out
 
 
 async def summary(pool, owner_id: int) -> dict:
@@ -137,8 +150,10 @@ async def summary(pool, owner_id: int) -> dict:
     out = {"suspicious": 0, "fake_top": None, "worst_pct": 0.0}
     if not owner_id:
         return out
-    for ch in await _owner_channels(pool, owner_id):
-        series = await _series(pool, owner_id, int(ch["channel_id"]))
+    chans = await _owner_channels(pool, owner_id)
+    by_ch = await _series_many(pool, owner_id, [int(c["channel_id"]) for c in chans])
+    for ch in chans:
+        series = by_ch.get(int(ch["channel_id"])) or []
         v = classify_series([r["members_count"] for r in series])
         if v["level"] in (SPIKE, CRASH):
             out["suspicious"] += 1
@@ -164,9 +179,11 @@ async def scan_and_remember(pool, owner_id: int) -> list[dict]:
     if not isinstance(seen, dict):
         seen = {}
     fresh: list[dict] = []
-    for ch in await _owner_channels(pool, owner_id):
+    chans = await _owner_channels(pool, owner_id)
+    by_ch = await _series_many(pool, owner_id, [int(c["channel_id"]) for c in chans])
+    for ch in chans:
         cid = int(ch["channel_id"])
-        series = await _series(pool, owner_id, cid)
+        series = by_ch.get(cid) or []
         v = classify_series([r["members_count"] for r in series])
         if v["level"] not in (SPIKE, CRASH):
             continue
