@@ -18,7 +18,7 @@ DASH = (SCREENS / "dashboard.js").read_text(encoding="utf-8")
 
 # Экраны, где сырой e.message ещё живёт. Список только сокращается: новый
 # экран с `(e && e.message) ||` краснит этот тест.
-RAW_MESSAGE_LEFT = {"contact_invite_link.js", "sales_manager.js", "va_admin.js"}
+RAW_MESSAGE_LEFT: set = set()
 
 
 def _fn(src, name):
