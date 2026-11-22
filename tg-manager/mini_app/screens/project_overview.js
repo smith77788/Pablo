@@ -30,8 +30,7 @@ function renderHomeProjects(section, data) {
     const hint = document.createElement('div');
     hint.className = 'hint';
     hint.style.margin = '8px 0 0';
-    hint.textContent = 'Проектов пока нет. Проект собирает каналы, ботов и чаты в одну сеть: '
-      + 'здесь будет видно, сколько в ней узлов, что идёт сейчас и где были сбои.';
+    hint.textContent = 'Проектов пока нет. Проект собирает каналы, ботов и чаты в одну сеть.';
     list.append(create, hint);
     return;
   }

@@ -219,9 +219,8 @@ async function openMoneySettings() {
 // В выпадашке стояли голые коды «KZT», «UZS», «BYN» — их помнит не каждый.
 // Ключи — services/owner_currency.MAIN_CURRENCIES.
 const MS_CUR_NAME = {
-  RUB: 'российский рубль', USD: 'доллар США', EUR: 'евро', KZT: 'казахстанский тенге',
-  UAH: 'украинская гривна', BYN: 'белорусский рубль', UZS: 'узбекский сум',
-  TRY: 'турецкая лира', GBP: 'фунт стерлингов', CNY: 'китайский юань',
+  RUB: 'рубль', USD: 'доллар', EUR: 'евро', KZT: 'тенге', UAH: 'гривна',
+  BYN: 'бел. рубль', UZS: 'сум', TRY: 'лира', GBP: 'фунт', CNY: 'юань',
 };
 function _msCurLabel(c) { return MS_CUR_NAME[c] ? c + ' — ' + MS_CUR_NAME[c] : c; }
 
@@ -244,7 +243,7 @@ function _msRender() {
   out += codes.map(function (c) {
     const ph = eff[c] != null ? 'по ЦБ: ' + (Math.round(eff[c] * 10000) / 10000) : 'курса нет';
     return '<div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">' +
-      '<span style="width:64px;font-size:13px">' + (c === 'XTR' ? '⭐ звезда' : '<span title="' + esc(MS_CUR_NAME[c] || c) + '">' + esc(c) + '</span>') + '</span>' +
+      '<span style="width:64px;font-size:13px">' + (c === 'XTR' ? '⭐ звезда' : esc(c)) + '</span>' +
       '<input class="inp ms-rate" data-cur="' + esc(c) + '" inputmode="decimal" style="flex:1" ' +
         'placeholder="' + esc(ph) + '" value="' + (manual[c] != null ? esc(String(manual[c])) : '') + '"></div>';
   }).join('');
