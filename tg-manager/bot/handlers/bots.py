@@ -55,6 +55,18 @@ async def cb_main_menu(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
 # ── List ──────────────────────────────────────────────────────────────────
 
 
+def _bots_word(n: int) -> str:
+    """«12 ботов», «21 бот», «3 бота» — вместо «12 шт.»."""
+    d, h = n % 10, n % 100
+    if d == 1 and h != 11:
+        w = "бот"
+    elif 2 <= d <= 4 and not 12 <= h <= 14:
+        w = "бота"
+    else:
+        w = "ботов"
+    return f"{n} {w}"
+
+
 @router.callback_query(BotCb.filter(F.action == "list"))
 async def cb_list(
     callback: CallbackQuery, callback_data: BotCb, pool: asyncpg.Pool
@@ -90,7 +102,7 @@ async def cb_list(
         )
     else:
         await callback.message.edit_text(
-            f"🤖 <b>Ваши боты</b> — {len(bots)} шт." + hint,
+            f"🤖 <b>Ваши боты</b> — {_bots_word(len(bots))}" + hint,
             parse_mode="HTML",
             reply_markup=bots_list(bots, callback_data.page),
         )
