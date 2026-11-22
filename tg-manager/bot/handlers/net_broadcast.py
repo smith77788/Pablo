@@ -116,7 +116,7 @@ async def cb_net_bc_target(
     if not await require_plan(pool, callback.from_user.id, "enterprise"):
 
         await callback.message.edit_text(
-            locked_text("Сетевая рассылка v2", "enterprise"),
+            locked_text("Сетевая рассылка", "enterprise"),
             parse_mode="HTML",
             reply_markup=subscription_locked_markup(
                 "enterprise", back_callback=NetworkCb(action="menu")
@@ -133,7 +133,7 @@ async def cb_net_bc_target(
         return
     total_aud = sum(b.get("audience_count", 0) for b in bots)
     await callback.message.edit_text(
-        f"📢 <b>Сетевая рассылка v2</b>\n\n"
+        f"📢 <b>Сетевая рассылка</b>\n\n"
         f"Ботов: <b>{len(bots)}</b>\n"
         f"Суммарная аудитория: <b>{total_aud:,}</b>\n\n"
         "Выберите цель рассылки:",

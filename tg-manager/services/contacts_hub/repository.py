@@ -233,11 +233,55 @@ async def list_segments(pool, owner_id) -> list[dict]:
         if isinstance(f, str):
             try: f = _json.loads(f)
             except Exception: f = {}
+        out.append({"id": int(r["id"]), "name": r["name"], "filters": f, "count": None})
+    counts = await count_segments(pool, owner_id, [s["filters"] or {} for s in out])
+    for s, n in zip(out, counts):
+        s["count"] = n
+    return out
+
+
+_PARAM_RE = re.compile(r"\$(\d+)\b")
+_SEGMENTS_PER_PASS = 40
+
+
+async def count_segments(pool, owner_id, filters_list: list[dict]) -> list[int | None]:
+    """Размеры нескольких срезов ОДНИМ проходом по контактам владельца.
+
+    Список сохранённых сегментов считал `count_segment` на каждый сегмент:
+    столько проходов по `unified_contacts` владельца, сколько у него
+    сегментов (на 30 000 контактов ~7 мс на проход, и экран рос линейно).
+    Здесь условие каждого сегмента — тот же `_segment_where`, только его
+    параметры перенумерованы, и все счётчики идут в одном SELECT через
+    `COUNT(*) FILTER`. Сбой общего запроса (например, один сегмент с
+    испорченным фильтром) — поштучный счёт, как раньше: кривой сегмент
+    получает None, остальные — свои числа.
+    """
+    out: list[int | None] = [None] * len(filters_list)
+    for start in range(0, len(filters_list), _SEGMENTS_PER_PASS):
+        chunk = filters_list[start:start + _SEGMENTS_PER_PASS]
+        params: list = [owner_id]
+        cols = []
         try:
-            n = await count_segment(pool, owner_id, f)
+            for i, f in enumerate(chunk):
+                where, p, _ = _segment_where(owner_id, f or {})
+                base = len(params)
+                where = _PARAM_RE.sub(lambda m, b=base: f"${int(m.group(1)) + b}", where)
+                params.extend(p)
+                cols.append(f"COUNT(*) FILTER (WHERE {where}) AS c{i}")
+            row = await pool.fetchrow(
+                f"SELECT {', '.join(cols)} FROM unified_contacts WHERE owner_id = $1",
+                *params)
+            if row is None:
+                raise LookupError("пустой ответ общего счёта")
+            for i in range(len(chunk)):
+                out[start + i] = int(row[f"c{i}"] or 0)
         except Exception:
-            n = None
-        out.append({"id": int(r["id"]), "name": r["name"], "filters": f, "count": n})
+            log.debug("count_segments: общий счёт не прошёл, считаю поштучно", exc_info=True)
+            for i, f in enumerate(chunk):
+                try:
+                    out[start + i] = await count_segment(pool, owner_id, f or {})
+                except Exception:
+                    out[start + i] = None
     return out
 
 

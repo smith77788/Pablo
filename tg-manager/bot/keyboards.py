@@ -111,7 +111,7 @@ def network_ops_menu() -> InlineKeyboardMarkup:
         text="👥 Пересечение аудиторий", callback_data=NetworkCb(action="overlap")
     )
     kb.button(
-        text="📢 Сетевая рассылка v2", callback_data=NetBcCb(action="choose_target")
+        text="📢 Сетевая рассылка", callback_data=NetBcCb(action="choose_target")
     )
     kb.button(text="🔄 Клонировать настройки", callback_data=NetworkCb(action="clone"))
     # ── Массовые операции ──
@@ -119,8 +119,8 @@ def network_ops_menu() -> InlineKeyboardMarkup:
     kb.button(text="🌍 Имя по гео", callback_data=NetworkCb(action="bulk_name_lang"))
     kb.button(text="📄 Описание всем", callback_data=NetworkCb(action="bulk_desc"))
     kb.button(text="🌍 Описание по гео", callback_data=NetworkCb(action="bulk_desc_lang"))
-    kb.button(text="📃 Краткое всем", callback_data=NetworkCb(action="bulk_short"))
-    kb.button(text="🌍 Краткое по гео", callback_data=NetworkCb(action="bulk_short_lang"))
+    kb.button(text="📃 Краткое описание всем", callback_data=NetworkCb(action="bulk_short"))
+    kb.button(text="🌍 Краткое описание по гео", callback_data=NetworkCb(action="bulk_short_lang"))
     kb.button(text="🤖 Команды всем", callback_data=NetworkCb(action="bulk_commands"))
     kb.button(
         text="🌍 Команды по гео", callback_data=NetworkCb(action="bulk_commands_lang")
@@ -201,8 +201,8 @@ def bulk_menu() -> InlineKeyboardMarkup:
     kb.button(text="🌍 Имя по гео", callback_data=BulkCb(action="name_lang"))
     kb.button(text="📄 Описание всем", callback_data=BulkCb(action="desc"))
     kb.button(text="🌍 Описание по гео", callback_data=BulkCb(action="desc_lang"))
-    kb.button(text="📃 Краткое всем", callback_data=BulkCb(action="short"))
-    kb.button(text="🌍 Краткое по гео", callback_data=BulkCb(action="short_lang"))
+    kb.button(text="📃 Краткое описание всем", callback_data=BulkCb(action="short"))
+    kb.button(text="🌍 Краткое описание по гео", callback_data=BulkCb(action="short_lang"))
     kb.button(text="🤖 Команды всем", callback_data=BulkCb(action="commands"))
     kb.button(text="🌍 Команды по гео", callback_data=BulkCb(action="commands_lang"))
     kb.button(text="🔍 Проверить токены", callback_data=BulkCb(action="check"))
@@ -239,6 +239,16 @@ def bots_list(bots: list, page: int = 0) -> InlineKeyboardMarkup:
             )
         )
     if nav:
+        # Между стрелками — где вы сейчас: по пять ботов на странице при
+        # полусотне ботов листали вслепую, не зная, сколько ещё впереди.
+        pages = (len(bots) + PAGE_SIZE - 1) // PAGE_SIZE
+        nav.insert(
+            1 if page > 0 else 0,
+            InlineKeyboardButton(
+                text=f"📄 {page + 1}/{pages}",
+                callback_data=BotCb(action="list", page=page).pack(),
+            ),
+        )
         kb.row(*nav)
 
     kb.row(
@@ -249,6 +259,13 @@ def bots_list(bots: list, page: int = 0) -> InlineKeyboardMarkup:
             text="🏭 Создать через BotFather",
             callback_data=BotFactCb(action="menu").pack(),
         ),
+    )
+    # С непустым списком выхода назад не было вовсе (у пустого — был):
+    # вернуться в меню можно было только командой /menu.
+    kb.row(
+        InlineKeyboardButton(
+            text="🏠 Главное меню", callback_data=BotCb(action="main").pack()
+        )
     )
     return kb.as_markup()
 
@@ -408,7 +425,9 @@ def broadcast_menu(bot_id: int) -> InlineKeyboardMarkup:
 
 def broadcast_history(bot_id: int, broadcasts: list) -> InlineKeyboardMarkup:
     kb = InlineKeyboardBuilder()
-    status_emoji = {"pending": "⏳", "running": "🔄", "done": "✅", "cancelled": "❌"}
+    # «failed» и «paused» тоже пишутся рассылкой; без них в списке стоял «❓».
+    status_emoji = {"pending": "⏳", "running": "🔄", "done": "✅", "cancelled": "❌",
+                    "failed": "⚠️", "paused": "⏸"}
     for bc in broadcasts[:10]:
         emoji = status_emoji.get(bc["status"], "❓")
         date_str = bc["created_at"].strftime("%d.%m %H:%M")

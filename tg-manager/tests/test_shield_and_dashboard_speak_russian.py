@@ -108,3 +108,10 @@ def test_analytics_period_is_chosen_and_remembered():
 
 def test_dashboard_error_can_be_retried():
     assert "onclick=\"_udReload()\"" in _fn(DASH, "_udError")
+
+
+def test_analytics_empty_states_explain_why():
+    assert "Нет данных" not in DASH
+    assert "Пока мало точек для графика" in DASH
+    assert "Каналов пока нет." in DASH and "openChannels()" in DASH
+    assert "За период событий не было" in DASH

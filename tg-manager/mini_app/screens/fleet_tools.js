@@ -158,6 +158,45 @@ async function fleetViewDelete(kind, id) {
   } catch (e) { toast('⚠️ ' + errRu(e, 'Не удалось удалить')); }
 }
 
+// Какой сохранённый вид сейчас на экране. Чипы видов выглядели одинаково,
+// и после нажатия было не понять, применился ли вид и какой из них стоит.
+// Сравниваем то, что вид хранит, с текущим фильтром, поиском и сортировкой;
+// пустое и отсутствующее значение — одно и то же.
+function _fxNormView(o) {
+  const n = {};
+  Object.keys(o || {}).forEach(k => {
+    const v = o[k];
+    n[k] = (v === null || v === undefined) ? '' : String(v);
+  });
+  if (!n.filter) n.filter = 'all';
+  if (!n.sort) n.sort = 'default';
+  if (n.sort === 'default') n.dir = '';
+  return n;
+}
+function _fxViewIsActive(kind, v) {
+  const io = FLEET_VIEW_IO[kind];
+  if (!io || !v) return false;
+  const st = _fxSortState(kind);
+  const cur = _fxNormView(Object.assign({}, io.get(), {sort: st.sort, dir: st.dir}));
+  const want = _fxNormView(v.params);
+  const keys = new Set(Object.keys(cur).concat(Object.keys(want)));
+  for (const k of keys) if ((cur[k] || '') !== (want[k] || '')) return false;
+  return true;
+}
+
+// Обновить только подсветку чипов видов, не перерисовывая строку целиком
+// (там открытый select сортировки).
+function _fxMarkViews(kind) {
+  const box = document.getElementById('fx-' + kind);
+  if (!box) return;
+  box.querySelectorAll('.fx-view[data-view]').forEach(el => {
+    const v = (FLEET_VIEWS[kind] || []).find(x => String(x.id) === el.getAttribute('data-view'));
+    const on = _fxViewIsActive(kind, v);
+    el.classList.toggle('on', on);
+    el.setAttribute('aria-pressed', String(on));
+  });
+}
+
 // Строка инструментов над списком: сортировка, направление, виды.
 function fleetToolsRender(kind) {
   const box = document.getElementById('fx-' + kind);
@@ -167,9 +206,11 @@ function fleetToolsRender(kind) {
     `<option value="${k}"${k === st.sort ? ' selected' : ''}>${esc(l)}</option>`).join('');
   const dirBtn = st.sort === 'default' ? '' :
     `<button class="btn btn-s fx-dir" onclick="fleetFlipDir('${kind}')" aria-label="Сменить направление сортировки">${st.dir === 'asc' ? '↑' : st.dir === 'desc' ? '↓' : '⇅'}</button>`;
-  const views = (FLEET_VIEWS[kind] || []).map(v =>
-    `<span class="lf-chip fx-view" role="button" tabindex="0" onclick="fleetViewApply('${kind}',${v.id})">⭐ ${esc(v.name)}`
-    + `<span class="fx-view-x" role="button" aria-label="Удалить вид" onclick="event.stopPropagation();fleetViewDelete('${kind}',${v.id})">✕</span></span>`).join('');
+  const views = (FLEET_VIEWS[kind] || []).map(v => {
+    const on = _fxViewIsActive(kind, v);
+    return `<span class="lf-chip fx-view${on ? ' on' : ''}" data-view="${v.id}" role="button" tabindex="0" aria-pressed="${on}" onclick="fleetViewApply('${kind}',${v.id})">⭐ ${esc(v.name)}`
+    + `<span class="fx-view-x" role="button" aria-label="Удалить вид" onclick="event.stopPropagation();fleetViewDelete('${kind}',${v.id})">✕</span></span>`;
+  }).join('');
   box.innerHTML = `<div class="fx-row">
       <label class="fx-sort"><span>Сортировка</span>
         <select class="sel" onchange="fleetSetSort('${kind}',this.value)" aria-label="Сортировка списка">${opts}</select></label>
