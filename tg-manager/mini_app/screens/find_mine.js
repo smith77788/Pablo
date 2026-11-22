@@ -22,6 +22,28 @@ const _FM_MORE = {
   contacts: 'openContacts()', deals: 'openDeals()', bots: "goTab('bots')", accounts: "goTab('accounts')",
   channels: 'openChannels()', personas: 'openSalesManager()', operations: 'openMassOps()',
 };
+// «Ещё N — открыть раздел» открывал раздел без запроса: из 40 найденных
+// контактов владелец видел все 3000 и набирал то же слово второй раз. Где у
+// раздела есть своё поле поиска, переносим запрос туда — через его же
+// обработчик, чтобы список перечитался тем же путём, что при наборе руками.
+function _fmFill(inputId, handler, q) {
+  const el = document.getElementById(inputId);
+  if (el) el.value = q;
+  if (typeof handler === 'function') handler(q);
+}
+const _FM_MORE_Q = {
+  contacts: q => { const el = document.getElementById('contactSearch'); if (el) el.value = q; openContacts(); },
+  bots:     q => { goTab('bots'); _fmFill('botSearch', typeof onBotSearch === 'function' && onBotSearch, q); },
+  accounts: q => { goTab('accounts'); _fmFill('accSearch', typeof onAccSearch === 'function' && onAccSearch, q); },
+  channels: q => { openChannels(); _fmFill('chSearch', typeof onChSearch === 'function' && onChSearch, q); },
+};
+function fmOpenMore(key) {
+  const box = document.getElementById('moreFindMine');
+  const q = (box && box._q) || '';
+  const withQ = _FM_MORE_Q[key];
+  if (!withQ) return;
+  try { return withQ(q); } catch (_) { toast('⚠️ Не получилось открыть раздел'); }
+}
 // Сделка открывается на доске своей карточкой. Доска показывает первые
 // карточки колонки; если найденная сделка дальше, говорим это прямо, а не
 // открываем молча доску без неё.
@@ -70,11 +92,14 @@ async function _fmRun(q) {
           '<div class="row-body"><div class="row-name">' + esc(it.title) + '</div>' +
           (it.sub ? '<div class="row-val">' + esc(it.sub) + '</div>' : '') + '</div></div>').join('');
       const more = g.has_more && _FM_MORE[g.key]
-        ? '<button class="btn btn-s" style="margin:4px 0 8px;font-size:12px;padding:6px 12px" onclick="' + _FM_MORE[g.key] + '">Ещё ' + num(g.total - g.items.length) + ' — открыть раздел</button>' : '';
+        ? '<button class="btn btn-s" style="margin:4px 0 8px;font-size:12px;padding:6px 12px" onclick="' +
+          (_FM_MORE_Q[g.key] ? 'fmOpenMore(\'' + esc(g.key) + '\')' : _FM_MORE[g.key]) + '">Ещё ' +
+          num(g.total - g.items.length) + (_FM_MORE_Q[g.key] ? ' — открыть с поиском «' + esc(q) + '»' : ' — открыть раздел') + '</button>' : '';
       return '<div style="font-size:12px;color:var(--hint);margin:8px 2px 2px">' + esc(g.label) + ' · ' + num(g.total) + '</div>' +
         '<div class="card" style="padding:0 12px">' + rows + '</div>' + more;
     }).join('');
   box._groups = groups;
+  box._q = q;
 }
 function _fmOpen(key, i) {
   const box = document.getElementById('moreFindMine');
