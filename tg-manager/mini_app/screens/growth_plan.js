@@ -28,7 +28,25 @@ async function gpLoad() {
       : empty('🎯', 'Целей пока нет', 'Поставьте цель каналу или боту: план покажет, успеваете ли вы и чем расти.', {label: '+ Поставить цель', fn: 'gpOpenNew()'});
     return;
   }
-  box.innerHTML = goals.map(_gpGoalRow).join('');
+  box.innerHTML = _gpSummary(goals) + goals.map(_gpGoalRow).join('');
+}
+
+// Сводка над списком: с десятком целей не видно, сколько из них горит, пока
+// не пролистаешь каждую карточку.
+function _gpSummary(goals) {
+  const n = {ok: 0, bad: 0, done: 0, active: 0};
+  for (const g of goals) {
+    const st = (g.progress || {}).state;
+    if (g.status === 'done' || st === 'done') { n.done++; continue; }
+    n.active++;
+    if (st === 'behind' || st === 'stalled' || st === 'overdue') n.bad++;
+    else n.ok++;
+  }
+  const parts = [`в работе: ${n.active}`];
+  if (n.ok) parts.push(`<span style="color:var(--green)">успеваете: ${n.ok}</span>`);
+  if (n.bad) parts.push(`<span style="color:var(--red)">отстают: ${n.bad}</span>`);
+  if (n.done) parts.push(`выполнено: ${n.done}`);
+  return `<div class="field-note" id="gpSummary" style="padding:6px 4px 8px">${parts.join(' · ')}</div>`;
 }
 
 function _gpBar(p) {
@@ -51,7 +69,9 @@ function _gpGoalRow(g) {
 
 // ── Новая цель и правка ────────────────────────────────────────────────────
 
-function gpOpenNew() {
+// pick — «channel:ID» или «bot:ID»: после выполненной цели следующую ставят
+// тому же каналу, а не первому в списке.
+function gpOpenNew(pick) {
   if (!GP.data) return;
   GP.edit = null;
   const a = GP.data.assets || {}, sel = document.getElementById('gpAsset');
@@ -60,6 +80,7 @@ function gpOpenNew() {
   for (const c of (a.channels || [])) if (!busy.has('channel:' + c.id)) sel.add(new Option(`📡 ${c.name} · ${_gpNum(c.current)}`, 'channel:' + c.id));
   for (const b of (a.bots || [])) if (!busy.has('bot:' + b.id)) sel.add(new Option(`🤖 ${b.name} · ${_gpNum(b.current)}`, 'bot:' + b.id));
   if (!sel.options.length) { toast('У всех ваших каналов и ботов уже есть цель'); return; }
+  if (pick && [...sel.options].some(o => o.value === pick)) sel.value = pick;
   document.getElementById('gpAssetWrap').style.display = 'block';
   txt('gpNewSec', 'Новая цель');
   txt('gpNewBtn', '🎯 Поставить цель');
@@ -220,7 +241,7 @@ function gpAct(a) {
     case 'seo': return openSeoObj();
     case 'boost': return openBoost();
     case 'edit_goal': return gpEditGoal();
-    case 'new_goal': back(); return gpOpenNew();
+    case 'new_goal': back(); return gpOpenNew(g.asset_kind + ':' + g.asset_id);
     default: return;
   }
 }
