@@ -75,13 +75,16 @@ class _Pool:
         self._series = series_by_cid             # {cid: [counts...]}
         self._state = state
         self.emitted = []
+        self.history_reads = 0
 
     async def fetch(self, q, *a):
         if "managed_channels" in q:
             return [dict(c) for c in self._channels]
         if "channel_member_history" in q:
-            cid = a[1]
-            return [{"captured_on": f"d{i}", "members_count": c}
+            # Ряды всех каналов одним запросом (channel_id = ANY($2)).
+            self.history_reads += 1
+            return [{"channel_id": cid, "captured_on": f"d{i}", "members_count": c}
+                    for cid in a[1]
                     for i, c in enumerate(self._series.get(cid, []))]
         return []
 
@@ -109,6 +112,7 @@ def test_summary_counts_suspicious_channels():
     s = asyncio.run(G.summary(pool, owner_id=7))
     assert s["suspicious"] == 1
     assert s["fake_top"] == "Накрученный"
+    assert pool.history_reads == 1, "ряды каналов читаются одним запросом, а не по каналу"
 
 
 def test_scan_remembers_and_dedups():
