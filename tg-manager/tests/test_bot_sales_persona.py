@@ -712,3 +712,68 @@ def test_diagnose_reports_provider_error(monkeypatch):
     # openai не установлен в тест-среде ИЛИ вызов упадёт — в любом случае error непустой,
     # провайдер виден в списке (на неудаче provider=None — успеха не было)
     assert r["ok"] is False and "openai" in r["providers"] and r["error"]
+
+
+# ── Валюта магазина и пересчёт промокода (регресс) ──────────────────────────
+def test_prompt_prices_in_shop_currency_not_product_default():
+    # Товар из мини-аппа всегда лежал с currency='USD' по умолчанию: рублёвый
+    # магазин называл клиенту цены каталога в долларах.
+    p = {"name": "A", "can_take_orders": True, "currency": "rub",
+         "min_order_total": 100000}
+    products = [{"name": "Кофе", "price_cents": 50000, "currency": "USD",
+                 "is_active": True,
+                 "variants": [{"name": "L", "price_cents": 60000}]}]
+    sp = bsp.build_system_prompt(p, products, None, None)
+    assert "500.00 RUB" in sp and "600.00 RUB" in sp and "1000.00 RUB" in sp
+    assert "USD" not in sp
+    assert bsp.shop_currency({}) == "USD"
+    assert bsp.shop_currency({"currency": " eur "}) == "EUR"
+
+
+def test_reapply_promo_on_changed_order():
+    promos = [{"code": "SALE10", "percent": 10, "is_active": True}]
+    # код найден (регистр не важен) → скидка от новой суммы
+    assert bsp._reapply_promo(3000, "sale10", promos, 100) == (300, 2700)
+    # кода больше нет → прежняя скидка в деньгах сохраняется, но не больше суммы
+    assert bsp._reapply_promo(3000, "GONE", promos, 100) == (100, 2900)
+    assert bsp._reapply_promo(50, "GONE", [], 100) == (50, 0)
+
+
+@pytest.mark.skipif(not DSN, reason="нужен живой Postgres: INFRAGRAM_TEST_DSN")
+def test_order_keeps_promo_and_shop_currency_postgres():
+    import asyncio
+    import asyncpg
+
+    OWN, BOT, CHAT = 800999, 556999, 77
+
+    async def go():
+        pool = await asyncpg.create_pool(DSN, min_size=1, max_size=3)
+
+        async def _cl():
+            for t in ("bot_sales_dialogs", "bot_sales_orders", "bot_sales_promos",
+                      "bot_sales_products", "bot_sales_personas"):
+                await pool.execute(f"DELETE FROM {t} WHERE owner_id=$1", OWN)
+        try:
+            await _cl()
+            p = await bsp.create_persona(pool, OWN, "Ника", currency="RUB")
+            pid = p["id"]
+            await bsp.add_product(pool, pid, OWN, "Эспрессо", price_cents=1000)
+            await bsp.add_product(pool, pid, OWN, "Круассан", price_cents=2000)
+            await bsp.add_promo(pool, pid, OWN, "SALE10", 10)
+            await bsp.assign_to_bot(pool, pid, OWN, BOT)
+            await bsp.handle_incoming(pool, BOT, OWN, CHAT, "хочу заказать эспрессо")
+            await bsp.handle_incoming(pool, BOT, OWN, CHAT, "хочу заказать, промокод SALE10")
+            # позиция ПОСЛЕ промокода: скидка должна пересчитаться, а не пропасть
+            await bsp.handle_incoming(pool, BOT, OWN, CHAT, "хочу заказать ещё круассан")
+            r = await bsp.handle_incoming(pool, BOT, OWN, CHAT, "тел +79001112233")
+            o = (await bsp.list_orders(pool, OWN, bot_id=BOT))[0]
+            assert o["currency"] == "RUB"
+            assert o["promo_code"] == "SALE10"
+            assert o["discount_cents"] == 300 and o["total_cents"] == 2700
+            # оператору — сумма к оплате со скидкой, в валюте магазина
+            assert "27.00 RUB" in (r.get("order_summary") or "")
+            await _cl()
+        finally:
+            await pool.close()
+
+    asyncio.new_event_loop().run_until_complete(go())

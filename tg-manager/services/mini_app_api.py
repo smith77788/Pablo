@@ -19243,7 +19243,8 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             d = await request.json()
         except Exception:
             return _err("Неверный запрос", 400)
-        if not await _sp_owned(uid, pid):
+        persona = await _sp_owned(uid, pid)
+        if not persona:
             return _err("Не найдено", 404)
         try:
             price_cents = (int(d["price_cents"]) if d.get("price_cents") is not None
@@ -19251,7 +19252,10 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             prod = await _bsp.add_product(
                 pool, pid, uid, d.get("name", ""), description=d.get("description", ""),
                 sku=d.get("sku", ""), price_cents=price_cents,
-                currency=d.get("currency", "USD"), in_stock=bool(d.get("in_stock", True)),
+                # Валюта товара — валюта магазина: форма её не передаёт, и
+                # прежний дефолт USD делал рублёвый каталог долларовым.
+                currency=d.get("currency") or _bsp.shop_currency(persona),
+                in_stock=bool(d.get("in_stock", True)),
                 min_qty=int(d.get("min_qty", 1) or 1), unit=d.get("unit", "шт") or "шт",
                 stock_qty=d.get("stock_qty"), related_skus=d.get("related_skus", "") or "",
                 variants=d.get("variants") or [],

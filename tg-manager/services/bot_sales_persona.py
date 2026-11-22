@@ -55,6 +55,19 @@ def format_price(cents: int, currency: str = "USD") -> str:
     return f"{cents // 100}.{cents % 100:02d} {currency}"
 
 
+def shop_currency(persona: dict | None) -> str:
+    """Валюта магазина — одна на менеджера. ЧИСТАЯ.
+
+    Источник правды — поле «Валюта» персоны. Мини-апп никогда не передавал
+    валюту товара, и каждый товар молча получал USD по умолчанию: магазин в
+    рублях называл клиенту цены каталога «500.00 USD», а минимальную сумму и
+    доставку — в рублях, и заказы записывались в долларах. Поэтому цены
+    товаров, вариантов, заказов и сводок оформляются в валюте персоны.
+    """
+    cur = str((persona or {}).get("currency") or "").strip().upper()[:8]
+    return cur or "USD"
+
+
 def _clamp(v, lo, hi):
     try:
         return max(lo, min(hi, int(v)))
@@ -226,6 +239,25 @@ def apply_promo(total_cents: int, promo: dict | None) -> tuple[int, int]:
         pct = 0
     discount = total * pct // 100
     return discount, total - discount
+
+
+def _reapply_promo(base_total: int, code: str, promos: list[dict] | None,
+                   prev_discount: int = 0) -> tuple[int, int]:
+    """Пересчитать уже применённый к заказу промокод на новую сумму. ЧИСТАЯ.
+
+    Код ищется среди промо менеджера без учёта регистра. Если его уже нет
+    (удалён, выключен) — сохраняем прежнюю скидку в деньгах, но не больше
+    суммы заказа: обещанную клиенту скидку молча не отнимаем.
+    Возвращает (discount_cents, new_total).
+    """
+    total = int(base_total or 0)
+    key = (code or "").strip().lower()
+    promo = next((pr for pr in (promos or [])
+                  if (pr.get("code") or "").strip().lower() == key), None) if key else None
+    if promo is not None:
+        return apply_promo(total, promo)
+    disc = max(0, min(total, int(prev_discount or 0)))
+    return disc, total - disc
 
 
 def _merge_items(existing: list[dict], new: list[dict]) -> tuple[list[dict], int]:
@@ -465,7 +497,7 @@ def build_system_prompt(persona: dict, products: list[dict],
         L.append("Актуальный прайс (называй ТОЛЬКО эти цены, ничего не выдумывай):")
         has_min = False
         for pr in active[:60]:
-            price = (format_price(pr["price_cents"], pr.get("currency") or "USD")
+            price = (format_price(pr["price_cents"], shop_currency(p))
                      if p.get("disclose_prices", True) else "цену уточните у оператора")
             stock = "" if pr.get("in_stock", True) else " (нет в наличии)"
             desc = f" — {pr['description'].strip()}" if pr.get("description") else ""
@@ -498,7 +530,7 @@ def build_system_prompt(persona: dict, products: list[dict],
                     parts = []
                     for v in vs[:8]:
                         vp = (format_price(v.get("price_cents", 0),
-                                           pr.get("currency") or "USD")
+                                           shop_currency(p))
                               if p.get("disclose_prices", True) else "")
                         parts.append(f"{v.get('name')}"
                                      + (f" — {vp}" if vp else ""))
@@ -597,7 +629,7 @@ def build_system_prompt(persona: dict, products: list[dict],
             mot = 0
         if mot > 0:
             L.append("Минимальная сумма заказа — "
-                     f"{format_price(mot, p.get('currency') or 'USD')}. Не оформляй "
+                     f"{format_price(mot, shop_currency(p))}. Не оформляй "
                      "заказ на меньшую сумму: вежливо предложи добрать до минимума.")
         # Бесплатная доставка от суммы.
         try:
@@ -606,7 +638,7 @@ def build_system_prompt(persona: dict, products: list[dict],
             fdt = 0
         if fdt > 0:
             L.append("Доставка бесплатна при заказе от "
-                     f"{format_price(fdt, p.get('currency') or 'USD')} — уместно "
+                     f"{format_price(fdt, shop_currency(p))} — уместно "
                      "подскажи это, чтобы клиент добрал корзину.")
         # Потолок скидки без оператора.
         try:
@@ -623,7 +655,7 @@ def build_system_prompt(persona: dict, products: list[dict],
         active_dlv = [d for d in (delivery or []) if d.get("is_active", True)
                       and (d.get("name"))]
         if active_dlv:
-            cur = p.get("currency") or "USD"
+            cur = shop_currency(p)
             parts = []
             for d in active_dlv[:10]:
                 price = ("бесплатно" if not int(d.get("price_cents") or 0)
@@ -1570,10 +1602,15 @@ async def handle_incoming(pool, bot_id: int, owner_id: int, chat_id: int,
     order_summary = ""
     if persona.get("can_take_orders", True) and (actions["order_intent"] or actions["phone"]):
         try:
+            cur = shop_currency(persona)
             order = await open_order_for_dialog(
                 pool, owner_id, bot_id, pid, chat_id,
-                customer_username=username, customer_name=name)
+                customer_username=username, customer_name=name, currency=cur)
             order_id = order["id"]
+            if (order.get("currency") or "") != cur:
+                # Открытый заказ, заведённый до исправления, — в долларах по
+                # умолчанию; приводим к валюте магазина, пока он не закрыт.
+                await update_order(pool, order_id, owner_id, currency=cur)
             # позиции: сопоставляем прайс ТОЛЬКО с текущей репликой (прошлые позиции
             # уже сохранены в заказе и подхватятся merge — иначе телефон/числа из
             # прошлых сообщений попадают в количество).
@@ -1582,20 +1619,34 @@ async def handle_incoming(pool, bot_id: int, owner_id: int, chat_id: int,
             if isinstance(cur_items, str):
                 cur_items = json.loads(cur_items or "[]")
             if new_items:
-                merged, total = _merge_items(cur_items, new_items)
-                await update_order(pool, order_id, owner_id,
-                                   items=merged, total_cents=total)
-                cur_items = merged
-            # Промокод: детерминированно применяем валидный код к сумме заказа.
+                cur_items, _ = _merge_items(cur_items, new_items)
             base_total = sum(int(it.get("qty") or 0) * int(it.get("price_cents") or 0)
                              for it in (cur_items or []))
-            promo = find_promo_in_text(text, promos, base_total)
-            if promo and not (order.get("promo_code") or ""):
-                disc, new_total = apply_promo(base_total, promo)
-                if disc > 0:
+            # Промокод: детерминированно применяем валидный код к сумме заказа.
+            # Уже применённый код ПЕРЕСЧИТЫВАЕТСЯ при каждом изменении состава:
+            # раньше добавленная после промокода позиция перезаписывала сумму
+            # полной ценой, а код и старая скидка оставались в заказе — клиенту
+            # обещали скидку, оператору приходила сумма без неё.
+            final_total = base_total
+            applied = (order.get("promo_code") or "").strip()
+            if applied:
+                disc, final_total = _reapply_promo(
+                    base_total, applied, promos, int(order.get("discount_cents") or 0))
+                if new_items:
+                    await update_order(pool, order_id, owner_id, items=cur_items,
+                                       total_cents=final_total, discount_cents=disc)
+            else:
+                promo = find_promo_in_text(text, promos, base_total)
+                disc, promo_total = apply_promo(base_total, promo)
+                if promo and disc > 0:
+                    final_total = promo_total
                     await update_order(pool, order_id, owner_id,
-                                       total_cents=new_total, discount_cents=disc,
+                                       **({"items": cur_items} if new_items else {}),
+                                       total_cents=final_total, discount_cents=disc,
                                        promo_code=promo["code"])
+                elif new_items:
+                    await update_order(pool, order_id, owner_id,
+                                       items=cur_items, total_cents=final_total)
             if actions["phone"]:
                 contact = order.get("contact") or {}
                 if isinstance(contact, str):
@@ -1605,12 +1656,11 @@ async def handle_incoming(pool, bot_id: int, owner_id: int, chat_id: int,
                                    contact=contact, status="confirmed")
                 order_note = persona.get("order_confirm_message") or "Заказ принят ✅"
                 order_confirmed = True
-                # Сводка заказа для оператора (уведомляем о новом заказе).
-                cur = (persona.get("currency") or "USD")
+                # Сводка заказа для оператора (уведомляем о новом заказе): сумма
+                # к оплате — уже со скидкой, в валюте магазина.
                 lines = [f"{it.get('name')} ×{it.get('qty')}"
                          for it in (cur_items or []) if it.get("name")]
-                tot = sum(int(it.get("qty") or 0) * int(it.get("price_cents") or 0)
-                          for it in (cur_items or []))
+                tot = final_total
                 order_summary = (
                     ("; ".join(lines) if lines else "состав уточняется")
                     + (f" — {format_price(tot, cur)}" if tot else "")

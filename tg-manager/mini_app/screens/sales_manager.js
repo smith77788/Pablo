@@ -424,7 +424,9 @@ function _spRenderProducts(products) {
     return '<div style="font-size:12px;color:var(--hint);padding:4px 2px">Товаров пока нет</div>';
   }
   return products.map(pr => {
-    const price = ((pr.price_cents || 0) / 100).toFixed(2) + ' ' + (pr.currency || 'USD');
+    // Цена — в валюте магазина (поле «Валюта» менеджера), как её видит клиент.
+    const price = ((pr.price_cents || 0) / 100).toFixed(2) + ' ' +
+      ((_spCurrent && _spCurrent.currency) || pr.currency || 'USD');
     const mq = parseInt(pr.min_qty || 1, 10);
     const minNote = (mq > 1) ? ' · от ' + mq + ' ' + esc(pr.unit || 'шт') : '';
     let stockNote = '';
