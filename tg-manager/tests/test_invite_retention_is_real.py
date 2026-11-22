@@ -103,7 +103,8 @@ def test_screen_shows_where_people_leave_and_offers_next_step():
 
 def test_brain_hint_leads_to_retention_not_invite():
     """Подсказка «отток» вела на масс-инвайт — то есть лить ещё людей в дырку."""
-    assert "if (k==='retention') return openRetention(30);" in HTML
+    # Без числа: экран сам вспоминает последний выбранный период.
+    assert "if (k==='retention') return openRetention();" in HTML
 
 
 def test_digest_shows_retention_row():
