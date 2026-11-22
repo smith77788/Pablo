@@ -450,9 +450,30 @@ def setup_routes(app: web.Application, pool) -> None:
         def _own(bot_id) -> int | None:
             return int(bot_id) if bot_id and bot_id in names else None
 
+        # Для «Повторить цепочку»: тот же маршрут и тот же текст. jsonb asyncpg
+        # отдаёт строкой. Маршрут отдаётся, только если ВСЕ его боты — боты
+        # владельца и живы: повтор по наполовину чужому маршруту сервер всё
+        # равно отклонит, а кнопка обещала бы его.
+        def _jl(v, default):
+            if isinstance(v, str):
+                try:
+                    v = json.loads(v)
+                except (TypeError, ValueError):
+                    return default
+            return v if isinstance(v, type(default)) else default
+
+        route_ids = []
+        for step in _jl(d.get("route"), []):
+            bid = step.get("bot") if isinstance(step, dict) else step
+            route_ids.append(_own(bid) if isinstance(bid, int) else None)
+        repeat_route = route_ids if route_ids and all(route_ids) else []
+        payload = _jl(d.get("payload"), {})
+
         return _json_resp({
             "task_id": d["task_id"],
             "status": d.get("status") or "running",
+            "route_ids": repeat_route,
+            "text": str(payload.get("text") or "")[:2000],
             "drop_reason": d.get("drop_reason"),
             "step": d.get("step") or 0,
             "depth": d.get("depth") or 0,
