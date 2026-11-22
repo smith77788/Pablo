@@ -62,10 +62,64 @@ async function openCmdCenter() {
   } catch (e) {
     // Через общий errHtml: он всегда даёт кнопку выхода. Своя вёрстка ошибки
     // оставляла экран без единой кнопки, а таббар на подэкране скрыт.
-    if (body) body.innerHTML = errHtml((e && e.message) || 'Ошибка загрузки', 'openCmdCenter()');
+    if (body) body.innerHTML = errHtml(errRu(e, 'Командный центр не загрузился'), 'openCmdCenter()');
     return;
   }
-  if (body) body.innerHTML = _ccRender(d);
+  if (body) body.innerHTML = _ccAutoRow() + _ccRender(d);
+  _ccSchedule();
+}
+
+// ── Автообновление ──
+// Командный центр держат открытым, пока идёт кампания, и жали ⟳ каждые
+// пару минут. Галочка обновляет данные раз в минуту на месте (без
+// спиннера и без шага в истории) и запоминается. Таймер живёт, только пока
+// экран сверху и вкладка видна: ушли с экрана — запросы прекращаются.
+const _CC_EVERY_MS = 60000;
+
+function _ccAutoOn() {
+  const p = (typeof loadFormPrefs === 'function') ? (loadFormPrefs('cmdcenter') || {}) : {};
+  return !!p.auto;
+}
+
+function _ccOnTop() {
+  return typeof STACK !== 'undefined' && STACK.length && STACK[STACK.length - 1] === 's-cmdcenter'
+    && !(typeof document.visibilityState === 'string' && document.visibilityState === 'hidden');
+}
+
+function _ccAutoRow() {
+  const t = new Date().toLocaleTimeString('ru-RU', {hour: '2-digit', minute: '2-digit'});
+  return '<label style="display:flex;gap:8px;align-items:center;font-size:12px;color:var(--hint);margin:0 2px 10px">' +
+    '<input type="checkbox" id="ccAuto"' + (_ccAutoOn() ? ' checked' : '') + ' onchange="ccSetAuto(this.checked)">' +
+    '<span style="flex:1">Обновлять каждую минуту</span><span id="ccUpdated">обновлено в ' + t + '</span></label>';
+}
+
+function ccSetAuto(on) {
+  if (typeof saveFormPrefs === 'function') saveFormPrefs('cmdcenter', {auto: !!on});
+  _ccSchedule();
+}
+
+function _ccSchedule() {
+  clearTimeout(_ccSchedule.timer);
+  _ccSchedule.timer = null;
+  if (!_ccAutoOn()) return;
+  _ccSchedule.timer = setTimeout(_ccTick, _CC_EVERY_MS);
+}
+
+async function _ccTick() {
+  _ccSchedule.timer = null;
+  if (!_ccAutoOn() || !_ccOnTop()) return;
+  const body = document.getElementById('ccBody');
+  try {
+    const d = await api('/api/miniapp/dashboard/visual');
+    // Пока шёл запрос, могли уйти с экрана или выключить галочку.
+    if (body && _ccOnTop() && _ccAutoOn()) body.innerHTML = _ccAutoRow() + _ccRender(d);
+  } catch (_) {
+    // Сбой фонового обновления не затирает экран: остаются прежние данные,
+    // а подпись честно говорит, что они не свежие.
+    const u = document.getElementById('ccUpdated');
+    if (u) u.textContent = 'не обновилось — данные прежние';
+  }
+  _ccSchedule();
 }
 
 function _ccCard(title, inner) {
