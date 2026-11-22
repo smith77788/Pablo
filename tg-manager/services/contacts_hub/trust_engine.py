@@ -1,4 +1,5 @@
 from __future__ import annotations
+import asyncio
 import json
 import logging
 from typing import Optional
@@ -189,7 +190,16 @@ async def detect_smart_duplicates(pool, owner_id: int) -> dict:
         '''SELECT id, telegram_user_id, username, first_name, last_name, phones, emails, company
            FROM unified_contacts WHERE owner_id=$1''', owner_id)
     rows = [dict(c) for c in contacts]
+    # Разбор — чистый Python по всей базе контактов (на 30 000 контактов
+    # ~0,7 с). В цикле событий он останавливал на это время ВЕСЬ процесс:
+    # бот, остальные экраны и исполнитель операций живут в том же цикле.
+    # В потоке цикл продолжает обслуживать остальных (GIL отпускается каждые
+    # несколько миллисекунд).
+    return await asyncio.to_thread(_find_duplicates, rows)
 
+
+def _find_duplicates(rows: list[dict]) -> dict:
+    """Чистая часть detect_smart_duplicates: группы по ключам и пары в них."""
     groups: dict[tuple, list[int]] = {}
     for i, c in enumerate(rows):
         keys = set()

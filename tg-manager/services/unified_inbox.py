@@ -19,6 +19,7 @@
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 from datetime import datetime, timezone
 
@@ -318,8 +319,11 @@ async def list_threads(pool, owner_id: int, *, only_waiting: bool = False,
             "SELECT telegram_user_id, id FROM unified_contacts "
             "WHERE owner_id=$1 AND telegram_user_id = ANY($2::bigint[])", uid, pids)
         contacts = {r["telegram_user_id"]: str(r["id"]) for r in rows}
-    all_threads = merge_threads(fleet, vault, bots, contacts, limit=100_000,
-                                relay=relay)
+    # Слияние — чистый Python по всем разговорам владельца (на 30 000 — около
+    # 0,3 с). В потоке, чтобы не останавливать цикл событий процесса: в нём
+    # же живут бот и исполнитель операций.
+    all_threads = await asyncio.to_thread(
+        merge_threads, fleet, vault, bots, contacts, limit=100_000, relay=relay)
     threads = ([t for t in all_threads if t["waiting"]] if only_waiting
                else all_threads)[: max(1, int(limit))]
     for t in threads:
