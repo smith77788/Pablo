@@ -13,6 +13,26 @@ let _SUM_ATT = [];
 
 const _SUM_CUR = { USD: '$', EUR: '€', RUB: '₽', XTR: '⭐' };
 
+// Период итогов. Был только «за 7 дней»: месяц к прошлому месяцу владелец
+// считал руками. Выбор запоминается, чтобы главный экран не сбрасывал его.
+const _SUM_PERIODS = [7, 30];
+function _sumDays() {
+  const p = (typeof loadFormPrefs === 'function') ? (loadFormPrefs('summary') || {}) : {};
+  const d = Number(p.days);
+  return _SUM_PERIODS.includes(d) ? d : 7;
+}
+function sumSetDays(days) {
+  const d = Number(days);
+  if (!_SUM_PERIODS.includes(d) || d === _sumDays()) return;
+  if (typeof saveFormPrefs === 'function') saveFormPrefs('summary', { days: d });
+  loadSummary.lastData = null;
+  loadSummary();
+}
+function _sumPeriodRow(days) {
+  return UI.group('Период', _SUM_PERIODS.map(d =>
+    UI.button((d === days ? '✓ ' : '') + d + ' дней', 'sumSetDays', d)).join(' '));
+}
+
 // Деньги в разных валютах не складываются: крупным числом показываем основную
 // валюту (больше всего заказов на сумму), остальные — подписью. Изменение к
 // прошлой неделе — тоже по основной валюте: сумма рублей с долларами дала бы
@@ -79,7 +99,7 @@ async function sumAct(idx) {
                                   : (r && r.op_id ? 'Операция #' + r.op_id : 'Готово')));
     if (a.reload) loadSummary();
   } catch (e) {
-    toast('⚠️ ' + ((e && e.message) || 'Не получилось'));
+    toast('⚠️ ' + errRu(e, 'Не получилось'));
   }
 }
 
@@ -119,16 +139,21 @@ function renderSummary(d) {
   const attention = UI.group('Требует внимания', att, more);
   wrap.innerHTML =
     UI.block('📊 Итоги за ' + days + ' дней', statsHtml + attention,
-      { label: 'Подробнее →', fn: 'sumOpen', args: ['attention'] });
+      { label: 'Подробнее →', fn: 'sumOpen', args: ['attention'] }) + _sumPeriodRow(days);
 }
 
 async function loadSummary() {
   const wrap = document.getElementById('summaryWrap');
   if (!wrap || loadSummary.pending) return;
   loadSummary.pending = true;
-  const cached = loadSummary.lastData || ((typeof getCached === 'function') ? getCached('infragram_cache_summary') : null);
-  if (cached && !loadSummary.lastData) renderSummary(cached);
-  else if (!cached) wrap.innerHTML = UI.block('📊 Итоги за 7 дней', UI.skeleton(4));
+  const days = _sumDays();
+  // У каждого периода свой кэш: иначе после переключения на месяц экран
+  // сначала показал бы недельные числа под заголовком «за 30 дней».
+  const cacheKey = days === 7 ? 'infragram_cache_summary' : 'infragram_cache_summary_' + days;
+  const last = loadSummary.lastData && Number(loadSummary.lastData.days || 7) === days ? loadSummary.lastData : null;
+  const cached = last || ((typeof getCached === 'function') ? getCached(cacheKey) : null);
+  if (cached && !last) renderSummary(cached);
+  else if (!cached) wrap.innerHTML = UI.block('📊 Итоги за ' + days + ' дней', UI.skeleton(4));
   function summaryState(message, retry) {
     let status = document.getElementById('summaryDataStatus');
     if (!status) {
@@ -143,14 +168,14 @@ async function loadSummary() {
   }
   summaryState(cached ? 'Обновляем итоги. Пока показаны предыдущие данные.' : 'Загружаем итоги…');
   try {
-    const d = await api('/api/miniapp/summary?days=7');
-    if (typeof setCache === 'function') setCache('infragram_cache_summary', d);
+    const d = await api('/api/miniapp/summary?days=' + days);
+    if (typeof setCache === 'function') setCache(cacheKey, d);
     loadSummary.lastData = d;
     renderSummary(d);
     summaryState('Итоги обновлены в ' + new Date().toLocaleTimeString('ru-RU', {hour:'2-digit', minute:'2-digit'}));
   } catch (e) {
     if (!cached) {
-      wrap.innerHTML = UI.block('📊 Итоги за 7 дней',
+      wrap.innerHTML = UI.block('📊 Итоги за ' + days + ' дней',
         (typeof errHtml === 'function') ? errHtml(errRu(e), 'loadSummary()') : UI.empty('Не удалось загрузить итоги'));
     }
     summaryState(cached ? 'Не удалось обновить итоги. Показаны предыдущие данные, они могут быть устаревшими.' : 'Итоги недоступны. Это не нулевые значения.', true);
