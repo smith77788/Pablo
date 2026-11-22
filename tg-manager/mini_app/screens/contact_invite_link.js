@@ -31,7 +31,7 @@ async function renderContactInviteLink(contactId) {
     box.innerHTML = _cilRender(contactId, d);
   } catch (e) {
     // Без повтора раздел оставался мёртвым до переоткрытия карточки контакта.
-    box.innerHTML = errHtml(e.message, `renderContactInviteLink(${Number(contactId)})`);
+    box.innerHTML = errHtml(errRu(e), `renderContactInviteLink(${Number(contactId)})`);
   }
 }
 
@@ -67,7 +67,7 @@ async function _cilOptOut(contactId) {
     toast('🚫 Добавлено в реестр «не приглашать»');
     await renderContactInviteLink(contactId);
   } catch (e) {
-    toast('Не удалось: ' + ((e && e.message) || 'ошибка'));
+    toast('Не удалось: ' + errRu(e, 'ошибка'));
   }
 }
 
@@ -77,6 +77,6 @@ async function _cilAllow(contactId) {
     toast('✅ Ограничение снято');
     await renderContactInviteLink(contactId);
   } catch (e) {
-    toast('Не удалось: ' + ((e && e.message) || 'ошибка'));
+    toast('Не удалось: ' + errRu(e, 'ошибка'));
   }
 }

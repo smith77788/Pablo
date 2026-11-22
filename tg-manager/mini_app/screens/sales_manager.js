@@ -243,7 +243,7 @@ async function openSalesManager(botId) {
   } catch (e) {
     // errHtml всегда даёт кнопку выхода; своя вёрстка ошибки оставляла
     // экран без единой кнопки, а таббар на подэкране скрыт.
-    body.innerHTML = errHtml((e && e.message) || 'Ошибка', 'openSalesManager(' + JSON.stringify(botId) + ')');
+    body.innerHTML = errHtml(errRu(e, 'Ошибка'), 'openSalesManager(' + JSON.stringify(botId) + ')');
   }
 }
 
@@ -354,7 +354,7 @@ async function openPersonaEditor(id) {
   } catch (e) {
     // errHtml всегда даёт кнопку выхода; своя вёрстка ошибки оставляла
     // экран без единой кнопки, а таббар на подэкране скрыт.
-    body.innerHTML = errHtml((e && e.message) || 'Ошибка', 'openPersonaEditor(' + JSON.stringify(id) + ')');
+    body.innerHTML = errHtml(errRu(e, 'Ошибка'), 'openPersonaEditor(' + JSON.stringify(id) + ')');
   }
 }
 
@@ -578,7 +578,7 @@ async function spAddFaq() {
     ['nf_q', 'nf_a', 'nf_kw', 'nf_prio'].forEach(id => {
       const el = document.getElementById(id); if (el) el.value = '';
     });
-  } catch (e) { toast(e.message || 'Ошибка'); }
+  } catch (e) { toast(errRu(e, 'Ошибка')); }
 }
 
 async function spDelFaq(fid) {
@@ -591,7 +591,7 @@ async function spDelFaq(fid) {
     const d = await api('/api/miniapp/sales/persona/' + pid);
     _spCurrent._faqs = d.faqs || [];
     document.getElementById('spFaqs').innerHTML = _spRenderFaqs(_spCurrent._faqs);
-  } catch (e) { toast(e.message || 'Ошибка'); }
+  } catch (e) { toast(errRu(e, 'Ошибка')); }
 }
 
 async function spAddExample() {
@@ -608,7 +608,7 @@ async function spAddExample() {
     document.getElementById('spExamples').innerHTML = _spRenderExamples(_spCurrent._examples);
     document.getElementById('ne_u').value = '';
     document.getElementById('ne_a').value = '';
-  } catch (e) { toast(e.message || 'Ошибка'); }
+  } catch (e) { toast(errRu(e, 'Ошибка')); }
 }
 
 async function spDelExample(eid) {
@@ -619,7 +619,7 @@ async function spDelExample(eid) {
     const d = await api('/api/miniapp/sales/persona/' + pid);
     _spCurrent._examples = d.examples || [];
     document.getElementById('spExamples').innerHTML = _spRenderExamples(_spCurrent._examples);
-  } catch (e) { toast(e.message || 'Ошибка'); }
+  } catch (e) { toast(errRu(e, 'Ошибка')); }
 }
 
 function _spRenderDelivery(items) {
@@ -667,7 +667,7 @@ async function spAddDelivery() {
     ['nd_name', 'nd_price', 'nd_eta', 'nd_zones'].forEach(id => {
       const el = document.getElementById(id); if (el) el.value = '';
     });
-  } catch (e) { toast(e.message || 'Ошибка'); }
+  } catch (e) { toast(errRu(e, 'Ошибка')); }
 }
 
 async function spDelDelivery(did) {
@@ -678,7 +678,7 @@ async function spDelDelivery(did) {
     const d = await api('/api/miniapp/sales/persona/' + pid);
     _spCurrent._delivery = d.delivery || [];
     document.getElementById('spDelivery').innerHTML = _spRenderDelivery(_spCurrent._delivery);
-  } catch (e) { toast(e.message || 'Ошибка'); }
+  } catch (e) { toast(errRu(e, 'Ошибка')); }
 }
 
 async function spAddPromo() {
@@ -698,7 +698,7 @@ async function spAddPromo() {
     ['np_code', 'np_percent', 'np_mintotal'].forEach(id => {
       const el = document.getElementById(id); if (el) el.value = '';
     });
-  } catch (e) { toast(e.message || 'Ошибка'); }
+  } catch (e) { toast(errRu(e, 'Ошибка')); }
 }
 
 async function spDelPromo(prid) {
@@ -709,7 +709,7 @@ async function spDelPromo(prid) {
     const d = await api('/api/miniapp/sales/persona/' + pid);
     _spCurrent._promos = d.promos || [];
     document.getElementById('spPromos').innerHTML = _spRenderPromos(_spCurrent._promos);
-  } catch (e) { toast(e.message || 'Ошибка'); }
+  } catch (e) { toast(errRu(e, 'Ошибка')); }
 }
 
 function _spFillForm(p) {
@@ -809,7 +809,7 @@ async function spSave() {
     toast('Сохранено ✅');
     openPersonaEditor(pid);
   } catch (e) {
-    toast(e.message || 'Ошибка сохранения');
+    toast(errRu(e, 'Ошибка сохранения'));
   }
 }
 
@@ -844,7 +844,7 @@ async function spAddProduct() {
     });
     if (document.getElementById('np_min_qty')) document.getElementById('np_min_qty').value = '1';
     if (document.getElementById('np_unit')) document.getElementById('np_unit').value = 'шт';
-  } catch (e) { toast(e.message || 'Ошибка'); }
+  } catch (e) { toast(errRu(e, 'Ошибка')); }
 }
 
 async function spDelProduct(prid) {
@@ -854,7 +854,7 @@ async function spDelProduct(prid) {
     await api('/api/miniapp/sales/product/' + prid, { method: 'DELETE' });
     const d = await api('/api/miniapp/sales/persona/' + pid);
     document.getElementById('spProducts').innerHTML = _spRenderProducts(d.products || []);
-  } catch (e) { toast(e.message || 'Ошибка'); }
+  } catch (e) { toast(errRu(e, 'Ошибка')); }
 }
 
 async function spDelete(pid) {
@@ -867,7 +867,7 @@ async function spDelete(pid) {
     await api('/api/miniapp/sales/persona/' + pid, { method: 'DELETE' });
     toast('Удалён');
     openSalesManager();
-  } catch (e) { toast(e.message || 'Ошибка'); }
+  } catch (e) { toast(errRu(e, 'Ошибка')); }
 }
 
 async function spTest(pid) {
@@ -892,7 +892,7 @@ async function spTest(pid) {
         'border-radius:8px;color:var(--red)">' + esc(r.error || 'неизвестная ошибка') + '</div>';
     }
   } catch (e) {
-    if (out) out.innerHTML = '<div style="color:var(--red)">' + esc(e.message) + '</div>';
+    if (out) out.innerHTML = '<div style="color:var(--red)">' + esc(errRu(e)) + '</div>';
   }
 }
 
@@ -984,7 +984,7 @@ async function spStats(pid) {
       cell('К оператору', s.handoffs || 0) +
       '</div>';
   } catch (e) {
-    if (out) out.innerHTML = '<div style="color:var(--red)">' + esc(e.message) + '</div>';
+    if (out) out.innerHTML = '<div style="color:var(--red)">' + esc(errRu(e)) + '</div>';
   }
 }
 
@@ -1041,7 +1041,7 @@ async function spChatSend() {
     _spChatRender();
   } catch (e) {
     if (typing) typing.remove();
-    toast(e.message || 'Ошибка');
+    toast(errRu(e, 'Ошибка'));
   }
 }
 
@@ -1105,7 +1105,7 @@ async function spOrders(pid, keep) {
   } catch (e) {
     // errHtml всегда даёт кнопку выхода; своя вёрстка ошибки оставляла
     // экран без единой кнопки, а таббар на подэкране скрыт.
-    body.innerHTML = errHtml((e && e.message) || 'Ошибка', 'spOrders(' + JSON.stringify(pid) + ')');
+    body.innerHTML = errHtml(errRu(e, 'Ошибка'), 'spOrders(' + JSON.stringify(pid) + ')');
   }
 }
 
@@ -1143,7 +1143,7 @@ async function spAiJournal(only, keep) {
     if (s) _spAiSummary = _spAiSummaryHtml(s, u);
     _spAiRender();
   } catch (e) {
-    body.innerHTML = errHtml((e && e.message) || 'Ошибка', 'spAiJournal(SP_AI_ONLY)');
+    body.innerHTML = errHtml(errRu(e, 'Ошибка'), 'spAiJournal(SP_AI_ONLY)');
   }
 }
 
@@ -1241,6 +1241,6 @@ async function spAiRate(id, rating) {
     if (row) row.rating = rating;
     _spAiRender();
   } catch (e) {
-    toast((e && e.message) || 'Оценка не сохранилась');
+    toast(errRu(e, 'Оценка не сохранилась'));
   }
 }
