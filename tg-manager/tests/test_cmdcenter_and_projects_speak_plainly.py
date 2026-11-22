@@ -67,3 +67,10 @@ def test_currency_list_names_every_main_currency():
     for code in owner_currency.MAIN_CURRENCIES:
         assert code + ":" in block, code
     assert "esc(_msCurLabel(c))" in co
+
+
+def test_project_journal_is_titled_by_name():
+    index = (SCREENS.parent / "index.html").read_text(encoding="utf-8")
+    m = re.search(r"\nfunction openOps\(projectId, projectName\) \{[\s\S]*?\n}\n", index)
+    assert m and "'Журнал: ' + pname" in m.group(0)
+    assert "openOps(project.id, project.name)" in PO

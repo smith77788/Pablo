@@ -53,7 +53,7 @@ function renderHomeProjects(section, data) {
     if (project.issue_id) {
       actions.append(projectOverviewButton('Открыть сбой', () => openOpDetail(project.issue_id)));
     }
-    actions.append(projectOverviewButton('Журнал', () => openOps(project.id)));
+    actions.append(projectOverviewButton('Журнал', () => openOps(project.id, project.name)));
     row.append(open, stats, actions);
     list.append(row);
   }
