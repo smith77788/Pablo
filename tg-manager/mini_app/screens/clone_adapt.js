@@ -146,7 +146,7 @@ async function openCloneModal(prefill) {
   txt('claPreview', '');
   const p = prefill || {};
   CLA.targets = new Set((p.target_bot_ids || []).map(Number));
-  CLA.fields = new Set(p.fields && p.fields.length ? p.fields : ['name', 'desc', 'short', 'commands']);
+  CLA.fields = new Set(p.fields && p.fields.length ? p.fields : claDefaultFields());
   const s = p.settings || {};
   CLA.reps = (s.replacements || []).map(x => [x[0], x[1]]);
   CLA.langs = new Set(Array.isArray(s.langs) ? s.langs : []);
@@ -178,6 +178,14 @@ async function openCloneModal(prefill) {
     srcEl.innerHTML = '<option value="">Ошибка загрузки</option>';
     txt('claTargets', errHtml(errRu(e), 'openCloneModal()'));
   }
+}
+
+// Что переносить — с прошлого запуска: обычно клонируют один и тот же набор
+// (скажем, только описание и команды). Неизвестные ключи отбрасываются.
+function claDefaultFields() {
+  const known = CLA_FIELDS.map(f => f[0]);
+  const saved = (loadFormPrefs('clone_adapt').fields || []).filter(k => known.indexOf(k) >= 0);
+  return saved.length ? saved : ['name', 'desc', 'short', 'commands'];
 }
 
 function claSrcId() { return Number(document.getElementById('clSrc').value || 0); }
@@ -361,6 +369,7 @@ async function submitCloneAdapt() {
   try {
     const r = await api('/api/miniapp/clone_adapt/submit', {method: 'POST', body: JSON.stringify(req)});
     closeModal('mo-clone');
+    saveFormPrefs('clone_adapt', {fields: [...CLA.fields]});
     toast(`✅ Клон поставлен в очередь: ${num(r.targets || req.target_bot_ids.length)} ${plural(r.targets || req.target_bot_ids.length, 'бот', 'бота', 'ботов')}`);
     openCloneAdapt(false, true);
   } catch (e) { errEl.textContent = errRu(e, 'Ошибка'); }
