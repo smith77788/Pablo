@@ -67,6 +67,7 @@ async function openBotMeshTask(taskId, keep) {
   txt('botmeshDetail','<div class="spin-wrap"><div class="spin"></div></div>');
   try {
     const d = await api('/api/miniapp/mesh/task/'+encodeURIComponent(taskId));
+    openBotMeshTask.last = d;
     const [cls, lbl] = MESH_ST[d.status] || ['b-gy', d.status||''];
     const hops = d.hops||[];
     txt('botmeshStop', d.status === 'running'
@@ -83,6 +84,8 @@ async function openBotMeshTask(taskId, keep) {
         : esc(d.origin_name || 'неизвестно')}</div>
       <div style="font-size:13px">Передач: ${num(d.depth||0)}</div>
       ${d.drop_reason?`<div style="font-size:13px;color:var(--orange)">Брошена: ${esc(meshDropText(d.drop_reason))}</div>`:''}
+      ${d.text?`<div style="font-size:12px;color:var(--hint);margin-top:4px;white-space:pre-wrap">«${esc(d.text)}»</div>`:''}
+      ${meshCanRepeat(d)?'<button class="btn btn-s" style="margin-top:8px;font-size:13px" onclick="meshRepeatTask()">🔁 Повторить цепочку</button>':''}
     </div>`;
     if (!hops.length) {
       txt('botmeshDetail', head + empty('🔗','Передач ещё не было',
@@ -109,4 +112,37 @@ async function openBotMeshTask(taskId, keep) {
       </div>`;
     }).join('') + '</div>');
   } catch(e) { txt('botmeshDetail', errHtml(errRu(e), 'retryBotMeshTask()')); }
+}
+
+// Повтор цепочки. Одинаковую цепочку собирали заново: бот-инициатор, каждый
+// шаг маршрута по одному и текст — до десяти выборов ради уже известного
+// ответа. Сервер отдаёт маршрут, только если все его боты — ваши.
+function meshCanRepeat(d) {
+  return !!(d && d.origin_id && Array.isArray(d.route_ids) && d.route_ids.length);
+}
+
+async function meshRepeatTask() {
+  const d = openBotMeshTask.last;
+  if (!meshCanRepeat(d)) return;
+  const names = {};
+  for (const h of d.hops || []) {
+    if (h.from_id) names[h.from_id] = h.from_name;
+    if (h.to_id) names[h.to_id] = h.to_name;
+  }
+  const path = d.route_ids.map(id => names[id] || ('бот #' + id)).join(' → ');
+  const ok = await askConfirm('Запустить такую же цепочку ещё раз?\n\n' +
+    (d.origin_name || ('бот #' + d.origin_id)) + ' → ' + path +
+    (d.text ? '\n\nТекст: ' + d.text.slice(0, 200) : ''));
+  if (!ok) return;
+  try {
+    const r = await api('/api/miniapp/mesh/task', {method: 'POST', body: JSON.stringify({
+      origin_bot: Number(d.origin_id), route: d.route_ids.map(b => ({bot: Number(b)})), text: d.text || ''})});
+    if (r.sent === false) toast('⚠️ ' + (r.error || 'Telegram не принял передачу'));
+    else toast('✅ Цепочка запущена снова');
+  } catch (e) { toast('⚠️ ' + errRu(e, 'Не удалось запустить')); return; }
+  // Назад к списку без второго шага в истории: список уже лежит под этим
+  // экраном, его нужно только перечитать с начала.
+  back();
+  MESH_ROWS = []; MESH_OFFSET = 0;
+  openBotMesh(true);
 }
