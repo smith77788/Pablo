@@ -1124,7 +1124,7 @@ async def vis_dashboard(
         last_check_str = "никогда"
 
     text = (
-        "👁️ <b>Visibility Engine</b>\n\n"
+        "👁️ <b>Позиции в поиске</b>\n\n"
         f"Отслеживается ботов: <b>{n_bots}</b>\n"
         f"Ключевых слов: <b>{n_keywords}</b>\n"
         f"Последняя проверка: <b>{last_check_str}</b>"
@@ -1262,7 +1262,7 @@ async def vis_select_bot(
         kb.button(text="◀️ Назад", callback_data=VisCb(action="dashboard"))
         await safe_edit(
             callback,
-            "👁️ <b>Visibility Engine</b>\n\nУ вас пока нет ботов.",
+            "👁️ <b>Позиции в поиске</b>\n\nУ вас пока нет ботов.",
             reply_markup=kb.as_markup(),
         )
         return

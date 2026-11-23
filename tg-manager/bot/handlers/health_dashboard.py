@@ -1617,7 +1617,7 @@ async def cb_health_export_csv(callback: CallbackQuery, pool: asyncpg.Pool) -> N
         caption=(
             "📥 <b>Экспорт здоровья аккаунтов</b>\n"
             f"Всего: {len(accounts)} аккаунтов\n"
-            "<i>trust_score, status, flood за 7 дней, device_model</i>"
+            "<i>доверие, статус, флуд за 7 дней, модель устройства</i>"
         ),
         parse_mode="HTML",
     )

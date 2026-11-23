@@ -4467,14 +4467,14 @@ async def cb_bulk_confirm_selection(
         proxy_note = (
             f"\n\n⚠️ {proxy_count} из {len(selected_ids)} аккаунтов имеют привязанный прокси."
             if proxy_count
-            else "\n\n<i>Аккаунты без прокси — будет использован CF relay.</i>"
+            else "\n\n<i>Аккаунты без прокси — будет использован релей CF.</i>"
         )
         await callback.message.edit_text(
             f"🔗 <b>Вступить в канал — выбор режима подключения</b>\n\n"
             f"Аккаунтов: <b>{len(selected_ids)}</b>{proxy_note}\n\n"
             "🔐 <b>Прокси аккаунтов</b> — каждый аккаунт использует свой прокси.\n"
-            "   При ошибке прокси автоматически переключается на CF relay.\n\n"
-            "☁️ <b>CF relay</b> — все аккаунты через Cloudflare IP, прокси игнорируются.\n"
+            "   При ошибке прокси автоматически переключается на релей CF.\n\n"
+            "☁️ <b>Релей CF</b> — все аккаунты через Cloudflare IP, прокси игнорируются.\n"
             "   Используйте если прокси недоступны или не настроены.",
             parse_mode="HTML",
             reply_markup=kb.as_markup(),
@@ -4504,14 +4504,14 @@ async def cb_bulk_confirm_selection(
         proxy_note = (
             f"\n\n⚠️ {proxy_count} из {len(selected_ids)} аккаунтов имеют привязанный прокси."
             if proxy_count
-            else "\n\n<i>Аккаунты без прокси — будет использован CF relay.</i>"
+            else "\n\n<i>Аккаунты без прокси — будет использован релей CF.</i>"
         )
         await callback.message.edit_text(
             f"🚪 <b>Выйти из канала — выбор режима подключения</b>\n\n"
             f"Аккаунтов: <b>{len(selected_ids)}</b>{proxy_note}\n\n"
             "🔐 <b>Прокси аккаунтов</b> — каждый аккаунт использует свой прокси.\n"
-            "   При ошибке прокси автоматически переключается на CF relay.\n\n"
-            "☁️ <b>CF relay</b> — все аккаунты через Cloudflare IP, прокси игнорируются.\n"
+            "   При ошибке прокси автоматически переключается на релей CF.\n\n"
+            "☁️ <b>Релей CF</b> — все аккаунты через Cloudflare IP, прокси игнорируются.\n"
             "   Используйте если прокси недоступны или не настроены.",
             parse_mode="HTML",
             reply_markup=kb.as_markup(),
@@ -4628,7 +4628,7 @@ async def fsm_bulk_channel_id(
 
         total = len(accounts)
         proxy_mode = data.get("bulk_proxy_mode", "bound")
-        mode_label = "🔐 прокси" if proxy_mode == "bound" else "☁️ CF relay"
+        mode_label = "🔐 прокси" if proxy_mode == "bound" else "☁️ релей CF"
         op_id = await operation_bus.submit(
             pool, message.from_user.id, "bulk_leave",
             {
@@ -4791,7 +4791,7 @@ async def cb_bulk_join_proxy_mode(
     await state.set_state(JoinChannelFSM.waiting_invite)
     data = await state.get_data()
     selected_ids = data.get("bulk_selected", [])
-    mode_label = "🔐 привязанные прокси" if mode == "bound" else "☁️ CF relay"
+    mode_label = "🔐 привязанные прокси" if mode == "bound" else "☁️ релей CF"
     kb = InlineKeyboardBuilder()
     kb.button(text="❌ Отмена", callback_data=ChanCb(action="bulk_menu"))
     await callback.message.edit_text(
@@ -4816,7 +4816,7 @@ async def cb_bulk_leave_proxy_mode(
     await state.set_state(PostToChannelFSM.waiting_channel_id)
     data = await state.get_data()
     selected_ids = data.get("bulk_selected", [])
-    mode_label = "🔐 привязанные прокси" if mode == "bound" else "☁️ CF relay"
+    mode_label = "🔐 привязанные прокси" if mode == "bound" else "☁️ релей CF"
     kb = InlineKeyboardBuilder()
     kb.button(text="❌ Отмена", callback_data=ChanCb(action="bulk_menu"))
     await callback.message.edit_text(
@@ -4874,7 +4874,7 @@ async def fsm_join_invite_combined(
             },
             total_items=int(count),
         )
-        mode_label = "☁️ CF relay" if proxy_mode == "relay" else "🔐 прокси аккаунтов"
+        mode_label = "☁️ релей CF" if proxy_mode == "relay" else "🔐 прокси аккаунтов"
         await message.answer(
             f"✅ Массовое вступление в <code>{html.escape(invite)}</code> поставлено в очередь\n"
             f"📋 Операция #{op_id} · {count} аккаунт(ов) · {mode_label}\n\n"
