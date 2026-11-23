@@ -8266,7 +8266,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 <div class="mbg" id="arMbg" onclick="if(event.target===this)closeArModal()">
   <div class="modal">
     <div class="modal-x" onclick="closeArModal()" role="button" tabindex="0" aria-label="Закрыть">✕</div>
-    <div class="modal-title">💬 Новый авто-ответ</div>
+    <div class="modal-title" id="arModalTitle">💬 Новый авто-ответ</div>
     <div class="field">
       <label>Тип триггера</label>
       <select id="arType" onchange="toggleArKw()">
@@ -8298,7 +8298,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
       <summary style="cursor:pointer;font-size:14px;color:var(--hint);padding:6px 0">⚙️ Дополнительно</summary>
       <div class="field" style="margin-top:8px">
         <label>Приоритет</label>
-        <input type="number" id="arPriority" min="-100" max="100" placeholder="0 (выше — срабатывает раньше)">
+        <input type="number" id="arPriority" min="0" max="1000" placeholder="0 (выше — срабатывает раньше)">
         <div class="field-note">Если под сообщение подходит несколько правил — сработает с бо́льшим приоритетом</div>
       </div>
       <div class="field">
@@ -12888,6 +12888,7 @@ async function loadArList() {
 }
 
 function renderArList(items) {
+  renderArList.items = items;
   const el = document.getElementById('arList');
   if (!items.length) { el.innerHTML=empty('💬','Нет авто-ответов','Правило: на сообщение/ключевое слово бот отвечает автоматически',{label:'➕ Добавить правило',fn:'openArModal()'}); return; }
   el.innerHTML = items.map(r=>{
@@ -12907,6 +12908,7 @@ function renderArList(items) {
       </div>
       <div class="li-right">
         <div class="toggle ${r.is_active?'on':'off'}" onclick="toggleAr(${r.id},this)"></div>
+        <span class="icon-btn sm" role="button" tabindex="0" aria-label="Изменить авто-ответ" title="Изменить" onclick="editAr(${r.id})">✏️</span>
         <span class="icon-btn sm danger" role="button" tabindex="0" aria-label="Удалить авто-ответ" onclick="deleteAr(${r.id}, this)">🗑</span>
       </div>
     </div>`;
@@ -12942,8 +12944,37 @@ async function doDeleteAr(id) {
 }
 
 let AR_SAVE_BOT = null;
+// Кнопки правила лежат в базе с экранированным текстом (escape_html на
+// сервере), а поле формы — сырой текст «Подпись | ссылка».
+function arButtonsText(buttons) {
+  let b = buttons;
+  if (typeof b === 'string') { try { b = JSON.parse(b); } catch (_) { b = null; } }
+  if (!Array.isArray(b)) return '';
+  const un = t => String(t || '').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#x27;|&#39;/g, "'").replace(/&amp;/g, '&');
+  return b.filter(x => x && x.text && x.url).map(x => un(x.text) + ' | ' + x.url).join('\n');
+}
+// Правка правила: раньше опечатку в ответе исправляли удалением и созданием
+// заново, и вместе с правилом пропадал счётчик срабатываний.
+function editAr(id) {
+  const r = (renderArList.items || []).find(x => Number(x.id) === Number(id));
+  if (!r) return;
+  openArModal();
+  openArModal.editId = r.id;
+  txt('arModalTitle', '✏️ Изменить авто-ответ');
+  document.getElementById('arType').value = r.trigger_type || 'keyword';
+  document.getElementById('arKw').value = r.keyword || '';
+  { const _m=document.getElementById('arMatch'); if(_m) _m.value = r.match_mode || 'contains'; }
+  { const _b=document.getElementById('arButtons'); if(_b) _b.value = arButtonsText(r.buttons); }
+  document.getElementById('arText').value = r.response_text || '';
+  const put = (k, v) => { const e = document.getElementById(k); if (e) e.value = (v == null || v === 0 && k !== 'arFromHour' && k !== 'arToHour') ? '' : String(v); };
+  put('arPriority', r.priority); put('arDelay', r.reply_delay_sec);
+  put('arFromHour', r.active_from_hour); put('arToHour', r.active_to_hour);
+  toggleArKw();
+}
 function openArModal() {
   AR_SAVE_BOT = CUR_BOT?.id;
+  openArModal.editId = null;
+  txt('arModalTitle', '💬 Новый авто-ответ');
   document.getElementById('arType').value='keyword';
   document.getElementById('arKw').value='';
   { const _m=document.getElementById('arMatch'); if(_m) _m.value='contains'; }
@@ -12984,10 +13015,17 @@ async function saveAutoReply() {
     if (_fh!=='' && _th==='') { errEl.textContent='Укажите оба часа рабочего окна'; errEl.style.display='block'; btn.disabled=false; btn.textContent='💾 Сохранить'; return; }
     if (_th!=='' && _fh==='') { errEl.textContent='Укажите оба часа рабочего окна'; errEl.style.display='block'; btn.disabled=false; btn.textContent='💾 Сохранить'; return; }
     if (_fh!=='') { _body.active_from_hour = parseInt(_fh); _body.active_to_hour = parseInt(_th); }
-    await api('/api/miniapp/bot/'+AR_SAVE_BOT+'/auto_reply', {
-      method:'POST', body:JSON.stringify(_body)
-    });
-    closeArModal(); toast('✅ Авто-ответ создан'); loadArList();
+    const _editId = openArModal.editId;
+    if (_editId) {
+      // Правка шлёт поле целиком: пустое окно часов = круглосуточно.
+      if (_fh==='') { _body.active_from_hour = null; _body.active_to_hour = null; }
+      await api('/api/miniapp/auto_reply/'+Number(_editId), {method:'PUT', body:JSON.stringify(_body)});
+    } else {
+      await api('/api/miniapp/bot/'+AR_SAVE_BOT+'/auto_reply', {
+        method:'POST', body:JSON.stringify(_body)
+      });
+    }
+    closeArModal(); toast(_editId ? '✅ Авто-ответ сохранён' : '✅ Авто-ответ создан'); loadArList();
   } catch(e) {
     errEl.textContent='Ошибка: '+errRu(e); errEl.style.display='block';
   } finally { btn.disabled=false; btn.textContent='💾 Сохранить'; }
@@ -16864,7 +16902,7 @@ async function loadSchedules() {
         <div style="display:flex;align-items:center;gap:10px">
           <div class="ava ava-orange">${statIco[s.status]||'⏰'}</div>
           <div class="li-body">
-            <div class="li-name">${dt}</div>
+            <div class="li-name">${dt}${schRepeatLabel(s.repeat_interval_min) ? ' · 🔁 ' + schRepeatLabel(s.repeat_interval_min) : ''}</div>
             <div class="li-sub">${esc(preview)}${preview.length===60?'…':''}</div>
           </div>
           <div style="display:flex;align-items:center;gap:6px">
@@ -16920,6 +16958,17 @@ async function saveSchedule() {
   } finally { btn.disabled=false; btn.textContent='⏰ Запланировать'; }
 }
 
+// Повтор виден в списке: повторяемая рассылка без пометки выглядела разовой,
+// и отмена «одной» снимала всю цепочку будущих отправок.
+function schRepeatLabel(min) {
+  const m = Number(min) || 0;
+  if (m <= 0) return '';
+  if (m === 1440) return 'ежедневно';
+  if (m === 10080) return 'еженедельно';
+  if (m % 1440 === 0) return 'каждые ' + (m / 1440) + ' дн.';
+  if (m % 60 === 0) return 'каждые ' + (m / 60) + ' ч';
+  return 'каждые ' + m + ' мин';
+}
 async function cancelSchedule(id) {
   if (!await askConfirm('Отменить эту запланированную рассылку? Вернуть её нельзя — только запланировать заново.')) return;
   try {

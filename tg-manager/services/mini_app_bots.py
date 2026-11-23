@@ -24,6 +24,28 @@ import asyncpg
 from aiohttp import web
 
 
+def auto_reply_hours(body: dict) -> tuple[int | None, int | None]:
+    """Рабочее окно правила из тела запроса: (с, по) в часах 0–23 или (None, None).
+
+    Окно имеет смысл только целиком: один час без второго, мусор или число
+    вне суток — это «круглосуточно», а не наполовину заданное окно, которое
+    исполнитель (auto_responder._within_active_window) всё равно бы не взял.
+    Чистая функция — тестируема.
+    """
+    def _hour(v):
+        if v is None or v == "" or isinstance(v, bool):
+            return None
+        try:
+            h = int(v)
+        except (TypeError, ValueError):
+            return None
+        return h if 0 <= h <= 23 else None
+    f, t = _hour(body.get("active_from_hour")), _hour(body.get("active_to_hour"))
+    if f is None or t is None:
+        return None, None
+    return f, t
+
+
 def setup_routes(app: web.Application, pool) -> None:
     """Зарегистрировать маршруты ботов на приложении мини-аппа."""
     from services import operation_bus as _obus
@@ -198,7 +220,7 @@ def setup_routes(app: web.Application, pool) -> None:
                 """SELECT ar.id, ar.trigger_type, ar.keyword, ar.response_text,
                           ar.is_active, ar.created_at, ar.match_mode,
                           ar.reply_delay_sec, ar.active_from_hour, ar.active_to_hour, ar.priority,
-                          COALESCE(l.fired, 0) AS fired
+                          ar.buttons, COALESCE(l.fired, 0) AS fired
                    FROM auto_replies ar
                    LEFT JOIN (
                        SELECT rule_id, COUNT(*) AS fired FROM auto_reply_log
@@ -215,27 +237,22 @@ def setup_routes(app: web.Application, pool) -> None:
                 bot_id)
         return _json_resp({"auto_replies": rows})
 
-    async def create_auto_reply(request: web.Request) -> web.Response:
-        uid = _get_uid(request)
-        if not uid:
-            return _err("Unauthorized", 401)
-        try:
-            bot_id = int(request.match_info["bot_id"])
-            body = await request.json()
-        except Exception:
-            return _err("Неверный запрос", 400)
-        if not isinstance(body, dict):
-            return _err("Неверный запрос", 400)
-        trigger_type = body.get("trigger_type", "keyword")
-        keyword = body.get("keyword", "").strip()
-        response_text = body.get("response_text", "").strip()
+    def _ar_parse(body: dict) -> dict:
+        """Поля правила автоответа из тела запроса — одни для создания и правки.
+
+        Правка заведена отдельной ручкой, и разбирать поля второй раз своим
+        кодом нельзя: класс «поле принято, но не записано» здесь уже ловили
+        четырежды (match_mode, кнопки, приоритет, рабочие часы)."""
+        trigger_type = str(body.get("trigger_type") or "keyword")
+        # `null` в поле (а форма шлёт `keyword: null` у правил /start и «любое»)
+        # ронял `.strip()` в 500.
+        keyword = str(body.get("keyword") or "").strip()
+        response_text = str(body.get("response_text") or "").strip()
         # match_mode принимался из UI, но НЕ персистился → выбор exact/starts молча
         # игнорировался (правило всегда работало как contains). Валидируем и пишем.
         match_mode = (body.get("match_mode") or "contains").lower()
         if match_mode not in ("contains", "exact", "starts"):
             match_mode = "contains"
-        if not response_text:
-            return _err("Нужен текст ответа", 400)
         # buttons/priority/reply_delay_sec принимались из UI, но НЕ персистились
         # (тот же класс #3, что и match_mode) → инлайн-кнопки, приоритет правила и
         # человекоподобная задержка молча терялись при создании. Send-путь
@@ -258,6 +275,30 @@ def setup_routes(app: web.Application, pool) -> None:
             reply_delay_sec = max(0, min(300, int(body.get("reply_delay_sec") or 0)))
         except (TypeError, ValueError):
             reply_delay_sec = 0
+        # Рабочие часы тоже приходили с экрана и терялись в INSERT (тот же
+        # класс, что match_mode и кнопки выше): форма их принимала, карточка
+        # правила их не показывала, а правило отвечало круглосуточно.
+        from_hour, to_hour = auto_reply_hours(body)
+        return {"trigger_type": trigger_type, "keyword": keyword or None,
+                "response_text": response_text, "match_mode": match_mode,
+                "buttons": buttons_json, "priority": priority,
+                "reply_delay_sec": reply_delay_sec,
+                "active_from_hour": from_hour, "active_to_hour": to_hour}
+
+    async def create_auto_reply(request: web.Request) -> web.Response:
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            bot_id = int(request.match_info["bot_id"])
+            body = await request.json()
+        except Exception:
+            return _err("Неверный запрос", 400)
+        if not isinstance(body, dict):
+            return _err("Неверный запрос", 400)
+        f = _ar_parse(body)
+        if not f["response_text"]:
+            return _err("Нужен текст ответа", 400)
         # Создание автоответа — МУТАЦИЯ, и доступ к ней ýже видимости.
         # `_user_can_use_bot` (своё + экосистема + пространство) — это правило
         # ВИДИМОСТИ: участник рабочего пространства с ролью viewer ВИДИТ бота
@@ -274,17 +315,59 @@ def setup_routes(app: web.Application, pool) -> None:
             row = await pool.fetchrow(
                 """INSERT INTO auto_replies
                        (bot_id, trigger_type, keyword, response_text, is_active,
-                        match_mode, buttons, priority, reply_delay_sec)
-                   VALUES ($1,$2,$3,$4,TRUE,$5,$6,$7,$8)
+                        match_mode, buttons, priority, reply_delay_sec,
+                        active_from_hour, active_to_hour)
+                   VALUES ($1,$2,$3,$4,TRUE,$5,$6,$7,$8,$9,$10)
                    RETURNING id""",
-                bot_id, trigger_type, keyword or None, response_text, match_mode,
-                buttons_json, priority, reply_delay_sec)
+                bot_id, f["trigger_type"], f["keyword"], f["response_text"], f["match_mode"],
+                f["buttons"], f["priority"], f["reply_delay_sec"],
+                f["active_from_hour"], f["active_to_hour"])
             if row is None:
                 return _err("Не удалось создать автоответ", 500)
             return _json_resp({"ok": True, "id": row["id"]})
         except Exception as e:
             log.warning("create_auto_reply bot=%d: %s", bot_id, e)
             return _err("Не удалось создать автоответ", 500)
+
+    async def update_auto_reply(request: web.Request) -> web.Response:
+        """Правка правила автоответа. Раньше правила можно было только создать,
+        включить и удалить: опечатку в ответе исправляли удалением и созданием
+        заново, и вместе с правилом пропадал его счётчик срабатываний.
+        Доступ — как у создания: только владелец бота (added_by), не зритель."""
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        try:
+            reply_id = int(request.match_info["reply_id"])
+            body = await request.json()
+        except Exception:
+            return _err("Неверный запрос", 400)
+        if not isinstance(body, dict):
+            return _err("Неверный запрос", 400)
+        f = _ar_parse(body)
+        if not f["response_text"]:
+            return _err("Нужен текст ответа", 400)
+        if f["trigger_type"] == "keyword" and not f["keyword"]:
+            return _err("Нужно ключевое слово", 400)
+        try:
+            row = await pool.fetchrow(
+                """UPDATE auto_replies
+                      SET trigger_type=$3, keyword=$4, response_text=$5, match_mode=$6,
+                          buttons=$7, priority=$8, reply_delay_sec=$9,
+                          active_from_hour=$10, active_to_hour=$11
+                    WHERE id=$1
+                      AND bot_id IN (SELECT bot_id FROM managed_bots
+                                      WHERE added_by=$2 AND deleted_at IS NULL)
+                RETURNING id""",
+                reply_id, uid, f["trigger_type"], f["keyword"], f["response_text"],
+                f["match_mode"], f["buttons"], f["priority"], f["reply_delay_sec"],
+                f["active_from_hour"], f["active_to_hour"])
+        except Exception as e:
+            log.warning("update_auto_reply id=%d: %s", reply_id, e)
+            return _err("Не удалось сохранить автоответ", 500)
+        if not row:
+            return _err("Не найдено", 404)
+        return _json_resp({"ok": True, "id": row["id"]})
 
     async def bot_funnels(request: web.Request) -> web.Response:
         uid = _get_uid(request)
@@ -1578,7 +1661,8 @@ def setup_routes(app: web.Application, pool) -> None:
         if not owns:
             return _err("Бот не найден", 404)
         rows = await _safe_fetch(pool,
-            """SELECT id, message_text, execute_at, status, created_at
+            """SELECT id, message_text, execute_at, status, created_at,
+                      COALESCE(repeat_interval_min, 0) AS repeat_interval_min
                FROM scheduled_broadcasts WHERE bot_id=$1
                ORDER BY execute_at DESC LIMIT 20""", bot_id)
         return _json_resp({"schedules": rows})
@@ -1961,6 +2045,7 @@ def setup_routes(app: web.Application, pool) -> None:
     app.router.add_get("/api/miniapp/bot/{bot_id}", bot_detail)
     app.router.add_get("/api/miniapp/bot/{bot_id}/auto_replies", bot_auto_replies)
     app.router.add_post("/api/miniapp/bot/{bot_id}/auto_reply", create_auto_reply)
+    app.router.add_put("/api/miniapp/auto_reply/{reply_id}", update_auto_reply)
     app.router.add_get("/api/miniapp/bot/{bot_id}/funnels", bot_funnels)
     app.router.add_get("/api/miniapp/bot/{bot_id}/subscribers", bot_subscribers)
     app.router.add_put("/api/miniapp/bot/{bot_id}/toggle", toggle_bot)

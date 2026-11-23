@@ -54,7 +54,9 @@ def test_create_endpoint_persists_match_mode():
     # Весь API-слой: ручки ботов вынесены в services/mini_app_bots.py.
     from tests.miniapp_source import api_source
 
-    body = api_function("create_auto_reply")
+    # Разбор полей вынесен в _ar_parse — общий для создания и правки;
+    # INSERT по-прежнему в create_auto_reply и берёт поля из его результата.
+    body = api_function("_ar_parse") + api_function("create_auto_reply")
     assert 'body.get("match_mode")' in body, "match_mode не читается из тела"
     insert = body.index("INSERT INTO auto_replies")
     assert "match_mode" in body[insert:insert + 400], \
@@ -73,7 +75,9 @@ def test_create_endpoint_persists_buttons_priority_delay():
     # Весь API-слой: ручки ботов вынесены в services/mini_app_bots.py.
     from tests.miniapp_source import api_source
 
-    body = api_function("create_auto_reply")
+    # Разбор полей вынесен в _ar_parse — общий для создания и правки;
+    # INSERT по-прежнему в create_auto_reply и берёт поля из его результата.
+    body = api_function("_ar_parse") + api_function("create_auto_reply")
     # читаются из тела
     assert 'body.get("buttons")' in body, "buttons не читается из тела"
     assert 'body.get("priority")' in body, "priority не читается из тела"
