@@ -117,7 +117,6 @@ async def cb_dashboard(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
         await callback.message.edit_text(text, parse_mode="HTML", reply_markup=_main_kb().as_markup())
     except Exception as e:
         log.error("stars_hub cb_dashboard: %s", e)
-        from bot.callbacks import BmCb
         kb = InlineKeyboardBuilder()
         kb.button(text="◀️ Назад", callback_data=BmCb(action="growth"))
         await callback.message.edit_text(
