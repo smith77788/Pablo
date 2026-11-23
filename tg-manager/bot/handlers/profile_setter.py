@@ -257,7 +257,7 @@ async def msg_setter_acc_count(message: Message, state: FSMContext, pool: asyncp
     total = await _total_accs(pool, message.from_user.id)
     use = min(n, total) if n > 0 else total
     if use == 0:
-        await message.answer("⚠️ Нет доступных аккаунтов.")
+        await message.answer("⚠️ Нет доступных аккаунтов.", reply_markup=terminal_kb())
         return
     await state.update_data(acc_count=use)
     data = await state.get_data()

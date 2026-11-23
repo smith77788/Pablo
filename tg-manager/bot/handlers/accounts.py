@@ -1241,7 +1241,7 @@ async def handle_2fa(message: Message, pool: asyncpg.Pool, state: FSMContext) ->
         await state.clear()
         await message.answer(
             f"❌ Ошибка 2FA: <code>{escape(err[:200])}</code>",
-            parse_mode="HTML",
+            parse_mode="HTML", reply_markup=terminal_kb(),
         )
         return
 
@@ -1999,7 +1999,7 @@ async def relog_phone_entered(
     acc_id = data.get("relog_acc_id")
     if not acc_id:
         await state.clear()
-        await message.answer("❌ Сессия релога потеряна. Откройте аккаунт заново.")
+        await message.answer("❌ Сессия релога потеряна. Откройте аккаунт заново.", reply_markup=terminal_kb())
         return
     try:
         await pool.execute(
@@ -3514,7 +3514,7 @@ async def handle_send_msg_text(
 
     acc = await db.get_tg_account(pool, acc_id, message.from_user.id)
     if not acc:
-        await message.answer("❌ Аккаунт не найден.")
+        await message.answer("❌ Аккаунт не найден.", reply_markup=terminal_kb())
         await state.clear()
         return
 
@@ -4536,7 +4536,7 @@ async def fsm_batch_import_file(
             downloaded.read() if hasattr(downloaded, "read") else bytes(downloaded)
         )
     except Exception as e:
-        await message.answer(f"⚠️ Не удалось прочитать файл: {owner_error(e)}")
+        await message.answer(f"⚠️ Не удалось прочитать файл: {owner_error(e)}", reply_markup=terminal_kb())
         return
 
     if filename.endswith(".zip"):
@@ -4591,7 +4591,7 @@ async def fsm_batch_import_file(
             )
         if not pairs:
             await state.clear()
-            await message.answer("❌ Ни одной валидной .session не найдено в архиве.")
+            await message.answer("❌ Ни одной валидной .session не найдено в архиве.", reply_markup=terminal_kb())
             return
         report = _prevalidate_sessions(pairs)
         await _show_validation_report(message, state, report)

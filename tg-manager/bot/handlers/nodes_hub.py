@@ -39,7 +39,7 @@ from bot.states import (
 )
 from services import nodes_engine
 from services.nodes_engine import ENTITY_LABELS, NODE_TYPE_LABELS
-from bot.utils.op_helpers import safe_answer
+from bot.utils.op_helpers import safe_answer, terminal_kb
 
 log = logging.getLogger(__name__)
 from bot.utils.owner_error import owner_error  # noqa: E402
@@ -795,7 +795,7 @@ async def msg_broadcast_text(
     # Determine entity_type from threads (mixed or single)
     entity_types = list({t["entity_type"] for t in threads})
     if not entity_types:
-        await message.answer("❌ Нет открытых топиков.")
+        await message.answer("❌ Нет открытых топиков.", reply_markup=terminal_kb())
         return
 
     await message.answer(

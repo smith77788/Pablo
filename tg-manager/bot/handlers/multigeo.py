@@ -243,7 +243,7 @@ async def msg_multigeo_name(
 
     token = await _get_token(pool, bot_id, message.from_user.id)
     if not token:
-        await message.answer("Бот не найден.")
+        await message.answer("Бот не найден.", reply_markup=terminal_kb())
         return
 
     value = "" if message.text.strip() == "-" else message.text.strip()
@@ -315,7 +315,7 @@ async def msg_multigeo_short(
 
     token = await _get_token(pool, bot_id, message.from_user.id)
     if not token:
-        await message.answer("Бот не найден.")
+        await message.answer("Бот не найден.", reply_markup=terminal_kb())
         return
 
     value = "" if message.text.strip() == "-" else message.text.strip()
@@ -387,7 +387,7 @@ async def msg_multigeo_desc(
 
     token = await _get_token(pool, bot_id, message.from_user.id)
     if not token:
-        await message.answer("Бот не найден.")
+        await message.answer("Бот не найден.", reply_markup=terminal_kb())
         return
 
     value = "" if message.text.strip() == "-" else message.text.strip()

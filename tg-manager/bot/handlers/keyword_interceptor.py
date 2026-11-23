@@ -19,7 +19,7 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 from bot.callbacks import KwCb, BmCb
 from bot.utils.subscription import require_plan, locked_text
 from bot.keyboards import subscription_locked_markup
-from bot.utils.op_helpers import safe_answer
+from bot.utils.op_helpers import safe_answer, terminal_kb
 from services.logger import log_exc_swallow
 from services import keyword_watcher as kw
 from bot.utils.owner_error import owner_error
@@ -147,7 +147,7 @@ async def msg_kw_keywords(message: Message, state: FSMContext, pool: asyncpg.Poo
         return
     except Exception:
         log_exc_swallow(log, "kw create_watcher failed")
-        await message.answer("Ошибка создания перехватчика.")
+        await message.answer("Ошибка создания перехватчика.", reply_markup=terminal_kb())
         return
     await state.clear()
     kb = InlineKeyboardBuilder()

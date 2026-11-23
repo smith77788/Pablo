@@ -1725,7 +1725,7 @@ async def fsm_eco_clone_region(
     except Exception as e:
         log.warning('handler error in fsm_eco_clone_region: %s', e)
         await message.answer(
-            f"❌ Ошибка клонирования: {owner_error(e)}", parse_mode="HTML"
+            f"❌ Ошибка клонирования: {owner_error(e)}", parse_mode="HTML", reply_markup=terminal_kb()
         )
 
 
@@ -1868,7 +1868,7 @@ async def fsm_eco_dna_name(
     except Exception as e:
         log.warning('handler error in fsm_eco_dna_name: %s', e)
         await message.answer(
-            f"❌ Ошибка: {owner_error(e)}", parse_mode="HTML"
+            f"❌ Ошибка: {owner_error(e)}", parse_mode="HTML", reply_markup=terminal_kb()
         )
 
 

@@ -10,7 +10,7 @@ from bot.keyboards import commands_menu, back_to_bot
 from bot.states import SetCommands
 from database import db
 from services import bot_api
-from bot.utils.op_helpers import safe_answer
+from bot.utils.op_helpers import safe_answer, terminal_kb
 
 router = Router()
 
@@ -118,7 +118,7 @@ async def msg_commands_add(
 
     row = await db.get_bot(pool, bot_id, message.from_user.id)
     if not row:
-        await message.answer("Бот не найден.")
+        await message.answer("Бот не найден.", reply_markup=terminal_kb())
         return
 
     # Load existing commands and merge
@@ -195,7 +195,7 @@ async def msg_commands_set_all(
 
     row = await db.get_bot(pool, bot_id, message.from_user.id)
     if not row:
-        await message.answer("Бот не найден.")
+        await message.answer("Бот не найден.", reply_markup=terminal_kb())
         return
 
     ok = await bot_api.set_my_commands(http, row["token"], commands)
