@@ -14201,7 +14201,7 @@ async def _exec_network_broadcast(
     res["summary"] = (
         f"{res.get('summary') or ''}\n"
         f"Сегмент: {label}\n"
-        f"Ботов: {total_started}, получателей: {total_users:,}"
+        f"Ботов: {total_started}, получателей: {format(total_users, ',').replace(',', ' ')}"
     ).strip()
     if deferred:
         # Работа была, но не доведена — это 'partial', а не «готово». Молчать

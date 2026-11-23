@@ -29,3 +29,16 @@ def test_no_comma_thousands_left_in_bot_texts():
             if re.search(r"\{[^{}]+:,(\.\d+f|d)?\}", line):
                 bad.append(f"{p.relative_to(BOT)}:{n}: {line.strip()[:90]}")
     assert not bad, "разряды через запятую:\n" + "\n".join(bad)
+
+
+def test_service_texts_for_the_owner_use_space_too():
+    """Тексты, которые сервисы присылают в бот (сводки аудитории, ДНК,
+    итоги сетевой рассылки), — та же запятая между разрядами."""
+    services = BOT.parent / "services"
+    bad = []
+    for p in sorted(services.glob("*.py")):
+        for n, line in enumerate(p.read_text(encoding="utf-8").splitlines(), 1):
+            if re.search(r"[А-Яа-яЁё]", line) and re.search(r"\{[^{}]+:,(\.\d+f)?\}", line) \
+                    and '.replace(",", " ")' not in line:
+                bad.append(f"{p.name}:{n}: {line.strip()[:90]}")
+    assert not bad, "разряды через запятую:\n" + "\n".join(bad)

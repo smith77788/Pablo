@@ -19,7 +19,7 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 from bot.callbacks import KwCb, BmCb
 from bot.utils.subscription import require_plan, locked_text
 from bot.keyboards import subscription_locked_markup
-from bot.utils.op_helpers import safe_answer, terminal_kb
+from bot.utils.op_helpers import safe_answer, terminal_kb, cancel_kb
 from services.logger import log_exc_swallow
 from services import keyword_watcher as kw
 from bot.utils.owner_error import owner_error
@@ -121,21 +121,21 @@ async def cb_kw_pick_acc(
 async def msg_kw_chat(message: Message, state: FSMContext) -> None:
     chat_ref = (message.text or "").strip()
     if not chat_ref or len(chat_ref) > 200:
-        await message.answer("Некорректный чат. Пришлите @username, ссылку или ID.")
+        await message.answer("Некорректный чат. Пришлите @username, ссылку или ID.", reply_markup=cancel_kb())
         return
     await state.update_data(chat_ref=chat_ref)
     await state.set_state(KwFSM.wait_keywords)
     await message.answer(
         "🔑 <b>Ключевые слова</b>\n\nПришлите ключи через запятую "
         "<i>(например: куплю, ищу, нужен мастер)</i>. Совпадение — по вхождению, "
-        "регистр не важен.", parse_mode="HTML")
+        "регистр не важен.", parse_mode="HTML", reply_markup=cancel_kb())
 
 
 @router.message(KwFSM.wait_keywords, F.text)
 async def msg_kw_keywords(message: Message, state: FSMContext, pool: asyncpg.Pool) -> None:
     keywords = kw.normalize_keywords(message.text or "")
     if not keywords:
-        await message.answer("Не распознал ключи. Пришлите слова через запятую.")
+        await message.answer("Не распознал ключи. Пришлите слова через запятую.", reply_markup=cancel_kb())
         return
     data = await state.get_data()
     try:

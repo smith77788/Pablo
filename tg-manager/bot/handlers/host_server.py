@@ -20,7 +20,7 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from bot.callbacks import HostCb, BmCb
 from bot.states import HostOfferingFSM, HostPriceFSM
-from bot.utils.op_helpers import safe_answer, terminal_kb
+from bot.utils.op_helpers import safe_answer, terminal_kb, cancel_kb
 from bot.utils.subscription import is_platform_admin
 from services import host_server as hs
 from services import usdt_invoice
@@ -438,7 +438,7 @@ async def cb_new_kind(callback: CallbackQuery, callback_data: HostCb, state: FSM
     await callback.message.edit_text(
         f"➕ <b>Шаг 2/4 — {_KIND_LABELS[kind]}</b>\n\n"
         "Введите короткое название предложения (например «VPS 4CPU/8GB Амстердам»):",
-        parse_mode="HTML")
+        parse_mode="HTML", reply_markup=cancel_kb())
 
 
 @router.message(HostOfferingFSM.title)
@@ -451,7 +451,7 @@ async def fsm_title(message: Message, state: FSMContext) -> None:
     await state.set_state(HostOfferingFSM.price)
     await message.answer(
         "➕ <b>Шаг 3/4</b>\n\nУкажите цену в USD (число), например <code>15</code>:",
-        parse_mode="HTML")
+        parse_mode="HTML", reply_markup=cancel_kb())
 
 
 @router.message(HostOfferingFSM.price)
@@ -545,7 +545,7 @@ async def cb_setprice(callback: CallbackQuery, state: FSMContext) -> None:
     await state.set_state(HostPriceFSM.waiting_price)
     await callback.message.edit_text(
         "💲 <b>Цена модуля Host-Server</b>\n\nВведите новую цену в USD (1–100000):",
-        parse_mode="HTML")
+        parse_mode="HTML", reply_markup=cancel_kb())
 
 
 @router.message(HostPriceFSM.waiting_price)
