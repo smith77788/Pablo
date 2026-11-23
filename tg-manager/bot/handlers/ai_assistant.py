@@ -38,6 +38,7 @@ _MEMORY_TAG_RE = re.compile(
 )
 
 from bot.utils.owner_error import owner_error  # noqa: E402
+from bot.utils.op_helpers import cancel_kb
 
 router = Router()
 log = logging.getLogger(__name__)
@@ -1402,6 +1403,7 @@ async def msg_ai_document(
             f"{owner_error(exc)}\n\n"
             f"Можно отправить: <code>{_SUPPORTED_FILE_HINT}</code>",
             parse_mode="HTML",
+            reply_markup=cancel_kb(),
         )
         return
     except Exception:
@@ -1410,6 +1412,7 @@ async def msg_ai_document(
             "📎 <b>Не получилось прочитать файл</b>\n\n"
             "Попробуйте отправить его еще раз или сохраните текст в формате TXT/MD.",
             parse_mode="HTML",
+            reply_markup=cancel_kb(),
         )
         return
 

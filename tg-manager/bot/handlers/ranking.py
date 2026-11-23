@@ -25,6 +25,7 @@ from database import db
 from services.logger import log_exc_swallow
 from bot.utils.op_helpers import safe_answer
 from bot.utils.op_helpers import no_bots_kb
+from bot.utils.op_helpers import cancel_kb
 
 log = logging.getLogger(__name__)
 
@@ -1846,6 +1847,7 @@ async def vis_receive_threshold(
         await message.answer(
             "⚠️ Неверный формат. Введите два числа от 1 до 50, например: <code>10 5</code>",
             parse_mode="HTML",
+            reply_markup=cancel_kb(),
         )
         return
 

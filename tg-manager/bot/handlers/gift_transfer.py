@@ -25,6 +25,7 @@ from services.gift_report import GiftTransferReportService
 from database import db
 from services.logger import log_exc_swallow
 from bot.utils.op_helpers import safe_answer
+from bot.utils.op_helpers import cancel_kb
 
 log = logging.getLogger(__name__)
 router = Router(name="gift_transfer")
@@ -525,7 +526,7 @@ async def msg_add_saved_recipient(message: Message, state: FSMContext, pool) -> 
     text = message.text.strip()
     username = text.lstrip("@").split("/")[-1].split("?")[0]
     if not username or len(username) < 4:
-        await message.answer("❌ Неверный формат. Введите @username:")
+        await message.answer("❌ Неверный формат. Введите @username:", reply_markup=cancel_kb())
         return
     await db.save_gift_recipient(pool, message.from_user.id, f"@{username}", username)
     await state.set_state(GiftTransferFSM.selecting_recipient)
@@ -563,7 +564,7 @@ async def msg_handle_username(message: Message, state: FSMContext, pool):
 
     # Validate format
     if not username or len(username) < 5:
-        await message.answer("❌ Неверный формат имени пользователя. Попробуйте снова:")
+        await message.answer("❌ Неверный формат имени пользователя. Попробуйте снова:", reply_markup=cancel_kb())
         return
 
     # Save to state and continue

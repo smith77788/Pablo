@@ -27,6 +27,7 @@ from services import bot_api
 from bot.utils.op_helpers import safe_answer, terminal_kb
 
 from bot.utils.owner_error import owner_error  # noqa: E402
+from bot.utils.op_helpers import cancel_kb
 
 router = Router()
 
@@ -450,7 +451,7 @@ async def msg_send_user_id(message: Message, state: FSMContext) -> None:
     try:
         user_id = int(message.text.strip())
     except ValueError:
-        await message.answer("❌ Неверный формат. Введите числовой ID пользователя:")
+        await message.answer("❌ Неверный формат. Введите числовой ID пользователя:", reply_markup=cancel_kb())
         return
     await state.update_data(target_user_id=user_id)
     await state.set_state(SendToUser.waiting_message)

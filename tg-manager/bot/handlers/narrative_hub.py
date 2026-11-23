@@ -27,6 +27,7 @@ from bot.utils.op_helpers import safe_answer
 
 log = logging.getLogger(__name__)
 from bot.utils.fmt import plural  # noqa: E402
+from bot.utils.op_helpers import cancel_kb
 
 router = Router(name="narrative_hub")
 
@@ -205,7 +206,7 @@ async def cb_narr_create(callback: CallbackQuery, state: FSMContext) -> None:
 async def msg_narr_topic(message: Message, state: FSMContext) -> None:
     topic = (message.text or "").strip()
     if not topic or len(topic) > 256:
-        await message.answer("⚠️ Тема должна быть от 1 до 256 символов.", parse_mode="HTML")
+        await message.answer("⚠️ Тема должна быть от 1 до 256 символов.", parse_mode="HTML", reply_markup=cancel_kb())
         return
 
     await state.update_data(topic=topic)
@@ -232,7 +233,7 @@ async def msg_narr_topic(message: Message, state: FSMContext) -> None:
 async def msg_narr_core(message: Message, state: FSMContext, pool: asyncpg.Pool) -> None:
     core_message = (message.text or "").strip()
     if not core_message or len(core_message) > 1000:
-        await message.answer("⚠️ Сообщение должно быть от 1 до 1000 символов.", parse_mode="HTML")
+        await message.answer("⚠️ Сообщение должно быть от 1 до 1000 символов.", parse_mode="HTML", reply_markup=cancel_kb())
         return
 
     await state.update_data(core_message=core_message, selected_channels=[])

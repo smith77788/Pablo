@@ -18,6 +18,7 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from bot.callbacks import PhoneCheckerCb, BmCb
 from bot.utils.op_helpers import terminal_kb
+from bot.utils.op_helpers import cancel_kb
 
 log = logging.getLogger(__name__)
 router = Router()
@@ -105,7 +106,7 @@ async def msg_phone_checker_phones(
 
     phones = parse_phone_list(message.text or "")
     if not phones:
-        await message.answer("⚠️ Не удалось распознать номера. Введите в формате +79991234567")
+        await message.answer("⚠️ Не удалось распознать номера. Введите в формате +79991234567", reply_markup=cancel_kb())
         return
 
     await state.clear()

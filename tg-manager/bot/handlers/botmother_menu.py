@@ -149,6 +149,7 @@ router = Router()
 
 from bot.utils.op_names import op_name as _op_name  # noqa: E402
 from bot.utils.op_helpers import no_bots_kb
+from bot.utils.op_helpers import cancel_kb
 
 def _lock(user_plan: str, required: str) -> str:
     from bot.utils.subscription import PLAN_LEVELS, coerce_plan
@@ -1901,7 +1902,7 @@ async def cb_plan_type(
 async def fsm_plan_waiting_text(message: Message, state: FSMContext) -> None:
     text = message.text or message.caption or ""
     if not text.strip():
-        await message.answer("⚠️ Текст не может быть пустым. Введите сообщение:")
+        await message.answer("⚠️ Текст не может быть пустым. Введите сообщение:", reply_markup=cancel_kb())
         return
     await state.update_data(publish_text=text.strip())
     await state.set_state(OpPlannerFSM.waiting_datetime)
@@ -1922,7 +1923,7 @@ async def fsm_plan_waiting_links(message: Message, state: FSMContext) -> None:
     text = message.text or ""
     links = [ln.strip() for ln in text.splitlines() if ln.strip()]
     if not links:
-        await message.answer("⚠️ Введите хотя бы одну ссылку или @username:")
+        await message.answer("⚠️ Введите хотя бы одну ссылку или @username:", reply_markup=cancel_kb())
         return
     await state.update_data(links=links)
     await state.set_state(OpPlannerFSM.waiting_datetime)
@@ -1985,7 +1986,7 @@ async def fsm_plan_waiting_datetime(
 
     now_utc = datetime.now(timezone.utc)
     if dt <= now_utc:
-        await message.answer("⚠️ Время должно быть в будущем. Попробуйте ещё раз:")
+        await message.answer("⚠️ Время должно быть в будущем. Попробуйте ещё раз:", reply_markup=cancel_kb())
         return
 
     sd = await state.get_data()

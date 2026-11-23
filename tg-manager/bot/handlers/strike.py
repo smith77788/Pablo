@@ -31,6 +31,7 @@ from services.account_manager import (
 from services.logger import log_exc_swallow
 from bot.utils.owner_error import owner_error
 from bot.utils.op_helpers import no_accounts_kb
+from bot.utils.op_helpers import cancel_kb
 
 # SMTP авто-определение по домену почты
 _SMTP_PRESETS: dict[str, tuple[str, int]] = {
@@ -925,7 +926,7 @@ async def msg_mini_strike_target(
 
     raw = (message.text or "").strip()
     if not raw:
-        await message.answer("⚠️ Введите юзернейм канала.", parse_mode="HTML")
+        await message.answer("⚠️ Введите юзернейм канала.", parse_mode="HTML", reply_markup=cancel_kb())
         return
 
     # Нормализация — обрабатываем публичные username и приватные invite-ссылки (+HASH)
@@ -933,7 +934,7 @@ async def msg_mini_strike_target(
     target = f"+{ref_value}" if ref_kind == "invite" else ref_value.lstrip("@")
     target_display = html.escape(format_telegram_join_ref_display(target))
     if not target or len(target) < 4:
-        await message.answer("⚠️ Некорректный юзернейм или ссылка. Попробуйте ещё раз.")
+        await message.answer("⚠️ Некорректный юзернейм или ссылка. Попробуйте ещё раз.", reply_markup=cancel_kb())
         return
 
     await state.update_data(target=target)
@@ -1480,7 +1481,7 @@ async def msg_email_input(
 
     raw = (message.text or "").strip().lower()
     if "@" not in raw or "." not in raw.split("@")[-1]:
-        await message.answer("⚠️ Некорректный email. Введите ещё раз.")
+        await message.answer("⚠️ Некорректный email. Введите ещё раз.", reply_markup=cancel_kb())
         return
 
     domain = raw.split("@")[-1]

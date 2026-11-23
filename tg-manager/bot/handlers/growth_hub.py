@@ -24,6 +24,7 @@ from bot.states import GrowthAgentFSM
 from services import operation_bus
 from bot.utils.op_helpers import safe_answer, terminal_kb
 from services import account_status as _acc_status
+from bot.utils.op_helpers import cancel_kb
 
 log = logging.getLogger(__name__)
 router = Router()
@@ -118,10 +119,10 @@ async def cb_growth_create(
 async def on_niche_input(message: Message, state: FSMContext) -> None:
     niche = (message.text or "").strip()
     if len(niche) < 3:
-        await message.answer("Ниша слишком короткая. Введите хотя бы 3 символа:")
+        await message.answer("Ниша слишком короткая. Введите хотя бы 3 символа:", reply_markup=cancel_kb())
         return
     if len(niche) > 200:
-        await message.answer("Ниша слишком длинная (макс 200 символов):")
+        await message.answer("Ниша слишком длинная (макс 200 символов):", reply_markup=cancel_kb())
         return
 
     await state.update_data(niche=niche)
@@ -151,7 +152,7 @@ async def cb_growth_skip_geo(callback: CallbackQuery, state: FSMContext) -> None
 async def on_geo_input(message: Message, state: FSMContext) -> None:
     geo = (message.text or "").strip()
     if len(geo) > 60:
-        await message.answer("Слишком длинно (макс 60 символов). Введите город/регион:")
+        await message.answer("Слишком длинно (макс 60 символов). Введите город/регион:", reply_markup=cancel_kb())
         return
     await state.update_data(geo=geo)
     await _go_to_promo_step(message, state, is_edit=False)
@@ -187,12 +188,14 @@ async def on_promo_text_input(
     promo_text = (message.text or "").strip()
     if len(promo_text) < _MIN_PROMO_TEXT:
         await message.answer(
-            f"Текст слишком короткий (минимум {_MIN_PROMO_TEXT} символов)."
+            f"Текст слишком короткий (минимум {_MIN_PROMO_TEXT} символов).",
+            reply_markup=cancel_kb(),
         )
         return
     if len(promo_text) > _MAX_PROMO_TEXT:
         await message.answer(
-            f"Текст слишком длинный (максимум {_MAX_PROMO_TEXT} символов)."
+            f"Текст слишком длинный (максимум {_MAX_PROMO_TEXT} символов).",
+            reply_markup=cancel_kb(),
         )
         return
 
@@ -204,7 +207,7 @@ async def on_promo_text_input(
         surface="growth_agent",
     )
     if _v.blocked:
-        await message.answer(content_safety.REFUSAL_TEXT, parse_mode="HTML")
+        await message.answer(content_safety.REFUSAL_TEXT, parse_mode="HTML", reply_markup=cancel_kb())
         return
 
     await state.update_data(promo_text=promo_text)
@@ -239,7 +242,7 @@ async def on_acc_count_input(
     try:
         n = int((message.text or "0").strip())
     except ValueError:
-        await message.answer("⚠️ Введите число")
+        await message.answer("⚠️ Введите число", reply_markup=cancel_kb())
         return
     total = await _get_acc_count(pool, message.from_user.id)
     use = min(n, total) if n > 0 else min(3, total)

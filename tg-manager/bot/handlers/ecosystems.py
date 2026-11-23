@@ -34,6 +34,7 @@ from bot.utils.op_helpers import safe_answer, terminal_kb
 log = logging.getLogger(__name__)
 from bot.utils.owner_error import owner_error  # noqa: E402
 from bot.utils.op_helpers import ask_to_confirm
+from bot.utils.op_helpers import cancel_kb
 
 router = Router()
 
@@ -179,7 +180,7 @@ async def cb_eco_create(callback: CallbackQuery, state: FSMContext) -> None:
 async def fsm_eco_name(message: Message, state: FSMContext) -> None:
     name = (message.text or "").strip()
     if not name or len(name) > 64:
-        await message.answer("Название от 1 до 64 символов. Попробуйте ещё раз:")
+        await message.answer("Название от 1 до 64 символов. Попробуйте ещё раз:", reply_markup=cancel_kb())
         return
     await state.update_data(name=name)
     await state.set_state(EcosystemCreateFSM.description)
@@ -1630,7 +1631,7 @@ async def fsm_eco_clone_name(
 ) -> None:
     new_name = (message.text or "").strip()[:80]
     if not new_name:
-        await message.answer("Название не может быть пустым. Введите название клона:")
+        await message.answer("Название не может быть пустым. Введите название клона:", reply_markup=cancel_kb())
         return
     await state.update_data(clone_new_name=new_name)
     await state.set_state(EcosystemCloneFSM.region)
@@ -1842,7 +1843,7 @@ async def fsm_eco_dna_name(
     dna_type = sd.get("dna_type", "custom")
     name = (message.text or "").strip()[:80]
     if not name:
-        await message.answer("Название не может быть пустым. Введите название шаблона:")
+        await message.answer("Название не может быть пустым. Введите название шаблона:", reply_markup=cancel_kb())
         return
 
     await state.clear()

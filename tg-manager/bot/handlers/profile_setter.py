@@ -24,6 +24,7 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 from bot.callbacks import ProfileSetterCb, BmCb
 from bot.utils.op_helpers import terminal_kb
 from bot.utils.owner_error import owner_error
+from bot.utils.op_helpers import cancel_kb
 
 log = logging.getLogger(__name__)
 router = Router()
@@ -199,20 +200,20 @@ async def msg_setter_value(message: Message, state: FSMContext, pool: asyncpg.Po
     elif op == "avatar":
         url = text.strip()
         if not url.startswith("http"):
-            await message.answer("⚠️ Введите прямую ссылку на изображение (https://...)")
+            await message.answer("⚠️ Введите прямую ссылку на изображение (https://...)", reply_markup=cancel_kb())
             return
         await state.update_data(avatar_url=url)
     elif op == "username":
         uname = text.strip().lstrip("@")
         if not uname:
-            await message.answer("⚠️ Введите юзернейм (без @)")
+            await message.answer("⚠️ Введите юзернейм (без @)", reply_markup=cancel_kb())
             return
         await state.update_data(username=uname)
     elif op == "2fa":
         parts = [p.strip() for p in text.split("\n") if p.strip()]
         new_pass = parts[0] if parts else ""
         if not new_pass or len(new_pass) < 4:
-            await message.answer("⚠️ Пароль должен быть минимум 4 символа")
+            await message.answer("⚠️ Пароль должен быть минимум 4 символа", reply_markup=cancel_kb())
             return
         await state.update_data(new_password=new_pass,
                                 current_password=parts[1] if len(parts) > 1 else "",
@@ -222,7 +223,7 @@ async def msg_setter_value(message: Message, state: FSMContext, pool: asyncpg.Po
     elif op in ("loc_role_add", "loc_role_del"):
         role = text.strip()
         if not role or len(role) > 40:
-            await message.answer("⚠️ Введите название роли (до 40 символов)")
+            await message.answer("⚠️ Введите название роли (до 40 символов)", reply_markup=cancel_kb())
             return
         await state.update_data(role=role)
 
@@ -252,7 +253,7 @@ async def msg_setter_acc_count(message: Message, state: FSMContext, pool: asyncp
     try:
         n = int(message.text or "0")
     except ValueError:
-        await message.answer("⚠️ Введите число")
+        await message.answer("⚠️ Введите число", reply_markup=cancel_kb())
         return
     total = await _total_accs(pool, message.from_user.id)
     use = min(n, total) if n > 0 else total

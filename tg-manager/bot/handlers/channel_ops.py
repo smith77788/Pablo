@@ -135,6 +135,7 @@ router = Router()
 
 from bot.utils.op_names import op_name as _op_name  # noqa: E402
 from bot.utils.op_helpers import no_accounts_kb
+from bot.utils.op_helpers import cancel_kb
 
 
 def _friendly_join_error(error_str: str) -> str:
@@ -1030,7 +1031,7 @@ async def cb_bulk_type_chosen(
 async def fsm_bulk_create_count(message: Message, state: FSMContext) -> None:
     raw = (message.text or "").strip()
     if not raw.isdigit() or not (1 <= int(raw) <= 10):
-        await message.answer("⚠️ Введите число от 1 до 10:")
+        await message.answer("⚠️ Введите число от 1 до 10:", reply_markup=cancel_kb())
         return
     count = int(raw)
     await state.update_data(channel_count=count)
@@ -1524,7 +1525,7 @@ async def fsm_bpchans_text(
 ) -> None:
     text = message.text or message.caption or ""
     if not text.strip():
-        await message.answer("⚠️ Введите текст поста:")
+        await message.answer("⚠️ Введите текст поста:", reply_markup=cancel_kb())
         return
     data = await state.get_data()
     selected_ids = data.get("bpchans_selected", [])
@@ -2815,7 +2816,7 @@ async def fsm_invite_usernames_file(
 ) -> None:
     doc = message.document
     if not doc or (doc.file_size and doc.file_size > 1_000_000):
-        await message.answer("⚠️ Файл слишком большой. Максимум 1 МБ.")
+        await message.answer("⚠️ Файл слишком большой. Максимум 1 МБ.", reply_markup=cancel_kb())
         return
     try:
         fi = await message.bot.get_file(doc.file_id)
@@ -2830,7 +2831,7 @@ async def fsm_invite_usernames_file(
         return
     usernames = _parse_username_list(raw)
     if not usernames:
-        await message.answer("⚠️ Файл не содержит распознанных юзернеймов.")
+        await message.answer("⚠️ Файл не содержит распознанных юзернеймов.", reply_markup=cancel_kb())
         return
     await _show_invite_count_menu(usernames, message, state)
 
@@ -2938,7 +2939,7 @@ async def fsm_invite_custom_count(
         if limit < 1:
             raise ValueError
     except ValueError:
-        await message.answer("⚠️ Введите целое число от 1 до 500.")
+        await message.answer("⚠️ Введите целое число от 1 до 500.", reply_markup=cancel_kb())
         return
 
     data = await state.get_data()
@@ -3125,7 +3126,7 @@ async def fsm_kick_user_id(
     try:
         user_id = int((message.text or "").strip())
     except ValueError:
-        await message.answer("⚠️ Введите числовой Telegram ID.")
+        await message.answer("⚠️ Введите числовой Telegram ID.", reply_markup=cancel_kb())
         return
     await state.clear()
     acc = await db.get_account_for_telethon(
@@ -3261,7 +3262,7 @@ async def cb_botfather_pick_account(
 async def fsm_botfather_count(message: Message, state: FSMContext) -> None:
     raw = (message.text or "").strip()
     if not raw.isdigit() or not (1 <= int(raw) <= 5):
-        await message.answer("⚠️ Введите число от 1 до 5:")
+        await message.answer("⚠️ Введите число от 1 до 5:", reply_markup=cancel_kb())
         return
     await state.update_data(bot_count=int(raw))
     await state.set_state(CreateBotFSM.waiting_name)
@@ -3280,7 +3281,7 @@ async def fsm_botfather_count(message: Message, state: FSMContext) -> None:
 async def fsm_botfather_name(message: Message, state: FSMContext) -> None:
     name = (message.text or "").strip()
     if not name or len(name) > 64:
-        await message.answer("⚠️ Имя от 1 до 64 символов:")
+        await message.answer("⚠️ Имя от 1 до 64 символов:", reply_markup=cancel_kb())
         return
     await state.update_data(bot_name=name)
     await state.set_state(CreateBotFSM.waiting_username)
@@ -3300,7 +3301,7 @@ async def fsm_botfather_username(
 ) -> None:
     base_username = (message.text or "").strip().lstrip("@")
     if not base_username or len(base_username) < 5:
-        await message.answer("⚠️ Юзернейм минимум 5 символов.")
+        await message.answer("⚠️ Юзернейм минимум 5 символов.", reply_markup=cancel_kb())
         return
     data = await state.get_data()
     await state.clear()
@@ -3531,6 +3532,7 @@ async def fsm_react_msg_id(message: Message, state: FSMContext) -> None:
                 "• <code>https://t.me/channelname/123</code>\n"
                 "• <code>123</code>",
                 parse_mode="HTML",
+                reply_markup=cancel_kb(),
             )
             return
         await state.update_data(msg_id=msg_id)
@@ -3852,7 +3854,7 @@ def _reason_kb() -> InlineKeyboardBuilder:
 async def fsm_bulk_report_peer(message: Message, state: FSMContext) -> None:
     peer = _normalize_peer(message.text or "")
     if not peer or peer == "@":
-        await message.answer("⚠️ Введите юзернейм.")
+        await message.answer("⚠️ Введите юзернейм.", reply_markup=cancel_kb())
         return
     await state.update_data(peer=peer, peers=[peer])
     await state.set_state(BulkReportFSM.choosing_reason)
@@ -3868,7 +3870,7 @@ async def fsm_bulk_report_peers_batch(message: Message, state: FSMContext) -> No
     raw = (message.text or "").replace(",", "\n")
     lines = [l.strip() for l in raw.splitlines() if l.strip()]
     if not lines:
-        await message.answer("⚠️ Введите хотя бы один юзернейм.")
+        await message.answer("⚠️ Введите хотя бы один юзернейм.", reply_markup=cancel_kb())
         return
     peers = [_normalize_peer(l) for l in lines if l]
     peers = list(dict.fromkeys(p for p in peers if len(p) > 1))  # дедупликация
@@ -4671,7 +4673,7 @@ async def fsm_bulk_post_text(
 ) -> None:
     text_to_post = (message.text or "").strip()
     if not text_to_post:
-        await message.answer("⚠️ Введите текст поста:")
+        await message.answer("⚠️ Введите текст поста:", reply_markup=cancel_kb())
         return
     data = await state.get_data()
     op = data.get("bulk_op", "")
@@ -5061,7 +5063,7 @@ async def fsm_bulk_dm_usernames_file(message: Message, state: FSMContext) -> Non
         await message.answer("⚠️ Документ не получен.", reply_markup=terminal_kb())
         return
     if doc.file_size and doc.file_size > 200_000:
-        await message.answer("⚠️ Файл слишком большой. Максимум 200 КБ.")
+        await message.answer("⚠️ Файл слишком большой. Максимум 200 КБ.", reply_markup=cancel_kb())
         return
     try:
         file_info = await message.bot.get_file(doc.file_id)
@@ -5076,7 +5078,7 @@ async def fsm_bulk_dm_usernames_file(message: Message, state: FSMContext) -> Non
         return
     usernames = _parse_username_list(raw)
     if not usernames:
-        await message.answer("⚠️ Файл не содержит распознанных юзернеймов.")
+        await message.answer("⚠️ Файл не содержит распознанных юзернеймов.", reply_markup=cancel_kb())
         return
     if len(usernames) > 500:
         usernames = usernames[:500]
@@ -5093,6 +5095,7 @@ async def fsm_bulk_dm_usernames(message: Message, state: FSMContext) -> None:
             "⚠️ Список пустой. Отправьте юзернеймы — по одному на строке:\n"
             "<code>@username1\n@username2</code>",
             parse_mode="HTML",
+            reply_markup=cancel_kb(),
         )
         return
 
@@ -5130,7 +5133,7 @@ async def fsm_bulk_dm_text(
 ) -> None:
     text_to_send = message.text or message.caption or ""
     if not text_to_send.strip():
-        await message.answer("⚠️ Текст не может быть пустым. Отправьте текст сообщения:")
+        await message.answer("⚠️ Текст не может быть пустым. Отправьте текст сообщения:", reply_markup=cancel_kb())
         return
 
     data = await state.get_data()
@@ -5198,7 +5201,7 @@ async def fsm_bulk_chan_value(
 
     value = (message.text or "").strip()
     if not value:
-        await message.answer("⚠️ Значение не может быть пустым. Введите текст:")
+        await message.answer("⚠️ Значение не может быть пустым. Введите текст:", reply_markup=cancel_kb())
         return
 
     data = await state.get_data()
@@ -5811,7 +5814,7 @@ async def fsm_my_chans_post_text(
 ) -> None:
     text_to_post = (message.text or "").strip()
     if not text_to_post:
-        await message.answer("⚠️ Текст не может быть пустым.")
+        await message.answer("⚠️ Текст не может быть пустым.", reply_markup=cancel_kb())
         return
     data = await state.get_data()
     ch_id = data.get("my_chans_post_ch_id")

@@ -45,6 +45,7 @@ from bot.utils.owner_error import owner_error
 
 log = logging.getLogger(__name__)
 from bot.utils.fmt import num_ru  # noqa: E402
+from bot.utils.op_helpers import cancel_kb
 
 router = Router()
 
@@ -913,7 +914,7 @@ async def msg_parser_geo_coords(message: Message, state: FSMContext) -> None:
     text = message.text or ""
     m = re.search(r"([-+]?\d+\.?\d*)[,\s]+([-+]?\d+\.?\d*)", text)
     if not m:
-        await message.answer("⚠️ Не удалось распознать координаты.\nВведите: 55.7558, 37.6173")
+        await message.answer("⚠️ Не удалось распознать координаты.\nВведите: 55.7558, 37.6173", reply_markup=cancel_kb())
         return
     lat, lon = float(m.group(1)), float(m.group(2))
     if not (-90 <= lat <= 90 and -180 <= lon <= 180):

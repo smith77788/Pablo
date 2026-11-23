@@ -21,6 +21,7 @@ from services.reporter_engine import REPORT_REASONS
 
 log = logging.getLogger(__name__)
 from bot.utils.op_helpers import terminal_kb  # noqa: E402
+from bot.utils.op_helpers import cancel_kb
 
 router = Router()
 
@@ -148,7 +149,7 @@ async def msg_reporter_msg_ids(message: Message, state: FSMContext) -> None:
     from services.boost_engine import parse_msg_ids
     ids = parse_msg_ids(message.text or "")
     if not ids:
-        await message.answer("⚠️ Введите ID сообщений через запятую: 123, 124")
+        await message.answer("⚠️ Введите ID сообщений через запятую: 123, 124", reply_markup=cancel_kb())
         return
     await state.update_data(msg_ids=ids)
     await message.answer(
@@ -201,7 +202,7 @@ async def msg_reporter_acc_count(
     try:
         n = int(message.text or "0")
     except ValueError:
-        await message.answer("⚠️ Введите число")
+        await message.answer("⚠️ Введите число", reply_markup=cancel_kb())
         return
     owner_id = message.from_user.id
     total = await _acc_count(pool, owner_id)

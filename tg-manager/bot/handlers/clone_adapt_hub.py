@@ -24,6 +24,7 @@ from bot.utils.op_helpers import safe_answer
 log = logging.getLogger(__name__)
 from bot.utils.owner_error import owner_error  # noqa: E402
 from bot.utils.op_helpers import no_bots_kb
+from bot.utils.op_helpers import cancel_kb
 
 router = Router()
 
@@ -301,7 +302,7 @@ async def msg_ca_suffix(
     data = await state.get_data()
     suffix = (message.text or "").strip()
     if len(suffix) > 32:
-        await message.answer("⚠️ Суффикс не должен превышать 32 символа.", parse_mode="HTML")
+        await message.answer("⚠️ Суффикс не должен превышать 32 символа.", parse_mode="HTML", reply_markup=cancel_kb())
         return
     await state.set_state(None)
     data["name_suffix"] = suffix

@@ -152,7 +152,7 @@ async def msg_api_key_name(
     try:
         created = await _keys.create_key(pool, message.from_user.id, name)
     except ValueError as e:
-        await message.answer(owner_error(e))
+        await message.answer(owner_error(e), reply_markup=cancel_kb())
         return
     except Exception as e:
         log.warning("api_hub: key create error: %s", e)

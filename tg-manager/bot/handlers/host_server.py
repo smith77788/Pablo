@@ -445,7 +445,7 @@ async def cb_new_kind(callback: CallbackQuery, callback_data: HostCb, state: FSM
 async def fsm_title(message: Message, state: FSMContext) -> None:
     title = (message.text or "").strip()
     if not title:
-        await message.answer("⚠️ Введите название текстом.")
+        await message.answer("⚠️ Введите название текстом.", reply_markup=cancel_kb())
         return
     await state.update_data(title=title[:200])
     await state.set_state(HostOfferingFSM.price)
@@ -462,7 +462,7 @@ async def fsm_price(message: Message, state: FSMContext) -> None:
         if price < 0:
             raise ValueError
     except (TypeError, ValueError):
-        await message.answer("⚠️ Введите цену числом, например 15 или 9.99.")
+        await message.answer("⚠️ Введите цену числом, например 15 или 9.99.", reply_markup=cancel_kb())
         return
     await state.update_data(price=price)
     await state.set_state(HostOfferingFSM.period)
@@ -559,7 +559,7 @@ async def fsm_setprice(message: Message, state: FSMContext, pool: asyncpg.Pool) 
     try:
         applied = await hs.set_price(pool, raw)
     except ValueError as ve:
-        await message.answer(f"⚠️ {owner_error(ve)}")
+        await message.answer(f"⚠️ {owner_error(ve)}", reply_markup=cancel_kb())
         return
     await state.clear()
     await message.answer(

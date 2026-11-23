@@ -2434,7 +2434,7 @@ async def handle_admin_message(
     if _is_env_action(state) and not _is_permanent_admin(message.from_user.id):
         await message.answer(
             "⛔️ Переменные окружения доступны только постоянным "
-            "администраторам (ADMIN_IDS).")
+            "администраторам (ADMIN_IDS).", reply_markup=cancel_kb())
         return
 
     try:
@@ -4435,7 +4435,7 @@ async def fsm_bm_set_channel_id(message: Message, state: FSMContext, pool: async
         return
     value = (message.text or "").strip()
     if not value:
-        await message.answer("⚠️ Введите ID или @username канала.")
+        await message.answer("⚠️ Введите ID или @username канала.", reply_markup=cancel_kb())
         return
     from services import botmother_channel as _bmc
     await _bmc.set_channel_id(pool, value)
@@ -4458,7 +4458,7 @@ async def fsm_bm_write_post(message: Message, state: FSMContext, pool: asyncpg.P
         return
     text = (message.text or "").strip()
     if not text:
-        await message.answer("⚠️ Текст не может быть пустым.")
+        await message.answer("⚠️ Текст не может быть пустым.", reply_markup=cancel_kb())
         return
     await state.update_data(post_text=text)
     await state.set_state(InfragramChannelFSM.confirm_post)

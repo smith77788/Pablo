@@ -27,6 +27,7 @@ from database import db
 from bot.utils.op_helpers import safe_answer, terminal_kb
 
 from bot.utils.fmt import num_ru  # noqa: E402
+from bot.utils.op_helpers import cancel_kb
 
 router = Router()
 log = logging.getLogger(__name__)
@@ -1108,7 +1109,7 @@ async def msg_deal_title_or_csv(message: Message, state: FSMContext, pool: async
         return
     title = (message.text or "").strip()
     if not title or len(title) > 120:
-        await message.answer("⚠️ Название от 1 до 120 символов. Попробуйте ещё раз:")
+        await message.answer("⚠️ Название от 1 до 120 символов. Попробуйте ещё раз:", reply_markup=cancel_kb())
         return
     await state.update_data(deal_title=title)
     await state.set_state(AddDeal.waiting_contact)
@@ -1226,7 +1227,7 @@ async def msg_deal_note(message: Message, state: FSMContext, pool: asyncpg.Pool)
     deal_id = data.get("deal_id", 0)
     await state.clear()
     if not note:
-        await message.answer("⚠️ Заметка не может быть пустой.")
+        await message.answer("⚠️ Заметка не может быть пустой.", reply_markup=cancel_kb())
         return
     await db.add_crm_activity(pool, message.from_user.id, deal_id, note[:500])
     kb = InlineKeyboardBuilder()
@@ -1299,11 +1300,11 @@ async def cb_csv_import_prompt(callback: CallbackQuery, state: FSMContext) -> No
 async def msg_csv_file(message: Message, state: FSMContext, pool: asyncpg.Pool) -> None:
     data = await state.get_data()
     if not data.get("csv_mode"):
-        await message.answer("⚠️ Ожидается текст названия сделки, а не файл.")
+        await message.answer("⚠️ Ожидается текст названия сделки, а не файл.", reply_markup=cancel_kb())
         return
     doc = message.document
     if not doc or not (doc.file_name or "").lower().endswith(".csv"):
-        await message.answer("⚠️ Ожидается .csv файл.")
+        await message.answer("⚠️ Ожидается .csv файл.", reply_markup=cancel_kb())
         return
     await state.clear()
     bot = message.bot

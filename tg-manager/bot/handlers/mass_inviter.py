@@ -28,6 +28,7 @@ log = logging.getLogger(__name__)
 from bot.utils.op_helpers import terminal_kb  # noqa: E402
 
 from bot.utils.fmt import num_ru  # noqa: E402
+from bot.utils.op_helpers import cancel_kb
 
 router = Router()
 
@@ -168,7 +169,7 @@ async def msg_inviter_preflight(
     from services.mass_inviter_engine import parse_group_ref, validate_group_ref
     _ok, _why = validate_group_ref(message.text or "")
     if not _ok:
-        await message.answer(f"⚠️ {_why}")
+        await message.answer(f"⚠️ {_why}", reply_markup=cancel_kb())
         return
     group = parse_group_ref(message.text or "")
     # Не чистим data — сохраняем группу для возможного «Вступить всеми».
@@ -271,7 +272,7 @@ async def msg_inviter_group(message: Message, state: FSMContext) -> None:
     from services.mass_inviter_engine import parse_group_ref, validate_group_ref
     _ok, _why = validate_group_ref(message.text or "")
     if not _ok:
-        await message.answer(f"⚠️ {_why}")
+        await message.answer(f"⚠️ {_why}", reply_markup=cancel_kb())
         return
     group = parse_group_ref(message.text or "")
     await state.update_data(group=group)
@@ -607,7 +608,7 @@ async def msg_inviter_manual(
     refs = parse_user_refs(message.text or "")
     if not refs:
         await message.answer("⚠️ Не удалось распознать пользователей. Введите @username "
-                             "или числовые ID — либо пришлите файл .txt/.csv/.xlsx/.db.")
+                             "или числовые ID — либо пришлите файл .txt/.csv/.xlsx/.db.", reply_markup=cancel_kb())
         return
     await _accept_refs(message, state, pool, refs, phones=False)
 
@@ -620,7 +621,7 @@ async def msg_inviter_manual_file(
     if refs is None:
         return
     if not refs:
-        await message.answer("⚠️ В файле не нашлось ни одного @username / ID.")
+        await message.answer("⚠️ В файле не нашлось ни одного @username / ID.", reply_markup=cancel_kb())
         return
     await _accept_refs(message, state, pool, refs, phones=False)
 
@@ -663,7 +664,7 @@ async def msg_inviter_phones_file(
     if phones is None:
         return
     if not phones:
-        await message.answer("⚠️ В файле не нашлось ни одного номера телефона.")
+        await message.answer("⚠️ В файле не нашлось ни одного номера телефона.", reply_markup=cancel_kb())
         return
     await _accept_refs(message, state, pool, phones, phones=True)
 
@@ -770,7 +771,7 @@ async def msg_inviter_acc_count(
     try:
         n = int(message.text or "0")
     except ValueError:
-        await message.answer("⚠️ Введите число")
+        await message.answer("⚠️ Введите число", reply_markup=cancel_kb())
         return
     owner_id = message.from_user.id
     total = await _acc_count(pool, owner_id)

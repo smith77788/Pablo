@@ -15,6 +15,7 @@ from bot.utils.picker_cap import cap_slice as _cap, cap_note_button as _cap_note
 from bot.states import ContentMeshFSM
 from bot.utils.op_helpers import safe_answer, terminal_kb
 from services import account_status as _acc_status
+from bot.utils.op_helpers import cancel_kb
 
 log = logging.getLogger(__name__)
 router = Router()
@@ -126,7 +127,7 @@ async def msg_mesh_name(
 ) -> None:
     name = (message.text or "").strip()
     if not name or len(name) > 100:
-        await message.answer("⚠️ Название должно быть от 1 до 100 символов.", parse_mode="HTML")
+        await message.answer("⚠️ Название должно быть от 1 до 100 символов.", parse_mode="HTML", reply_markup=cancel_kb())
         return
     await state.clear()
     mesh_id = await pool.fetchval(
@@ -264,7 +265,7 @@ async def msg_mesh_source_channel(
     mesh_id = data["mesh_id"]
     channel = (message.text or "").strip()
     if not channel:
-        await message.answer("⚠️ Введите @username или ID канала.", parse_mode="HTML")
+        await message.answer("⚠️ Введите @username или ID канала.", parse_mode="HTML", reply_markup=cancel_kb())
         return
     await state.set_state(ContentMeshFSM.waiting_source_account)
     await state.update_data(source_channel=channel)
@@ -394,7 +395,7 @@ async def msg_mesh_target_channel(
         return
     channel = (message.text or "").strip()
     if not channel:
-        await message.answer("⚠️ Введите @username или ID канала.", parse_mode="HTML")
+        await message.answer("⚠️ Введите @username или ID канала.", parse_mode="HTML", reply_markup=cancel_kb())
         return
     existing = await pool.fetchrow(
         "SELECT id FROM mesh_targets WHERE mesh_id=$1 AND target_channel=$2",
@@ -502,11 +503,11 @@ async def msg_mesh_settings(
     text = (message.text or "").strip()
     parts = text.split(" ", 1)
     if not parts[0].isdigit():
-        await message.answer("⚠️ Начните с числа (минуты задержки).", parse_mode="HTML")
+        await message.answer("⚠️ Начните с числа (минуты задержки).", parse_mode="HTML", reply_markup=cancel_kb())
         return
     delay = int(parts[0])
     if not (0 <= delay <= 1440):
-        await message.answer("⚠️ Задержка должна быть от 0 до 1440 минут.", parse_mode="HTML")
+        await message.answer("⚠️ Задержка должна быть от 0 до 1440 минут.", parse_mode="HTML", reply_markup=cancel_kb())
         return
     cta = parts[1].strip() if len(parts) > 1 else None
     if cta == "-":

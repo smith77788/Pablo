@@ -30,6 +30,7 @@ from bot.utils.op_helpers import safe_answer
 
 from bot.utils.fmt import num_ru  # noqa: E402
 from bot.utils.op_helpers import no_bots_kb
+from bot.utils.op_helpers import cancel_kb
 
 router = Router()
 
@@ -474,7 +475,7 @@ async def msg_set_weight(
         if weight < 0 or weight > 10:
             raise ValueError
     except ValueError:
-        await message.answer("❌ Введите число от 0 до 10 (например: 1.5):")
+        await message.answer("❌ Введите число от 0 до 10 (например: 1.5):", reply_markup=cancel_kb())
         return
     data = await state.get_data()
     await state.clear()

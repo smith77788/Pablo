@@ -34,6 +34,7 @@ from bot.utils.op_names import acc_status_short as _acc_short, run_status as _ru
 log = logging.getLogger(__name__)
 from bot.utils.owner_error import owner_error  # noqa: E402
 from bot.utils.op_helpers import ask_to_confirm
+from bot.utils.op_helpers import cancel_kb
 
 router = Router()
 
@@ -1210,7 +1211,7 @@ async def fsm_wu_targets_text(message: Message, state: FSMContext) -> None:
 
     raw = (message.text or "").strip()
     if not raw:
-        await message.answer("⚠️ Введите хотя бы один юзернейм или ссылку.")
+        await message.answer("⚠️ Введите хотя бы один юзернейм или ссылку.", reply_markup=cancel_kb())
         return
 
     parts = re.split(r"[\s,;]+", raw)

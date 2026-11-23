@@ -43,6 +43,7 @@ from bot.utils.template_validator import (
 log = logging.getLogger(__name__)
 from bot.utils.owner_error import owner_error  # noqa: E402
 from bot.utils.op_helpers import no_accounts_kb
+from bot.utils.op_helpers import cancel_kb
 
 router = Router()
 
@@ -303,7 +304,7 @@ async def fsm_mpub_text(message: Message, state: FSMContext) -> None:
         media_type = "document"
 
     if not text and not media_file_id:
-        await message.answer("⚠️ Введите текст поста или отправьте медиа с подписью:")
+        await message.answer("⚠️ Введите текст поста или отправьте медиа с подписью:", reply_markup=cancel_kb())
         return
 
     from services import postbot
