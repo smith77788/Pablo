@@ -44,7 +44,7 @@ async function openChSettings(chId) {
 }
 
 function _csToggle(key, label, on, hint) {
-  return `<label style="display:flex;align-items:center;justify-content:space-between;gap:10px;cursor:pointer;padding:9px 0;border-bottom:1px solid var(--sep)">
+  return `<label class="chk-row" style="display:flex;align-items:center;justify-content:space-between;gap:10px;cursor:pointer;padding:9px 0;border-bottom:1px solid var(--sep)">
     <span style="font-size:14px">${label}${hint ? `<div style="font-size:12px;color:var(--hint);line-height:1.35">${hint}</div>` : ''}</span>
     <input type="checkbox" ${on ? 'checked' : ''} style="width:18px;height:18px;accent-color:var(--accent);flex:none"
       onchange="csSet('${key}', this.checked, this)">
@@ -116,7 +116,7 @@ function _csRender() {
     const allowed = Object.keys(labels).filter(k => perms[k] !== false).length;
     html += `<div class="sec" style="margin:8px 0 0">🔑 Разрешения участников · ${allowed}/${Object.keys(labels).length}</div>`;
     for (const k of Object.keys(labels)) {
-      html += `<label style="display:flex;align-items:center;justify-content:space-between;cursor:pointer;padding:8px 0;border-bottom:1px solid var(--sep)">
+      html += `<label class="chk-row" style="display:flex;align-items:center;justify-content:space-between;cursor:pointer;padding:8px 0;border-bottom:1px solid var(--sep)">
         <span style="font-size:14px">${esc(labels[k])}</span>
         <input type="checkbox" ${perms[k] !== false ? 'checked' : ''} style="width:18px;height:18px;accent-color:var(--accent)"
           onchange="csSet('permissions', {'${escJs(k)}': this.checked}, this)">

@@ -95,12 +95,12 @@ function _nrRenderEdit() {
   const all = r.bot_ids == null;
   const sel = new Set((r.bot_ids || []).map(Number));
   const botRows = [{bot_id: 0, title: 'Каналы и чаты, где админ главный бот'}].concat(d.bots || []).map(b => `
-    <label style="display:flex;align-items:center;gap:10px;padding:7px 0;border-bottom:1px solid var(--sep);cursor:pointer;${all ? 'opacity:.5' : ''}">
+    <label class="chk-row" style="display:flex;align-items:center;gap:10px;padding:7px 0;border-bottom:1px solid var(--sep);cursor:pointer;${all ? 'opacity:.5' : ''}">
       <input type="checkbox" ${all || sel.has(Number(b.bot_id)) ? 'checked' : ''} ${all ? 'disabled' : ''} style="width:18px;height:18px;accent-color:var(--accent)"
         onchange="nrouteToggleBot(${Number(b.bot_id)}, this.checked)">
       <span style="font-size:14px">${esc(b.title)}</span></label>`).join('');
   const evRows = Object.entries(d.events || {}).map(([k, label]) => `
-    <label style="display:flex;align-items:center;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--sep);cursor:pointer">
+    <label class="chk-row" style="display:flex;align-items:center;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--sep);cursor:pointer">
       <span style="font-size:14px">${esc(label)}</span>
       <input type="checkbox" ${(r.events || []).includes(k) ? 'checked' : ''} style="width:18px;height:18px;accent-color:var(--accent)"
         onchange="nrouteToggleEvent('${escJs(k)}', this.checked)"></label>`).join('');
@@ -112,16 +112,16 @@ function _nrRenderEdit() {
     ${chats.length ? `<select style="${field}" onchange="_nrEdit.chat_id=Number(this.value)">${chatOpts}</select>` : '<div style="font-size:14px;color:var(--red)">Нет подключённых каналов</div>'}
     ${_nrHowTo()}
     <div class="sec" style="margin:10px 0 4px">Какие боты</div>
-    <label style="display:flex;align-items:center;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--sep);cursor:pointer">
+    <label class="chk-row" style="display:flex;align-items:center;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--sep);cursor:pointer">
       <span style="font-size:14px;font-weight:600">Все боты (и новые тоже)</span>
       <input type="checkbox" ${all ? 'checked' : ''} style="width:18px;height:18px;accent-color:var(--accent)" onchange="nrouteAllBots(this.checked)"></label>
     <div style="max-height:220px;overflow:auto">${botRows}</div>
     <div class="sec" style="margin:10px 0 4px">События</div>
     ${evRows}
-    <label style="display:flex;align-items:center;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--sep);cursor:pointer">
+    <label class="chk-row" style="display:flex;align-items:center;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--sep);cursor:pointer">
       <span style="font-size:14px">🔕 Не дублировать в личку<div style="font-size:12px;color:var(--hint)">Если канал недоступен — всё равно придёт в личку</div></span>
       <input type="checkbox" ${r.mute_dm ? 'checked' : ''} style="width:18px;height:18px;accent-color:var(--accent)" onchange="_nrEdit.mute_dm=this.checked"></label>
-    <label style="display:flex;align-items:center;justify-content:space-between;padding:8px 0;cursor:pointer">
+    <label class="chk-row" style="display:flex;align-items:center;justify-content:space-between;padding:8px 0;cursor:pointer">
       <span style="font-size:14px">✅ Включён</span>
       <input type="checkbox" ${r.enabled ? 'checked' : ''} style="width:18px;height:18px;accent-color:var(--accent)" onchange="_nrEdit.enabled=this.checked"></label>
     <div id="nrErr" style="color:var(--red);font-size:13px;min-height:16px"></div>
