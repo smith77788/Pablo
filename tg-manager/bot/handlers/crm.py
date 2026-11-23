@@ -765,7 +765,7 @@ async def msg_rule_name(
     action_label = ACTION_LABELS.get(data["action_type"], data["action_type"])
     await message.answer(
         f"✅ <b>Правило создано!</b>\n\n"
-        f"Название: {rule_name}\n"
+        f"Название: {html.escape(rule_name)}\n"
         f"Триггер: {trigger_label}\n"
         f"Действие: {action_label}\n"
         f"Значение: <code>{data['action_value'][:60]}</code>",
@@ -1189,7 +1189,7 @@ async def _finish_deal_creation(
     val_str = num_ru(round(value)) if value else "не указана"
     await message.answer(
         f"✅ <b>Сделка создана!</b>\n\n"
-        f"Название: <b>{title}</b>\n"
+        f"Название: <b>{html.escape(str(title))}</b>\n"
         f"Контакт: {contact or '—'}\n"
         f"Сумма: {val_str}\n"
         f"Стадия: {_STAGE_LABELS['lead']}",

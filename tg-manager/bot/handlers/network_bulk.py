@@ -18,6 +18,7 @@ from services import bot_api
 from services.logger import log_exc_swallow
 from bot.utils.op_helpers import safe_answer, terminal_kb
 from services.secret_masking import mask_bot_token
+import html as _html
 
 router = Router()
 log = logging.getLogger(__name__)
@@ -182,7 +183,7 @@ async def msg_bulk_name(
     )
     log.info("network_bulk: set_name done ok=%d fail=%d total=%d", ok, fail, total)
     await msg.edit_text(
-        _result_text(ok, fail, total, f"Имя → «{name[:30]}»"),
+        _result_text(ok, fail, total, f"Имя → «{_html.escape(name[:30])}»"),
         parse_mode="HTML",
         reply_markup=network_ops_menu(),
     )
@@ -218,7 +219,7 @@ async def msg_bulk_localized_name(
         pool, message.from_user.id, http, bot_api.set_name, name, lang
     )
     await msg.edit_text(
-        _result_text(ok, fail, total, f"Имя [{lang or 'default'}] → «{name[:30]}»"),
+        _result_text(ok, fail, total, f"Имя [{lang or 'по умолчанию'}] → «{_html.escape(name[:30])}»"),
         parse_mode="HTML",
         reply_markup=network_ops_menu(),
     )

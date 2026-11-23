@@ -228,7 +228,7 @@ async def fsm_cluster_name(message: Message, state: FSMContext) -> None:
     kb.adjust(1)
 
     await message.answer(
-        f"✅ Название: <b>{name}</b>\n\n"
+        f"✅ Название: <b>{_html.escape(name)}</b>\n\n"
         "Введите описание кластера или нажмите <b>Пропустить</b>:",
         parse_mode="HTML",
         reply_markup=kb.as_markup(),

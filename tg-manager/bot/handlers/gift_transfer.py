@@ -533,7 +533,7 @@ async def msg_add_saved_recipient(message: Message, state: FSMContext, pool) -> 
     kb.button(text="◀️ К выбору получателя", callback_data="gt:select_recipient")
     kb.adjust(1)
     await message.answer(
-        f"✅ Получатель <b>@{username}</b> сохранён!\n\nТеперь выберите его для трансфера.",
+        f"✅ Получатель <b>@{_html.escape(username)}</b> сохранён!\n\nТеперь выберите его для трансфера.",
         parse_mode="HTML",
         reply_markup=kb.as_markup(),
     )
@@ -1076,7 +1076,7 @@ async def cb_edit_recipient(callback: CallbackQuery, state: FSMContext, pool):
     uid_line = f"\n🆔 user_id: <code>{rec['user_id']}</code>" if rec.get("user_id") else ""
     await callback.message.edit_text(
         f"👤 <b>{_html.escape(str(rec['name']))}</b>{main_admin}\n"
-        f"📎 {rec['username'] or 'нет @username'}{uid_line}",
+        f"📎 {_html.escape(rec['username'] or 'нет @username')}{uid_line}",
         reply_markup=kb.as_markup(),
     )
 

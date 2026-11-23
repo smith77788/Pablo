@@ -979,7 +979,7 @@ async def fsm_bot_reg_date(message: Message, state: FSMContext) -> None:
     await state.update_data(reg_date=text)
     await state.set_state(PromoAddBotFSM.token)
     await message.answer(
-        f"✅ Дата: {text}\n\n"
+        f"✅ Дата: {html.escape(text)}\n\n"
         "Введите <b>токен бота</b> (из BotFather) или <code>-</code> чтобы пропустить:", reply_markup=cancel_kb()
     )
 
@@ -1238,7 +1238,7 @@ async def fsm_transfer_new_owner(message: Message, state: FSMContext, pool: asyn
             f"Бот: @{html.escape(bot_username)}\n"
             f"Ошибка: <code>{html.escape(str(result['error'])[:300])}</code>\n\n"
             f"Возможные причины:\n"
-            f"• @{new_owner} не существует\n"
+            f"• @{html.escape(new_owner)} не существует\n"
             f"• Новый владелец не принял условия BotFather\n"
             f"• Флуд-лимит Telegram — попробуйте позже",
             reply_markup=terminal_kb(),
@@ -1598,7 +1598,7 @@ async def fsm_panel_service_id(message: Message, state: FSMContext, pool: asyncp
     await message.answer(
         f"✅ <b>Панель «{html.escape(data['name'])}» добавлена!{verified_str}</b>\n\n"
         + (f"💰 Баланс: {data.get('balance', '?')}\n" if data.get("balance_verified") else "")
-        + (f"🎯 ID сервиса: <code>{svc_id}</code>\n" if svc_id else "⚠️ ID сервиса не задан — задайте через «Сервисы панели»\n")
+        + (f"🎯 ID сервиса: <code>{html.escape(str(svc_id))}</code>\n" if svc_id else "⚠️ ID сервиса не задан — задайте через «Сервисы панели»\n")
         + "\nНажмите «Сервисы панели» чтобы найти нужный Telegram-сервис.",
         reply_markup=kb.as_markup(),
     )
