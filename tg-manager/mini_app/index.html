@@ -22673,8 +22673,8 @@ async function openContactCRM(id) {
           <select id="crm-currency" onchange="saveCrmValue('${id}')" style="flex:0 0 auto;padding:10px;border-radius:var(--radius);border:1.5px solid var(--border-input);background:var(--bg-input);color:var(--text);font-size:14px">${crmCurrencyOptions(crm.currency)}</select>
         </div>
         <div style="font-size:11px;color:var(--hint);margin-top:3px">Сумма и валюта сохраняются, когда уводите фокус. Валюта у каждой сделки своя — итоги считаются по валютам отдельно.</div></div>
-      <div style="margin-bottom:10px"><label style="font-size:12px;color:var(--hint)">Напоминание</label><input id="crm-remind" type="datetime-local" style="width:100%;padding:10px;border-radius:var(--radius);border:1.5px solid var(--border-input);background:var(--bg-input);color:var(--text);font-size:14px;margin-top:4px"></div>
-      <div style="margin-bottom:10px"><input id="crm-remind-text" placeholder="Текст напоминания" class="inp"></div>
+      <div style="margin-bottom:10px"><label style="font-size:12px;color:var(--hint)">Напоминание</label><input id="crm-remind" type="datetime-local" value="${crm.next_reminder_at ? toLocalInput(new Date(crm.next_reminder_at)) : ''}" style="width:100%;padding:10px;border-radius:var(--radius);border:1.5px solid var(--border-input);background:var(--bg-input);color:var(--text);font-size:14px;margin-top:4px"></div>
+      <div style="margin-bottom:10px"><input id="crm-remind-text" placeholder="Текст напоминания" class="inp" value="${esc(crm.next_reminder_text||'')}"></div>
       <button class="btn btn-p" data-main onclick="saveCrmReminder('${id}')" style="width:100%;margin-bottom:12px">⏰ Сохранить напоминание</button>
     </div>`;
     if (crm.next_reminder_at) {
