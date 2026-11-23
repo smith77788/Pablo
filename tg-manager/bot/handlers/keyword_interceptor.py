@@ -144,7 +144,7 @@ async def msg_kw_keywords(message: Message, state: FSMContext, pool: asyncpg.Poo
             pool, message.from_user.id, int(data["account_id"]),
             data["chat_ref"], keywords)
     except ValueError as e:
-        await message.answer(f"⚠️ {owner_error(e)}")
+        await message.answer(f"⚠️ {owner_error(e)}", reply_markup=cancel_kb())
         return
     except Exception:
         log_exc_swallow(log, "kw create_watcher failed")

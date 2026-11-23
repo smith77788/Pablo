@@ -25,6 +25,7 @@ from bot.utils.template_validator import (
 from database import db
 from bot.utils.subscription import locked_text, require_plan
 from bot.utils.op_helpers import safe_answer
+from bot.utils.op_helpers import cancel_kb
 
 router = Router()
 log = logging.getLogger(__name__)
@@ -361,6 +362,7 @@ async def msg_placeholders(
             f"❌ Не все плейсхолдеры заполнены:\n{ph_list}\n\n"
             "Отправьте значения ещё раз:",
             parse_mode="HTML",
+            reply_markup=cancel_kb(),
         )
         return
 
@@ -432,7 +434,7 @@ async def msg_ai_template_prompt(
 ) -> None:
     prompt = (message.text or "").strip()
     if not prompt:
-        await message.answer("❌ Описание не может быть пустым. Попробуйте снова:")
+        await message.answer("❌ Описание не может быть пустым. Попробуйте снова:", reply_markup=cancel_kb())
         return
     if not await require_plan(pool, message.from_user.id, "starter"):
         await state.clear()
@@ -641,7 +643,7 @@ async def cb_template_edit_keep_text(
 async def msg_edit_template_name(message: Message, state: FSMContext) -> None:
     name = (message.text or "").strip()
     if not name or len(name) > 64:
-        await message.answer("❌ Название от 1 до 64 символов:")
+        await message.answer("❌ Название от 1 до 64 символов:", reply_markup=cancel_kb())
         return
     await state.update_data(new_name=name)
     await state.set_state(EditTemplate.waiting_text)
@@ -692,7 +694,7 @@ async def msg_edit_template_text(
 ) -> None:
     text = (message.text or "").strip()
     if not text:
-        await message.answer("❌ Текст не может быть пустым:")
+        await message.answer("❌ Текст не может быть пустым:", reply_markup=cancel_kb())
         return
     data = await state.get_data()
     await state.clear()
@@ -721,10 +723,10 @@ async def msg_ai_template_name(
 ) -> None:
     name = (message.text or "").strip()
     if not name:
-        await message.answer("❌ Название не может быть пустым:")
+        await message.answer("❌ Название не может быть пустым:", reply_markup=cancel_kb())
         return
     if len(name) > 64:
-        await message.answer("❌ Название слишком длинное (макс. 64 символа):")
+        await message.answer("❌ Название слишком длинное (макс. 64 символа):", reply_markup=cancel_kb())
         return
 
     data = await state.get_data()

@@ -23,6 +23,7 @@ from bot.utils.op_helpers import safe_answer, terminal_kb
 
 log = logging.getLogger(__name__)
 from bot.utils.fmt import num_ru  # noqa: E402
+from bot.utils.op_helpers import cancel_kb
 
 router = Router()
 
@@ -1238,7 +1239,7 @@ async def fsm_seo_feedback(
     """Пользователь написал правку — сохраняем и перегенерируем."""
     feedback = (message.text or "").strip()
     if not feedback:
-        await message.answer("⚠️ Введите текст правки:")
+        await message.answer("⚠️ Введите текст правки:", reply_markup=cancel_kb())
         return
 
     data = await state.get_data()
@@ -1870,14 +1871,14 @@ async def fsm_seo_edit_value(
     acc_id = sd.get("seo_acc_id", 0)
 
     if not value:
-        await message.answer("⚠️ Значение не может быть пустым. Попробуйте ещё раз:")
+        await message.answer("⚠️ Значение не может быть пустым. Попробуйте ещё раз:", reply_markup=cancel_kb())
         return
 
     if field == "title" and len(value) > 128:
-        await message.answer("⚠️ Название не более 128 символов. Попробуйте ещё раз:")
+        await message.answer("⚠️ Название не более 128 символов. Попробуйте ещё раз:", reply_markup=cancel_kb())
         return
     if field == "about" and len(value) > 255:
-        await message.answer("⚠️ Описание не более 255 символов. Попробуйте ещё раз:")
+        await message.answer("⚠️ Описание не более 255 символов. Попробуйте ещё раз:", reply_markup=cancel_kb())
         return
     if field == "username":
         import re as _re

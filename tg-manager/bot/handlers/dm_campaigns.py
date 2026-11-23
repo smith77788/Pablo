@@ -31,6 +31,7 @@ from bot.utils.owner_error import owner_error  # noqa: E402
 
 from bot.utils.fmt import num_ru  # noqa: E402
 from bot.utils.op_helpers import ask_to_confirm
+from bot.utils.op_helpers import cancel_kb
 
 router = Router()
 
@@ -688,7 +689,7 @@ async def fsm_dm_import_text(
 
     raw = (message.text or "").strip()
     if not raw:
-        await message.answer("⚠️ Список пустой. Введите хотя бы одного получателя:")
+        await message.answer("⚠️ Список пустой. Введите хотя бы одного получателя:", reply_markup=cancel_kb())
         return
 
     items: list[dict] = []

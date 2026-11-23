@@ -31,6 +31,7 @@ from bot.utils.op_helpers import safe_answer
 
 log = logging.getLogger(__name__)
 from bot.utils.owner_error import owner_error  # noqa: E402
+from bot.utils.op_helpers import cancel_kb
 
 router = Router()
 
@@ -183,7 +184,7 @@ async def cb_group_create_acc_chosen(
 async def fsm_group_title(message: Message, state: FSMContext) -> None:
     title = (message.text or "").strip()
     if not title or len(title) > 128:
-        await message.answer("⚠️ Название от 1 до 128 символов. Попробуйте ещё раз:")
+        await message.answer("⚠️ Название от 1 до 128 символов. Попробуйте ещё раз:", reply_markup=cancel_kb())
         return
     await state.update_data(title=title)
     await state.set_state(CreateGroupFSM.waiting_about)
@@ -852,7 +853,7 @@ async def cb_group_announce_acc(
 async def fsm_announce_text(message: Message, state: FSMContext) -> None:
     text = (message.text or "").strip()
     if not text:
-        await message.answer("⚠️ Введите текст объявления:")
+        await message.answer("⚠️ Введите текст объявления:", reply_markup=cancel_kb())
         return
     await state.update_data(announce_text=text)
     await state.set_state(AnnounceGroupFSM.confirming)

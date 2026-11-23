@@ -59,6 +59,7 @@ from bot.utils.op_names import op_name as _op_name  # noqa: E402
 from bot.utils.op_names import status_label as _ost_label  # noqa: E402
 from bot.utils.op_helpers import no_accounts_kb
 from bot.utils.op_helpers import ask_to_confirm
+from bot.utils.op_helpers import cancel_kb
 
 
 # ── Timing options ──────────────────────────────────────────────────────────
@@ -519,7 +520,7 @@ async def _proceed_mp_text(text: str, message: Message, state: FSMContext) -> No
 async def fsm_mp_text(message: Message, state: FSMContext) -> None:
     text = (message.text or "").strip()
     if not text:
-        await message.answer("⚠️ Введите текст поста:")
+        await message.answer("⚠️ Введите текст поста:", reply_markup=cancel_kb())
         return
     await _proceed_mp_text(text, message, state)
 
@@ -528,10 +529,10 @@ async def fsm_mp_text(message: Message, state: FSMContext) -> None:
 async def fsm_mp_text_file(message: Message, state: FSMContext) -> None:
     doc = message.document
     if not doc or (doc.mime_type and not doc.mime_type.startswith("text")):
-        await message.answer("⚠️ Отправьте текстовый .txt файл с текстом поста.")
+        await message.answer("⚠️ Отправьте текстовый .txt файл с текстом поста.", reply_markup=cancel_kb())
         return
     if doc.file_size and doc.file_size > 50_000:
-        await message.answer("⚠️ Файл слишком большой. Максимум 50 КБ.")
+        await message.answer("⚠️ Файл слишком большой. Максимум 50 КБ.", reply_markup=cancel_kb())
         return
     try:
         file_info = await message.bot.get_file(doc.file_id)
@@ -541,7 +542,7 @@ async def fsm_mp_text_file(message: Message, state: FSMContext) -> None:
         await message.answer(f"⚠️ Не удалось прочитать файл: {owner_error(e)}", reply_markup=terminal_kb())
         return
     if not text:
-        await message.answer("⚠️ Файл пустой.")
+        await message.answer("⚠️ Файл пустой.", reply_markup=cancel_kb())
         return
     if len(text) > 4000:
         text = text[:4000]
@@ -1510,7 +1511,7 @@ async def cb_bbe_field_chosen(
 async def fsm_bbe_value(message: Message, state: FSMContext) -> None:
     value = (message.text or "").strip()
     if not value:
-        await message.answer("⚠️ Введите значение:")
+        await message.answer("⚠️ Введите значение:", reply_markup=cancel_kb())
         return
     await state.update_data(bbe_value=value)
     await state.set_state(BulkBotEditFSM.previewing)
@@ -1876,10 +1877,10 @@ async def fsm_bulk_join_links_file(
 ) -> None:
     doc = message.document
     if not doc or (doc.mime_type and not doc.mime_type.startswith("text")):
-        await message.answer("⚠️ Отправьте текстовый файл (.txt) со списком ссылок.")
+        await message.answer("⚠️ Отправьте текстовый файл (.txt) со списком ссылок.", reply_markup=cancel_kb())
         return
     if doc.file_size and doc.file_size > 100_000:
-        await message.answer("⚠️ Файл слишком большой. Максимум 100 КБ.")
+        await message.answer("⚠️ Файл слишком большой. Максимум 100 КБ.", reply_markup=cancel_kb())
         return
     try:
         file_info = await message.bot.get_file(doc.file_id)
@@ -1890,7 +1891,7 @@ async def fsm_bulk_join_links_file(
         return
     links = [ln.strip() for ln in raw.splitlines() if ln.strip()]
     if not links:
-        await message.answer("⚠️ Файл пустой или не содержит ссылок.")
+        await message.answer("⚠️ Файл пустой или не содержит ссылок.", reply_markup=cancel_kb())
         return
     if len(links) > 200:
         links = links[:200]
@@ -2240,10 +2241,10 @@ async def fsm_bulk_leave_channels_file(
 ) -> None:
     doc = message.document
     if not doc or (doc.mime_type and not doc.mime_type.startswith("text")):
-        await message.answer("⚠️ Отправьте текстовый файл (.txt) со списком каналов.")
+        await message.answer("⚠️ Отправьте текстовый файл (.txt) со списком каналов.", reply_markup=cancel_kb())
         return
     if doc.file_size and doc.file_size > 100_000:
-        await message.answer("⚠️ Файл слишком большой. Максимум 100 КБ.")
+        await message.answer("⚠️ Файл слишком большой. Максимум 100 КБ.", reply_markup=cancel_kb())
         return
     try:
         file_info = await message.bot.get_file(doc.file_id)
@@ -2254,7 +2255,7 @@ async def fsm_bulk_leave_channels_file(
         return
     channels = [ln.strip() for ln in raw.splitlines() if ln.strip()]
     if not channels:
-        await message.answer("⚠️ Файл пустой или не содержит каналов.")
+        await message.answer("⚠️ Файл пустой или не содержит каналов.", reply_markup=cancel_kb())
         return
     if len(channels) > 200:
         channels = channels[:200]
@@ -2728,7 +2729,7 @@ async def fsm_ob_entering_params(
 ) -> None:
     text = (message.text or "").strip()
     if not text:
-        await message.answer("⚠️ Введите значение:")
+        await message.answer("⚠️ Введите значение:", reply_markup=cancel_kb())
         return
 
     sd = await state.get_data()
@@ -2738,10 +2739,10 @@ async def fsm_ob_entering_params(
     if op_type in ("bulk_join", "bulk_leave"):
         lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
         if not lines:
-            await message.answer("⚠️ Введите хотя бы одну запись:")
+            await message.answer("⚠️ Введите хотя бы одну запись:", reply_markup=cancel_kb())
             return
         if len(lines) > 50:
-            await message.answer("⚠️ Максимум 50 записей за одну операцию.")
+            await message.answer("⚠️ Максимум 50 записей за одну операцию.", reply_markup=cancel_kb())
             return
         await state.update_data(ob_links=lines)
     else:

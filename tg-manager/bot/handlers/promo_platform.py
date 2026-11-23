@@ -543,7 +543,7 @@ async def fsm_order_cancel_to_orders(callback: CallbackQuery, state: FSMContext,
 async def fsm_order_keyword(message: Message, state: FSMContext) -> None:
     kw = message.text.strip() if message.text else ""
     if len(kw) < 2:
-        await message.answer("❌ Минимум 2 символа. Введите ключевое слово.")
+        await message.answer("❌ Минимум 2 символа. Введите ключевое слово.", reply_markup=cancel_kb())
         return
     await state.update_data(keyword=kw)
     await state.set_state(PromoOrderFSM.target_position)
@@ -647,7 +647,7 @@ async def fsm_order_target_subs(message: Message, state: FSMContext, pool: async
     try:
         subs = int((message.text or "0").strip())
     except ValueError:
-        await message.answer("❌ Введите число (количество подписчиков).")
+        await message.answer("❌ Введите число (количество подписчиков).", reply_markup=cancel_kb())
         return
 
     data = await state.get_data()
@@ -942,7 +942,7 @@ async def fsm_bot_cancel(callback: CallbackQuery, state: FSMContext, pool: async
 async def fsm_bot_username(message: Message, state: FSMContext) -> None:
     username = (message.text or "").strip().lstrip("@")
     if not username or len(username) < 3:
-        await message.answer("❌ Юзернейм минимум 3 символа.")
+        await message.answer("❌ Юзернейм минимум 3 символа.", reply_markup=cancel_kb())
         return
     await state.update_data(username=username)
     await state.set_state(PromoAddBotFSM.reg_date)
@@ -974,7 +974,7 @@ async def fsm_bot_reg_date(message: Message, state: FSMContext) -> None:
     try:
         datetime.strptime(text, "%Y-%m-%d")
     except ValueError:
-        await message.answer("❌ Формат: ГГГГ-ММ-ДД (например: 2025-01-15).")
+        await message.answer("❌ Формат: ГГГГ-ММ-ДД (например: 2025-01-15).", reply_markup=cancel_kb())
         return
     await state.update_data(reg_date=text)
     await state.set_state(PromoAddBotFSM.token)
@@ -1184,7 +1184,7 @@ async def cb_bot_transfer_start(callback: CallbackQuery, callback_data: PromoCb,
 async def fsm_transfer_new_owner(message: Message, state: FSMContext, pool: asyncpg.Pool) -> None:
     new_owner = (message.text or "").strip().lstrip("@")
     if not new_owner or len(new_owner) < 3:
-        await message.answer("❌ Введите корректный @username.")
+        await message.answer("❌ Введите корректный @username.", reply_markup=cancel_kb())
         return
 
     data = await state.get_data()
@@ -1484,7 +1484,7 @@ async def fsm_panel_cancel(callback: CallbackQuery, state: FSMContext, pool: asy
 async def fsm_panel_name(message: Message, state: FSMContext) -> None:
     name = (message.text or "").strip()
     if len(name) < 2:
-        await message.answer("❌ Введите название панели.")
+        await message.answer("❌ Введите название панели.", reply_markup=cancel_kb())
         return
     await state.update_data(name=name)
     await state.set_state(PromoAddPanelFSM.api_url)
@@ -1500,7 +1500,7 @@ async def fsm_panel_name(message: Message, state: FSMContext) -> None:
 async def fsm_panel_url(message: Message, state: FSMContext) -> None:
     url = (message.text or "").strip()
     if not url.startswith("http"):
-        await message.answer("❌ URL должен начинаться с http:// или https://")
+        await message.answer("❌ URL должен начинаться с http:// или https://", reply_markup=cancel_kb())
         return
     await state.update_data(api_url=url)
     await state.set_state(PromoAddPanelFSM.api_key)
@@ -1511,7 +1511,7 @@ async def fsm_panel_url(message: Message, state: FSMContext) -> None:
 async def fsm_panel_key(message: Message, state: FSMContext) -> None:
     key = (message.text or "").strip()
     if len(key) < 5:
-        await message.answer("❌ API-ключ слишком короткий.")
+        await message.answer("❌ API-ключ слишком короткий.", reply_markup=cancel_kb())
         return
     await state.update_data(api_key=key)
     data = await state.get_data()
@@ -1636,7 +1636,7 @@ async def fsm_topcheck_cancel(callback: CallbackQuery, state: FSMContext, pool: 
 async def fsm_topcheck_keyword(message: Message, state: FSMContext, pool: asyncpg.Pool) -> None:
     keyword = (message.text or "").strip()
     if not keyword:
-        await message.answer("❌ Введите ключевое слово.")
+        await message.answer("❌ Введите ключевое слово.", reply_markup=cancel_kb())
         return
     await state.clear()
 

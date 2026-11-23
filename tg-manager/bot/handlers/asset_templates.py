@@ -48,6 +48,7 @@ from bot.utils.template_validator import validate_asset_template
 from database import db
 from bot.utils.op_helpers import safe_answer
 from bot.utils.op_helpers import no_accounts_kb
+from bot.utils.op_helpers import cancel_kb
 
 log = logging.getLogger(__name__)
 router = Router()
@@ -452,7 +453,7 @@ async def cb_choose_type(
 async def msg_waiting_name(message: Message, state: FSMContext) -> None:
     name = (message.text or "").strip()
     if not name:
-        await message.answer("❌ Название не может быть пустым. Попробуйте ещё раз:")
+        await message.answer("❌ Название не может быть пустым. Попробуйте ещё раз:", reply_markup=cancel_kb())
         return
     if len(name) > 64:
         await message.answer(
@@ -551,6 +552,7 @@ async def msg_waiting_json(message: Message, state: FSMContext) -> None:
         await message.answer(
             f"❌ <b>Ошибки в шаблоне:</b>\n{errors}\n\nВведите параметры заново:",
             parse_mode="HTML",
+            reply_markup=cancel_kb(),
         )
         return
 
@@ -1585,7 +1587,7 @@ async def cb_btcz_skip_company(callback: CallbackQuery, state: FSMContext) -> No
 async def fsm_btcz_company(message: Message, state: FSMContext) -> None:
     text = (message.text or "").strip()
     if not text:
-        await message.answer("⚠️ Введите название компании или нажмите «Отмена».")
+        await message.answer("⚠️ Введите название компании или нажмите «Отмена».", reply_markup=cancel_kb())
         return
     data = await state.get_data()
     subs = data.get("tpl_subs", {})
@@ -1633,7 +1635,7 @@ async def cb_btcz_skip_hours(callback: CallbackQuery, state: FSMContext) -> None
 async def fsm_btcz_hours(message: Message, state: FSMContext) -> None:
     text = (message.text or "").strip()
     if not text:
-        await message.answer("⚠️ Введите часы работы или нажмите «Оставить».")
+        await message.answer("⚠️ Введите часы работы или нажмите «Оставить».", reply_markup=cancel_kb())
         return
     data = await state.get_data()
     subs = data.get("tpl_subs", {})

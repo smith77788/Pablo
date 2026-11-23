@@ -16,6 +16,7 @@ from bot.utils.picker_cap import cap_slice as _cap, cap_note_button as _cap_note
 from bot.states import GhostConfigFSM
 from bot.utils.op_helpers import safe_answer
 from services import account_status as _acc_status
+from bot.utils.op_helpers import cancel_kb
 
 log = logging.getLogger(__name__)
 router = Router()
@@ -391,14 +392,15 @@ async def msg_ghost_hours(
         await message.answer(
             "⚠️ Неверный формат. Введите как <code>09-23</code>.",
             parse_mode="HTML",
+            reply_markup=cancel_kb(),
         )
         return
     start, end = int(parts[0]), int(parts[1])
     if not (0 <= start <= 23 and 0 <= end <= 23):
-        await message.answer("⚠️ Часы должны быть в диапазоне 0–23.", parse_mode="HTML")
+        await message.answer("⚠️ Часы должны быть в диапазоне 0–23.", parse_mode="HTML", reply_markup=cancel_kb())
         return
     if start == end:
-        await message.answer("⚠️ Начало и конец не должны совпадать.", parse_mode="HTML")
+        await message.answer("⚠️ Начало и конец не должны совпадать.", parse_mode="HTML", reply_markup=cancel_kb())
         return
 
     await pool.execute(
@@ -453,14 +455,15 @@ async def msg_ghost_cap(
         await message.answer(
             "⚠️ Введите два числа через пробел: <code>ЛИМИТ КУЛДАУН</code>, напр. <code>12 45</code>.",
             parse_mode="HTML",
+            reply_markup=cancel_kb(),
         )
         return
     cap, cooldown = int(parts[0]), int(parts[1])
     if not (1 <= cap <= 50):
-        await message.answer("⚠️ Лимит должен быть от 1 до 50.", parse_mode="HTML")
+        await message.answer("⚠️ Лимит должен быть от 1 до 50.", parse_mode="HTML", reply_markup=cancel_kb())
         return
     if not (10 <= cooldown <= 1440):
-        await message.answer("⚠️ Кулдаун должен быть от 10 до 1440 минут.", parse_mode="HTML")
+        await message.answer("⚠️ Кулдаун должен быть от 10 до 1440 минут.", parse_mode="HTML", reply_markup=cancel_kb())
         return
 
     await pool.execute(

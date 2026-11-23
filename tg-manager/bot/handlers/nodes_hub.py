@@ -43,6 +43,7 @@ from bot.utils.op_helpers import safe_answer, terminal_kb
 
 log = logging.getLogger(__name__)
 from bot.utils.owner_error import owner_error  # noqa: E402
+from bot.utils.op_helpers import cancel_kb
 
 router = Router()
 
@@ -533,7 +534,7 @@ async def msg_prov_topic_name(
 ) -> None:
     topic_name = (message.text or "").strip()[:128]
     if not topic_name:
-        await message.answer("❌ Название не может быть пустым.")
+        await message.answer("❌ Название не может быть пустым.", reply_markup=cancel_kb())
         return
 
     fsm_data = await state.get_data()
@@ -671,15 +672,15 @@ async def msg_bulk_ids(
     try:
         ids = [int(x.strip()) for x in raw.replace("\n", ",").split(",") if x.strip()]
     except (TypeError, ValueError):
-        await message.answer("❌ Неверный формат. Пример: <code>101, 102, 103</code>", parse_mode="HTML")
+        await message.answer("❌ Неверный формат. Пример: <code>101, 102, 103</code>", parse_mode="HTML", reply_markup=cancel_kb())
         return
 
     if not ids:
-        await message.answer("❌ Список пустой.")
+        await message.answer("❌ Список пустой.", reply_markup=cancel_kb())
         return
 
     if len(ids) > 500:
-        await message.answer("❌ Максимум 500 сущностей за один запуск.")
+        await message.answer("❌ Максимум 500 сущностей за один запуск.", reply_markup=cancel_kb())
         return
 
     fsm_data = await state.get_data()
@@ -773,7 +774,7 @@ async def msg_broadcast_text(
 ) -> None:
     text = (message.text or "").strip()
     if not text:
-        await message.answer("❌ Текст не может быть пустым.")
+        await message.answer("❌ Текст не может быть пустым.", reply_markup=cancel_kb())
         return
 
     fsm_data = await state.get_data()

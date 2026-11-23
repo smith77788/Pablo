@@ -42,6 +42,7 @@ from bot.utils.op_names import run_status as _run_status  # noqa: E402
 
 log = logging.getLogger(__name__)
 from bot.utils.owner_error import owner_error  # noqa: E402
+from bot.utils.op_helpers import cancel_kb
 
 router = Router(name="intent_engine")
 
@@ -256,7 +257,7 @@ async def fsm_intent_description(
 ) -> None:
     description = (message.text or "").strip()
     if not description:
-        await message.answer("Опиши цель текстом.")
+        await message.answer("Опиши цель текстом.", reply_markup=cancel_kb())
         return
 
     await state.clear()

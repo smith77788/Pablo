@@ -16,6 +16,7 @@ from bot.utils.subscription import require_plan, locked_text
 from database import db
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from bot.utils.op_helpers import safe_answer, terminal_kb
+from bot.utils.op_helpers import cancel_kb
 
 router = Router()
 
@@ -196,6 +197,7 @@ async def msg_dl_param(message: Message, state: FSMContext, pool: asyncpg.Pool) 
         await message.answer(
             "❌ Параметр <b>{}</b> уже занят. Введите другой:".format(param),
             parse_mode="HTML",
+            reply_markup=cancel_kb(),
         )
         return  # keep state active
     await state.clear()

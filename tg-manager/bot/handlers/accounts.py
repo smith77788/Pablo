@@ -76,6 +76,7 @@ from services.account_manager import (
 from bot.utils.owner_error import owner_error
 
 from bot.utils.fmt import num_ru, plural  # noqa: E402
+from bot.utils.op_helpers import cancel_kb
 
 router = Router()
 
@@ -1237,10 +1238,11 @@ async def handle_2fa(message: Message, pool: asyncpg.Pool, state: FSMContext) ->
             await message.answer(
                 f"⏳ Слишком много запросов. Попробуйте через <b>{wait} сек</b>.",
                 parse_mode="HTML",
+                reply_markup=cancel_kb(),
             )
             return
         if "PasswordHashInvalidError" in err or "invalid" in err.lower():
-            await message.answer("❌ Неверный пароль 2FA. Попробуйте снова:")
+            await message.answer("❌ Неверный пароль 2FA. Попробуйте снова:", reply_markup=cancel_kb())
             return
         await state.clear()
         await message.answer(
@@ -3754,7 +3756,7 @@ async def handle_import_tdata(
     # Дебаунс: если уже обрабатываем — игнорируем повторную отправку
     sd = await state.get_data()
     if sd.get("tdata_processing"):
-        await message.answer("⏳ Уже обрабатываю предыдущий файл, подождите...")
+        await message.answer("⏳ Уже обрабатываю предыдущий файл, подождите...", reply_markup=cancel_kb())
         return
     await state.update_data(tdata_processing=True)
 
@@ -3937,7 +3939,7 @@ async def handle_import_session_file(
 
     doc = message.document
     if not doc:
-        await message.answer("⚠️ Отправьте .session файл как документ.")
+        await message.answer("⚠️ Отправьте .session файл как документ.", reply_markup=cancel_kb())
         return
 
     filename = (doc.file_name or "").lower()
@@ -4454,7 +4456,7 @@ async def fsm_batch_import_text(
     raw = (message.text or "").strip()
     sessions = [ln.strip() for ln in raw.splitlines() if ln.strip()]
     if not sessions:
-        await message.answer("⚠️ Введите хотя бы одну строку сессии:")
+        await message.answer("⚠️ Введите хотя бы одну строку сессии:", reply_markup=cancel_kb())
         return
     if len(sessions) > 50:
         sessions = sessions[:50]
@@ -4523,7 +4525,7 @@ async def fsm_batch_import_file(
 ) -> None:
     doc = message.document
     if not doc:
-        await message.answer("⚠️ Отправьте .txt или .csv файл со списком сессий.")
+        await message.answer("⚠️ Отправьте .txt или .csv файл со списком сессий.", reply_markup=cancel_kb())
         return
     filename = (doc.file_name or "").lower()
     if not (
@@ -4539,7 +4541,7 @@ async def fsm_batch_import_file(
     max_size = 20 * 1024 * 1024 if filename.endswith(".zip") else 500_000
     if doc.file_size and doc.file_size > max_size:
         size_label = "20 МБ" if filename.endswith(".zip") else "500 КБ"
-        await message.answer(f"⚠️ Файл слишком большой. Максимум {size_label}.")
+        await message.answer(f"⚠️ Файл слишком большой. Максимум {size_label}.", reply_markup=cancel_kb())
         return
     try:
         file_info = await message.bot.get_file(doc.file_id)
@@ -4569,7 +4571,7 @@ async def fsm_batch_import_file(
                     and i.file_size <= _ZIP_SESSION_MAX_BYTES
                 ]
         except zipfile.BadZipFile:
-            await message.answer("❌ Повреждённый ZIP-файл.")
+            await message.answer("❌ Повреждённый ZIP-файл.", reply_markup=cancel_kb())
             return
         if not session_names:
             await message.answer(
@@ -4626,7 +4628,7 @@ async def fsm_batch_import_file(
         raw_text = raw_bytes.decode("utf-8", errors="ignore")
         sessions = [ln.strip() for ln in raw_text.splitlines() if ln.strip()]
         if not sessions:
-            await message.answer("⚠️ Файл пустой или не содержит сессий.")
+            await message.answer("⚠️ Файл пустой или не содержит сессий.", reply_markup=cancel_kb())
             return
         if len(sessions) > 50:
             sessions = sessions[:50]

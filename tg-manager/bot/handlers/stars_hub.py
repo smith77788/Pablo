@@ -466,7 +466,7 @@ async def cb_create_ctype(callback: CallbackQuery, state: FSMContext) -> None:
 async def fsm_waiting_price_a(message: Message, state: FSMContext) -> None:
     text = message.text.strip() if message.text else ""
     if not text.isdigit() or int(text) < 1:
-        await message.answer("⚠️ Введите целое положительное число Stars.")
+        await message.answer("⚠️ Введите целое положительное число Stars.", reply_markup=cancel_kb())
         return
     await state.update_data(price_a=int(text))
     await state.set_state(StarsExperimentFSM.waiting_price_b)
@@ -480,13 +480,13 @@ async def fsm_waiting_price_a(message: Message, state: FSMContext) -> None:
 async def fsm_waiting_price_b(message: Message, state: FSMContext, pool: asyncpg.Pool) -> None:
     text = message.text.strip() if message.text else ""
     if not text.isdigit() or int(text) < 1:
-        await message.answer("⚠️ Введите целое положительное число Stars.")
+        await message.answer("⚠️ Введите целое положительное число Stars.", reply_markup=cancel_kb())
         return
     data = await state.get_data()
     price_b = int(text)
     price_a = data["price_a"]
     if price_a == price_b:
-        await message.answer("⚠️ Цены A и B должны быть разными. Введите другую цену.")
+        await message.answer("⚠️ Цены A и B должны быть разными. Введите другую цену.", reply_markup=cancel_kb())
         return
 
     exp = await stars_optimizer.create_experiment(
