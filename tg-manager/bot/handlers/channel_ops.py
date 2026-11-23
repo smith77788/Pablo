@@ -34,7 +34,7 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 from bot.callbacks import ChanCb, ContactInvCb, BmCb, SubCb, AccCb, MassOpCb
 from bot.utils.picker_cap import cap_slice as _cap, cap_note_button as _cap_note
 from services import task_registry as _treg
-from bot.utils.op_helpers import safe_answer, terminal_kb
+from bot.utils.op_helpers import queued_op_kb, safe_answer, terminal_kb
 from bot.states import (
     BulkChanFSM,
     BulkCreateFSM,
@@ -1559,6 +1559,7 @@ async def fsm_bpchans_text(
         f"ID операции: <code>{op_id}</code>\n"
         "Прогресс: /ops",
         parse_mode="HTML",
+        reply_markup=queued_op_kb(op_id, back=ChanCb(action="menu")),
     )
 
 
@@ -4736,6 +4737,7 @@ async def fsm_bulk_post_text(
             f"📋 Операция <code>#{op_id}</code> · {total} аккаунтов\n"
             f"💡 Статус: /ops",
             parse_mode="HTML",
+            reply_markup=queued_op_kb(op_id, back=ChanCb(action="menu")),
         )
     else:
         # Single-account post (from cb_post_channel_chosen)
@@ -5182,6 +5184,7 @@ async def fsm_bulk_dm_text(
         f"ID операции: <code>{op_id}</code>\n"
         "Прогресс доступен в разделе /ops",
         parse_mode="HTML",
+        reply_markup=queued_op_kb(op_id, back=ChanCb(action="menu")),
     )
 
 

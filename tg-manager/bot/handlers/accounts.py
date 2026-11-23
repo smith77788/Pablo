@@ -42,7 +42,7 @@ from bot.keyboards import subscription_locked_markup
 from bot.utils.subscription import get_plan, locked_text
 from bot.utils import tariffs
 from bot.utils.event_status import mark_handled_error
-from bot.utils.op_helpers import safe_answer, safe_edit, terminal_kb
+from bot.utils.op_helpers import retry_kb, safe_answer, safe_edit, terminal_kb
 from bot.utils.picker_cap import cap_text, cap_text_append
 from config import TG_API_ID, TG_API_HASH
 from database import db
@@ -734,6 +734,7 @@ async def handle_phone(message: Message, pool: asyncpg.Pool, state: FSMContext) 
             await message.answer(
                 f"⏳ Слишком много запросов. Попробуйте через <b>{wait} сек</b>.",
                 parse_mode="HTML",
+                reply_markup=retry_kb(AccCb(action="add")),
             )
         elif "TG_API_ID" in err or "TG_API_HASH" in err:
             await state.clear()
@@ -742,6 +743,7 @@ async def handle_phone(message: Message, pool: asyncpg.Pool, state: FSMContext) 
                 "Обратитесь к администратору платформы — "
                 "необходимо задать переменные <code>TG_API_ID</code> и <code>TG_API_HASH</code>.",
                 parse_mode="HTML",
+                reply_markup=terminal_kb(),
             )
         else:
             await state.clear()
@@ -3649,6 +3651,7 @@ async def handle_import_string(
             f"❌ <b>Ошибка импорта</b>\n\n<code>{owner_error(exc)}</code>\n\n"
             "Проверьте строку сессии и попробуйте снова.",
             parse_mode="HTML",
+            reply_markup=retry_kb(AccCb(action="import_string"), back=AccCb(action="import_menu")),
         )
         return
     await _finalize_import(message, pool, state, session_str, info)
@@ -3689,6 +3692,7 @@ async def handle_import_pyrogram(
             f"❌ <b>Ошибка импорта</b>\n\n<code>{owner_error(exc)}</code>\n\n"
             "Проверьте JSON и попробуйте снова.",
             parse_mode="HTML",
+            reply_markup=retry_kb(AccCb(action="import_pyrogram"), back=AccCb(action="import_menu")),
         )
         return
     await _finalize_import(message, pool, state, session_str, info)
@@ -3730,12 +3734,12 @@ async def handle_import_tdata(
     doc = message.document
     if not doc:
         await state.clear()
-        await message.answer("⚠️ Отправьте ZIP-файл как документ.")
+        await message.answer("⚠️ Отправьте ZIP-файл как документ.", reply_markup=retry_kb(AccCb(action="import_tdata"), back=AccCb(action="import_menu")))
         return
 
     if doc.file_size and doc.file_size > 50 * 1024 * 1024:
         await state.clear()
-        await message.answer("❌ Файл слишком большой. Максимум 50 МБ.")
+        await message.answer("❌ Файл слишком большой. Максимум 50 МБ.", reply_markup=retry_kb(AccCb(action="import_tdata"), back=AccCb(action="import_menu")))
         return
 
     name = (doc.file_name or "").lower()
@@ -3777,6 +3781,7 @@ async def handle_import_tdata(
                 f"Telegram не смог передать файл: <code>{owner_error(exc)}</code>\n\n"
                 f"Убедитесь что ZIP-архив не превышает 50 МБ.",
                 parse_mode="HTML",
+                reply_markup=retry_kb(AccCb(action="import_tdata"), back=AccCb(action="import_menu")),
             )
             return
 
@@ -3791,6 +3796,7 @@ async def handle_import_tdata(
                     await msg.edit_text(
                         f"❌ Архив содержит {len(members)} файлов. Максимум {_MAX_FILES}.",
                         parse_mode="HTML",
+                        reply_markup=retry_kb(AccCb(action="import_tdata"), back=AccCb(action="import_menu")),
                     )
                     return
                 total_size = sum(i.file_size for i in members)
@@ -3800,13 +3806,14 @@ async def handle_import_tdata(
                         f"❌ Архив слишком большой ({total_size // 1024 // 1024} МБ). "
                         "Максимум 200 МБ в распакованном виде.",
                         parse_mode="HTML",
+                        reply_markup=retry_kb(AccCb(action="import_tdata"), back=AccCb(action="import_menu")),
                     )
                     return
                 for member in members:
                     fname = member.filename.replace("\\", "/")
                     if os.path.isabs(fname) or ".." in fname.split("/"):
                         await state.clear()
-                        await msg.edit_text("❌ Архив содержит подозрительные пути к файлам. Архив отклонён.")
+                        await msg.edit_text("❌ Архив содержит подозрительные пути к файлам. Архив отклонён.", reply_markup=retry_kb(AccCb(action="import_tdata"), back=AccCb(action="import_menu")))
                         return
                 # Распаковка до 200 МБ — в поток: на цикле событий это секунды
                 # простоя всего процесса.
@@ -3870,6 +3877,7 @@ async def handle_import_tdata(
             await msg.edit_text(
                 f"❌ <b>Ошибка конвертации tdata</b>\n\n<code>{owner_error(exc)}</code>",
                 parse_mode="HTML",
+                reply_markup=retry_kb(AccCb(action="import_tdata"), back=AccCb(action="import_menu")),
             )
             return
     finally:
@@ -3945,7 +3953,7 @@ async def handle_import_session_file(
 
     if doc.file_size and doc.file_size > 1_048_576:
         await state.clear()
-        await message.answer("❌ Файл слишком большой. Максимум 1 МБ.")
+        await message.answer("❌ Файл слишком большой. Максимум 1 МБ.", reply_markup=retry_kb(AccCb(action="import_session_file"), back=AccCb(action="import_menu")))
         return
 
     msg = await message.answer("⏳ Читаю .session файл...")
@@ -3958,7 +3966,8 @@ async def handle_import_session_file(
     except Exception as e:
         await state.clear()
         await msg.edit_text(
-            f"❌ Не удалось скачать файл: {owner_error(e)}", parse_mode="HTML"
+            f"❌ Не удалось скачать файл: {owner_error(e)}", parse_mode="HTML",
+            reply_markup=retry_kb(AccCb(action="import_session_file"), back=AccCb(action="import_menu")),
         )
         return
 
@@ -3972,6 +3981,7 @@ async def handle_import_session_file(
             f"<code>{owner_error(exc)}</code>\n\n"
             "Убедитесь что файл является валидным Telethon .session файлом.",
             parse_mode="HTML",
+            reply_markup=retry_kb(AccCb(action="import_session_file"), back=AccCb(action="import_menu")),
         )
         return
 

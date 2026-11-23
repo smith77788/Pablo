@@ -1694,7 +1694,7 @@ async def _show_bot_pick_customize(target: Message, state: FSMContext, pool: asy
     preset = get_preset_by_key(key)
     if not preset:
         await state.clear()
-        await target.answer("❌ Шаблон не найден.", parse_mode="HTML")
+        await target.answer("❌ Шаблон не найден.", parse_mode="HTML", reply_markup=terminal_kb())
         return
 
     tpl_name = preset["name"]

@@ -268,6 +268,25 @@ def retry_kb(retry_cb: object, *, retry_text: str = "🔄 Попробовать
     return kb.as_markup()
 
 
+def queued_op_kb(op_id: int, *, back: object | None = None):
+    """Клавиатура экрана «операция поставлена в очередь».
+
+    Раньше такие экраны заканчивались строкой «Прогресс: /ops» без единой
+    кнопки: чтобы увидеть свою операцию, надо было помнить команду и потом
+    искать её в списке. Первая кнопка открывает именно эту операцию.
+    """
+    from aiogram.utils.keyboard import InlineKeyboardBuilder
+    from bot.callbacks import BmCb
+
+    kb = InlineKeyboardBuilder()
+    kb.button(text="📋 Детали операции", callback_data=BmCb(action="op_detail", op_id=op_id))
+    if back is not None:
+        kb.button(text="◀️ Назад", callback_data=back)
+    kb.button(text="🏠 Главное меню", callback_data=BmCb(action="main"))
+    kb.adjust(1, 2)
+    return kb.as_markup()
+
+
 def cancel_kb(*, back: object | None = None):
     """Клавиатура под запросом ввода («Введите…», «Пришлите…»).
 
