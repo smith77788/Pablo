@@ -826,7 +826,7 @@ async def cb_resend_sms(callback: CallbackQuery, state: FSMContext) -> None:
         except Exception as exc2:
             await state.clear()
             await callback.message.answer(
-                f"❌ Не удалось выслать код: <code>{escape(str(exc2)[:200])}</code>",
+                f"❌ Не удалось выслать код: <code>{owner_error(exc2)}</code>",
                 parse_mode="HTML",
                 reply_markup=terminal_kb(),
             )
@@ -1097,7 +1097,7 @@ async def handle_qr_2fa(
         kb.button(text="❌ Отмена", callback_data=AccCb(action="cancel_qr"))
         kb.adjust(1)
         await message.answer(
-            f"❌ {escape(str(exc))}\n\nВведите пароль ещё раз:",
+            f"❌ {owner_error(exc)}\n\nВведите пароль ещё раз:",
             parse_mode="HTML",
             reply_markup=kb.as_markup(),
         )
@@ -1657,7 +1657,7 @@ async def handle_story_caption(
         )
     except Exception as exc:
         await message.answer(
-            f"❌ Ошибка публикации: <code>{escape(str(exc)[:200])}</code>",
+            f"❌ Ошибка публикации: <code>{owner_error(exc)}</code>",
             parse_mode="HTML",
             reply_markup=_back_to_acc_markup(acc_id or 0),
         )
@@ -2154,7 +2154,7 @@ async def cb_channels(
         # Причина уже написана по-русски и адресована владельцу —
         # показываем её как есть, а не технической подписью в <code>.
         await callback.message.edit_text(
-            f"⚠️ {escape(str(exc))}",
+            f"⚠️ {owner_error(exc)}",
             parse_mode="HTML",
             reply_markup=_acc_menu_markup(callback_data.acc_id),
         )
@@ -2256,7 +2256,7 @@ async def cb_post_choose_chat(
         # Причина уже написана по-русски и адресована владельцу —
         # показываем её как есть, а не технической подписью в <code>.
         await callback.message.edit_text(
-            f"⚠️ {escape(str(exc))}",
+            f"⚠️ {owner_error(exc)}",
             parse_mode="HTML",
             reply_markup=_acc_menu_markup(callback_data.acc_id),
         )
@@ -2465,7 +2465,7 @@ async def cb_remove_confirm(
         active_ops = assets.get("ops", [])
     except Exception as _e:
         await callback.message.edit_text(
-            f"❌ Ошибка при проверке операций: {escape(str(_e)[:200])}",
+            f"❌ Ошибка при проверке операций: {owner_error(_e)}",
             parse_mode="HTML", reply_markup=terminal_kb(),
         )
         return
@@ -2490,7 +2490,7 @@ async def cb_remove_confirm(
         await db.remove_tg_account(pool, acc_id, callback.from_user.id)
     except Exception as _e:
         await callback.message.edit_text(
-            f"❌ Ошибка при удалении аккаунта: {escape(str(_e)[:200])}",
+            f"❌ Ошибка при удалении аккаунта: {owner_error(_e)}",
             parse_mode="HTML", reply_markup=terminal_kb(),
         )
         return
@@ -2968,7 +2968,7 @@ async def cb_purge_expired_confirm(callback: CallbackQuery, pool: asyncpg.Pool) 
     except Exception as exc:
         mark_handled_error(f"purge_expired_confirm: {exc}")
         await callback.message.edit_text(
-            f"❌ <b>Ошибка при удалении:</b> <code>{escape(str(exc)[:200])}</code>",
+            f"❌ <b>Ошибка при удалении:</b> <code>{owner_error(exc)}</code>",
             parse_mode="HTML",
             reply_markup=InlineKeyboardBuilder()
             .button(text="◀️ Назад", callback_data=AccCb(action="menu"))
@@ -3286,7 +3286,7 @@ async def cb_dialogs(
         # Причина уже написана по-русски и адресована владельцу —
         # показываем её как есть, а не технической подписью в <code>.
         await callback.message.edit_text(
-            f"⚠️ {escape(str(exc))}",
+            f"⚠️ {owner_error(exc)}",
             parse_mode="HTML",
             reply_markup=_acc_menu_markup(callback_data.acc_id),
         )
@@ -3644,7 +3644,7 @@ async def handle_import_string(
     except Exception as exc:
         await state.clear()
         await msg.edit_text(
-            f"❌ <b>Ошибка импорта</b>\n\n<code>{escape(str(exc)[:300])}</code>\n\n"
+            f"❌ <b>Ошибка импорта</b>\n\n<code>{owner_error(exc)}</code>\n\n"
             "Проверьте строку сессии и попробуйте снова.",
             parse_mode="HTML",
         )
@@ -3684,7 +3684,7 @@ async def handle_import_pyrogram(
     except Exception as exc:
         await state.clear()
         await msg.edit_text(
-            f"❌ <b>Ошибка импорта</b>\n\n<code>{escape(str(exc)[:300])}</code>\n\n"
+            f"❌ <b>Ошибка импорта</b>\n\n<code>{owner_error(exc)}</code>\n\n"
             "Проверьте JSON и попробуйте снова.",
             parse_mode="HTML",
         )
@@ -3772,7 +3772,7 @@ async def handle_import_tdata(
             await state.clear()
             await msg.edit_text(
                 f"❌ <b>Ошибка загрузки файла</b>\n\n"
-                f"Telegram не смог передать файл: <code>{escape(str(exc)[:200])}</code>\n\n"
+                f"Telegram не смог передать файл: <code>{owner_error(exc)}</code>\n\n"
                 f"Убедитесь что ZIP-архив не превышает 50 МБ.",
                 parse_mode="HTML",
             )
@@ -3866,7 +3866,7 @@ async def handle_import_tdata(
         except Exception as exc:
             await state.clear()
             await msg.edit_text(
-                f"❌ <b>Ошибка конвертации tdata</b>\n\n<code>{escape(str(exc)[:300])}</code>",
+                f"❌ <b>Ошибка конвертации tdata</b>\n\n<code>{owner_error(exc)}</code>",
                 parse_mode="HTML",
             )
             return
@@ -3956,7 +3956,7 @@ async def handle_import_session_file(
     except Exception as e:
         await state.clear()
         await msg.edit_text(
-            f"❌ Не удалось скачать файл: {escape(str(e)[:200])}", parse_mode="HTML"
+            f"❌ Не удалось скачать файл: {owner_error(e)}", parse_mode="HTML"
         )
         return
 
@@ -3967,7 +3967,7 @@ async def handle_import_session_file(
         await state.clear()
         await msg.edit_text(
             f"❌ <b>Ошибка чтения .session файла</b>\n\n"
-            f"<code>{escape(str(exc)[:300])}</code>\n\n"
+            f"<code>{owner_error(exc)}</code>\n\n"
             "Убедитесь что файл является валидным Telethon .session файлом.",
             parse_mode="HTML",
         )

@@ -27,6 +27,8 @@ from bot.utils.event_status import mark_handled_error
 from bot.utils.op_helpers import safe_answer, terminal_kb
 
 log = logging.getLogger(__name__)
+from bot.utils.owner_error import owner_error  # noqa: E402
+
 router = Router()
 
 _STATUS_EMOJI = {
@@ -1345,9 +1347,8 @@ async def cb_dm_resume(
         )
     except Exception as exc:
         await safe_answer(callback)
-        import html as _h
         await callback.message.answer(
-            f"⚠️ Ошибка постановки в очередь: {_h.escape(str(exc)[:200])}",
+            f"⚠️ Ошибка постановки в очередь: {owner_error(exc)}",
             parse_mode="HTML",
             reply_markup=terminal_kb(),
         )

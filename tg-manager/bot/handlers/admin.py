@@ -1727,7 +1727,7 @@ async def _adm_users(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
     except Exception as e:
         mark_handled_error(f"adm_users: {e}")
         await callback.message.edit_text(
-            f"❌ <code>{e}</code>", parse_mode="HTML", reply_markup=_back_kb()
+            f"❌ <code>{owner_error(e)}</code>", parse_mode="HTML", reply_markup=_back_kb()
         )
         return
     total = total_row or 0
@@ -1898,7 +1898,7 @@ async def _adm_send_tokens_file(callback: CallbackQuery, pool: asyncpg.Pool) -> 
     except Exception as e:
         log_exc_swallow(log, "_adm_send_tokens_file fetch failed")
         await callback.message.answer(
-            f"❌ Ошибка получения токенов: <code>{_html.escape(str(e)[:200])}</code>",
+            f"❌ Ошибка получения токенов: <code>{owner_error(e)}</code>",
             parse_mode="HTML",
             reply_markup=terminal_kb(),
         )
@@ -1934,7 +1934,7 @@ async def _adm_send_users_csv(callback: CallbackQuery, pool: asyncpg.Pool) -> No
     except Exception as e:
         log_exc_swallow(log, "_adm_send_users_csv fetch failed")
         await callback.message.answer(
-            f"❌ Ошибка получения данных: <code>{_html.escape(str(e)[:200])}</code>",
+            f"❌ Ошибка получения данных: <code>{owner_error(e)}</code>",
             parse_mode="HTML",
             reply_markup=terminal_kb(),
         )
@@ -2025,7 +2025,7 @@ async def _adm_logs_csv(
     except Exception as exc:
         mark_handled_error(f"adm_logs_csv: {exc}")
         await callback.message.answer(
-            f"❌ Ошибка формирования CSV: <code>{_html.escape(str(exc)[:200])}</code>",
+            f"❌ Ошибка формирования CSV: <code>{owner_error(exc)}</code>",
             parse_mode="HTML",
             reply_markup=terminal_kb(),
         )
@@ -2504,7 +2504,7 @@ async def handle_admin_message(
             except Exception as e:
                 log.warning("block execute failed: %s", e)
                 await message.answer(
-                    f"❌ Ошибка БД: <code>{_html.escape(str(e)[:200])}</code>",
+                    f"❌ Ошибка БД: <code>{owner_error(e)}</code>",
                     parse_mode="HTML",
                     reply_markup=_admin_main_kb(),
                 )
@@ -2534,7 +2534,7 @@ async def handle_admin_message(
             except Exception as e:
                 log.warning("unblock execute failed: %s", e)
                 await message.answer(
-                    f"❌ Ошибка БД: <code>{_html.escape(str(e)[:200])}</code>",
+                    f"❌ Ошибка БД: <code>{owner_error(e)}</code>",
                     parse_mode="HTML",
                     reply_markup=_admin_main_kb(),
                 )
@@ -2573,7 +2573,7 @@ async def handle_admin_message(
             except Exception as e:
                 log.warning("delete_user fetch failed: %s", e)
                 await message.answer(
-                    f"❌ Ошибка БД: <code>{_html.escape(str(e)[:200])}</code>",
+                    f"❌ Ошибка БД: <code>{owner_error(e)}</code>",
                     parse_mode="HTML",
                     reply_markup=_admin_main_kb(),
                 )
@@ -2612,7 +2612,7 @@ async def handle_admin_message(
             except Exception as e:
                 log.warning("grant execute failed: %s", e)
                 await message.answer(
-                    f"❌ Ошибка БД: <code>{_html.escape(str(e)[:200])}</code>",
+                    f"❌ Ошибка БД: <code>{owner_error(e)}</code>",
                     parse_mode="HTML",
                     reply_markup=_admin_main_kb(),
                 )
@@ -2818,7 +2818,7 @@ async def handle_admin_message(
             except Exception as e:
                 log.warning("strike_grant execute failed: %s", e)
                 await message.answer(
-                    f"❌ Ошибка БД: <code>{_html.escape(str(e)[:200])}</code>",
+                    f"❌ Ошибка БД: <code>{owner_error(e)}</code>",
                     parse_mode="HTML",
                     reply_markup=_admin_main_kb(),
                 )
@@ -3197,7 +3197,7 @@ async def _adm_env_delete(
     except Exception as e:
         log.warning('handler error in _adm_env_delete: %s', e)
         await callback.message.edit_text(
-            f"❌ Ошибка удаления {_html.escape(key)}: {_html.escape(str(e))}",
+            f"❌ Ошибка удаления {_html.escape(key)}: {owner_error(e)}",
             parse_mode="HTML",
             reply_markup=_back_kb(),
         )
@@ -3264,7 +3264,7 @@ async def _adm_platform_ops(callback: CallbackQuery, pool: asyncpg.Pool) -> None
     except Exception as e:
         log.warning('handler error in _adm_platform_ops: %s', e)
         await callback.message.edit_text(
-            f"❌ Ошибка получения данных: {e}",
+            f"❌ Ошибка получения данных: {owner_error(e)}",
             parse_mode="HTML",
             reply_markup=_back_kb(),
         )
@@ -3404,7 +3404,7 @@ async def _adm_error_reports(
     except Exception as e:
         log_exc_swallow(log, "Ошибка загрузки error_reports")
         await callback.message.edit_text(
-            f"❌ Не удалось загрузить отчёты: <code>{e}</code>",
+            f"❌ Не удалось загрузить отчёты: <code>{owner_error(e)}</code>",
             parse_mode="HTML",
             reply_markup=_back_kb(),
         )
@@ -3486,7 +3486,7 @@ async def _adm_show_error_report(
     except Exception as e:
         log_exc_swallow(log, f"Ошибка загрузки отчёта #{report_id}")
         await callback.message.edit_text(
-            f"❌ Ошибка загрузки отчёта #{report_id}: {_html.escape(str(e))}",
+            f"❌ Ошибка загрузки отчёта #{report_id}: {owner_error(e)}",
             parse_mode="HTML",
             reply_markup=_back_kb_err.as_markup(),
         )
@@ -3566,7 +3566,7 @@ async def _adm_set_error_report_status(
     except Exception as e:
         log_exc_swallow(log, f"Ошибка обновления статуса отчёта #{report_id}")
         await callback.message.edit_text(
-            f"❌ Ошибка при обновлении статуса: {_html.escape(str(e))}",
+            f"❌ Ошибка при обновлении статуса: {owner_error(e)}",
             parse_mode="HTML",
             reply_markup=_back_kb_err.as_markup(),
         )

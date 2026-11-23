@@ -22,6 +22,8 @@ from database.db import fetch_bots
 from services import operation_bus
 from bot.utils.op_helpers import safe_answer, terminal_kb
 
+from bot.utils.owner_error import owner_error  # noqa: E402
+
 router = Router()
 log = logging.getLogger(__name__)
 
@@ -59,7 +61,7 @@ async def cb_net_bc_cluster(
     except Exception as _e:
         log.exception("cb_net_bc_cluster: pool.fetch failed")
         await callback.message.edit_text(
-            f"⚠️ Ошибка загрузки ботов кластера.\n<code>{_html.escape(str(_e)[:200])}</code>",
+            f"⚠️ Ошибка загрузки ботов кластера.\n<code>{owner_error(_e)}</code>",
             parse_mode="HTML",
             reply_markup=terminal_kb(),
         )
@@ -553,7 +555,7 @@ async def cb_net_bc_confirm(
         kb = InlineKeyboardBuilder()
         kb.button(text="◀️ Назад", callback_data=NetBcCb(action="choose_target"))
         await callback.message.edit_text(
-            f"❌ <b>Ошибка постановки в очередь</b>\n\n<code>{_html.escape(str(exc))}</code>",
+            f"❌ <b>Ошибка постановки в очередь</b>\n\n<code>{owner_error(exc)}</code>",
             parse_mode="HTML",
             reply_markup=kb.as_markup(),
         )

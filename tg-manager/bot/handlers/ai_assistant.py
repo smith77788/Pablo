@@ -37,6 +37,8 @@ _MEMORY_TAG_RE = re.compile(
     re.DOTALL,
 )
 
+from bot.utils.owner_error import owner_error  # noqa: E402
+
 router = Router()
 log = logging.getLogger(__name__)
 
@@ -1397,7 +1399,7 @@ async def msg_ai_document(
     except ValueError as exc:
         await message.answer(
             "📎 <b>Не могу прочитать этот файл</b>\n\n"
-            f"{escape(str(exc))}\n\n"
+            f"{owner_error(exc)}\n\n"
             f"Можно отправить: <code>{_SUPPORTED_FILE_HINT}</code>",
             parse_mode="HTML",
         )

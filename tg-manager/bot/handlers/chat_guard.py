@@ -714,7 +714,7 @@ async def cmd_warn(message: Message, command: CommandObject, bot: Bot,
             await message.reply(f"🔇 {name}: {max_warns}/{max_warns} → мьют {minutes} мин.")
     except Exception as e:
         await message.reply(f"⚠️ Лимит предупреждений достигнут, но наказание не "
-                            f"применилось: {html.escape(str(e)[:100])}")
+                            f"применилось: {owner_error(e)}")
 
 
 @router.message(Command("unwarn"), F.chat.type.in_(_GROUP))

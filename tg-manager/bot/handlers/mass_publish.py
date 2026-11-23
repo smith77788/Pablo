@@ -41,6 +41,8 @@ from bot.utils.template_validator import (
 )
 
 log = logging.getLogger(__name__)
+from bot.utils.owner_error import owner_error  # noqa: E402
+
 router = Router()
 
 _STARTER = "starter"
@@ -559,7 +561,7 @@ async def cb_mpub_confirm_send(
             "mass_publish submit error user=%s: %s", callback.from_user.id, exc
         )
         await callback.message.edit_text(
-            f"⚠️ Ошибка постановки в очередь: {html.escape(str(exc)[:200])}",
+            f"⚠️ Ошибка постановки в очередь: {owner_error(exc)}",
             parse_mode="HTML",
             reply_markup=_back_menu_kb().as_markup(),
         )
@@ -629,7 +631,7 @@ async def msg_mpub_schedule_datetime(
     except Exception as exc:
         log.exception("mass_publish schedule error user=%s: %s", message.from_user.id, exc)
         await message.answer(
-            f"⚠️ Ошибка планирования: {html.escape(str(exc)[:200])}",
+            f"⚠️ Ошибка планирования: {owner_error(exc)}",
             parse_mode="HTML", reply_markup=_back_menu_kb().as_markup(),
         )
 
@@ -729,7 +731,7 @@ async def cb_mpub_retry_failed(
     except Exception as exc:
         log.exception("mass_publish retry submit error: %s", exc)
         await callback.message.edit_text(
-            f"⚠️ Не удалось поставить повтор в очередь: {html.escape(str(exc)[:200])}",
+            f"⚠️ Не удалось поставить повтор в очередь: {owner_error(exc)}",
             parse_mode="HTML",
             reply_markup=_back_menu_kb().as_markup(),
         )

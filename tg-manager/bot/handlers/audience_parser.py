@@ -367,7 +367,7 @@ async def _start_parse(
         return
     except ImmunityBlockedError as exc:
         await msg_target.answer(
-            f"🌩 <b>Разбор временно приостановлен</b>\n\n{html.escape(str(exc))}",
+            f"🌩 <b>Разбор временно приостановлен</b>\n\n{owner_error(exc)}",
             parse_mode="HTML",
             reply_markup=_back_kb().as_markup(),
         )

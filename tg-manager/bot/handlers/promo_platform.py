@@ -45,6 +45,8 @@ from services.logger import log_exc_swallow
 from bot.utils.op_helpers import safe_answer
 
 log = logging.getLogger(__name__)
+from bot.utils.owner_error import owner_error  # noqa: E402
+
 router = Router()
 
 _PRO = "pro"
@@ -1052,7 +1054,7 @@ async def cb_bot_parse(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
         )
     except Exception as exc:
         await callback.message.answer(
-            f"⚠️ Ошибка получения аккаунтов.\n<code>{html.escape(str(exc)[:200])}</code>",
+            f"⚠️ Ошибка получения аккаунтов.\n<code>{owner_error(exc)}</code>",
             reply_markup=terminal_kb(),
         )
         return
@@ -1194,7 +1196,7 @@ async def fsm_transfer_new_owner(message: Message, state: FSMContext, pool: asyn
         acc = await select_account(pool, message.from_user.id, action_type="read")
     except Exception as exc:
         await message.answer(
-            f"⚠️ Нет доступных аккаунтов.\n<code>{html.escape(str(exc)[:200])}</code>",
+            f"⚠️ Нет доступных аккаунтов.\n<code>{owner_error(exc)}</code>",
             reply_markup=terminal_kb(),
         )
         return
@@ -1220,7 +1222,7 @@ async def fsm_transfer_new_owner(message: Message, state: FSMContext, pool: asyn
         )
     except Exception as exc:
         await message.answer(
-            f"⚠️ Ошибка BotFather:\n<code>{html.escape(str(exc)[:300])}</code>",
+            f"⚠️ Ошибка BotFather:\n<code>{owner_error(exc)}</code>",
             reply_markup=terminal_kb(),
         )
         return

@@ -31,6 +31,8 @@ from bot.callbacks import AdIntelCb, BmCb
 from bot.utils.op_helpers import safe_answer
 
 log = logging.getLogger(__name__)
+from bot.utils.owner_error import owner_error  # noqa: E402
+
 router = Router(name="ad_intelligence_hub")
 
 _PAGE_SIZE = 10
@@ -475,7 +477,7 @@ async def msg_adi_budget_input(
     except Exception as exc:
         log.exception("msg_adi_budget_input: get_recommendations error")
         await message.answer(
-            f"❌ Ошибка при получении рекомендаций: <code>{html.escape(str(exc)[:200])}</code>",
+            f"❌ Ошибка при получении рекомендаций: <code>{owner_error(exc)}</code>",
             parse_mode="HTML",
             reply_markup=_back_kb().as_markup(),
         )
@@ -631,7 +633,7 @@ async def msg_adi_niche_input(
     except Exception as exc:
         log.exception("msg_adi_niche_input: get_market_report error")
         await message.answer(
-            f"❌ Ошибка при получении отчёта: <code>{html.escape(str(exc)[:200])}</code>",
+            f"❌ Ошибка при получении отчёта: <code>{owner_error(exc)}</code>",
             parse_mode="HTML",
             reply_markup=_back_kb().as_markup(),
         )
