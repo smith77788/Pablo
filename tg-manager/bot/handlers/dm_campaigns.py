@@ -30,6 +30,7 @@ log = logging.getLogger(__name__)
 from bot.utils.owner_error import owner_error  # noqa: E402
 
 from bot.utils.fmt import num_ru  # noqa: E402
+from bot.utils.op_helpers import ask_to_confirm
 
 router = Router()
 
@@ -126,7 +127,7 @@ async def cb_dm_menu(
             )
         else:
             kb.button(
-                text="🗑", callback_data=DmCb(action="delete", campaign_id=c["id"])
+                text="🗑", callback_data=DmCb(action="delete_ask", campaign_id=c["id"])
             )
 
     kb.button(text="◀️ Назад", callback_data=BmCb(action="comms"))
@@ -1267,7 +1268,7 @@ async def cb_dm_detail(
         )
     if status in ("done", "failed"):
         kb.button(
-            text="🗑️ Удалить", callback_data=DmCb(action="delete", campaign_id=c["id"])
+            text="🗑️ Удалить", callback_data=DmCb(action="delete_ask", campaign_id=c["id"])
         )
     kb.button(text="◀️ Назад", callback_data=DmCb(action="menu"))
     kb.adjust(1)
@@ -1376,3 +1377,14 @@ async def cb_dm_delete(
     except Exception as e:
         log.warning("cb_dm_delete campaign: %s", e)
     await cb_dm_menu(callback, pool, state)
+
+
+@router.callback_query(DmCb.filter(F.action == "delete_ask"))
+async def cb_dmcb_delete_ask(callback: CallbackQuery, callback_data: DmCb) -> None:
+    await ask_to_confirm(
+        callback,
+        question="🗑 <b>Удалить кампанию?</b>\n\nВместе с ней уйдёт журнал отправок.",
+        yes=callback_data.model_copy(update={"action": "delete"}),
+        no=DmCb(action="detail", campaign_id=callback_data.campaign_id),
+        yes_text="🗑 Да, удалить",
+    )

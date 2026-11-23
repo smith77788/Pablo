@@ -58,6 +58,7 @@ from bot.utils.op_names import op_name as _op_name  # noqa: E402
 
 from bot.utils.op_names import status_label as _ost_label  # noqa: E402
 from bot.utils.op_helpers import no_accounts_kb
+from bot.utils.op_helpers import ask_to_confirm
 
 
 # ── Timing options ──────────────────────────────────────────────────────────
@@ -1361,7 +1362,7 @@ async def cb_queue(
     if has_completed:
         kb.button(
             text="🗑 Очистить завершённые",
-            callback_data=MassOpCb(action="clear_completed"),
+            callback_data=MassOpCb(action="clear_completed_ask"),
         )
     kb.button(text="🔄 Обновить", callback_data=MassOpCb(action="queue", op_type=status_filter_key, page=page))
     kb.button(text="◀️ Назад", callback_data=MassOpCb(action="menu"))
@@ -2969,4 +2970,15 @@ async def cb_ob_confirm(
         f"Воркер запустит операцию автоматически.\n"
         f"Следить за прогрессом: <b>Очередь операций</b>",
         reply_markup=kb.as_markup(),
+    )
+
+
+@router.callback_query(MassOpCb.filter(F.action == "clear_completed_ask"))
+async def cb_massopcb_clear_completed_ask(callback: CallbackQuery, callback_data: MassOpCb) -> None:
+    await ask_to_confirm(
+        callback,
+        question="🗑 <b>Очистить завершённые операции?</b>\n\nИз очереди уйдут записи об уже законченных операциях.",
+        yes=callback_data.model_copy(update={"action": "clear_completed"}),
+        no=MassOpCb(action="queue"),
+        yes_text="🗑 Да, очистить",
     )

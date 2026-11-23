@@ -33,6 +33,7 @@ from bot.utils.op_helpers import safe_answer, terminal_kb
 
 log = logging.getLogger(__name__)
 from bot.utils.owner_error import owner_error  # noqa: E402
+from bot.utils.op_helpers import ask_to_confirm
 
 router = Router()
 
@@ -1915,7 +1916,7 @@ async def cb_eco_dna_view(
     if is_mine:
         kb.button(
             text="🗑 Удалить ДНК",
-            callback_data=EcoCb(action="dna_delete", eco_id=eco_id, page=dna_id),
+            callback_data=EcoCb(action="dna_delete_ask", eco_id=eco_id, page=dna_id),
         )
     kb.button(
         text="◀️ Назад к ДНК", callback_data=EcoCb(action="dna_menu", eco_id=eco_id)
@@ -2186,3 +2187,14 @@ async def cb_ecopick_add(
         )
     except Exception as e:
         log.warning('handler error in cb_ecopick_add: %s', e)
+
+
+@router.callback_query(EcoCb.filter(F.action == "dna_delete_ask"))
+async def cb_ecocb_dna_delete_ask(callback: CallbackQuery, callback_data: EcoCb) -> None:
+    await ask_to_confirm(
+        callback,
+        question="🗑 <b>Удалить ДНК-шаблон?</b>",
+        yes=callback_data.model_copy(update={"action": "dna_delete"}),
+        no=EcoCb(action="dna_menu", eco_id=callback_data.eco_id),
+        yes_text="🗑 Да, удалить",
+    )
