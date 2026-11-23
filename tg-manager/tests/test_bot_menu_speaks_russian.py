@@ -314,3 +314,33 @@ def test_english_label_probe_sees_known_examples():
     for s in ('f"🔴 {name} — trust {t:.2f}"', '"⚙️ Открыть Mass Ops"', '"или invite link"'):
         assert _ENGLISH_LABELS.search(s), s
     assert not _ENGLISH_LABELS.search('"доверие {trust_score:.2f}"')
+
+
+_SERVICE_LABELS = re.compile(
+    r"(?<![\w@/_.-])(trust|Trust score|Mass Ops|Health Dashboard|failure rate|"
+    r"success rate|retention|Bulk Join|bio)(?![\w_-])"
+)
+
+
+def test_no_english_labels_in_service_texts_for_the_owner():
+    """Советы и алерты, которые сервисы присылают владельцу («Trust score
+    ниже 0.3», «Высокий failure rate», «Откройте Health Dashboard»). Строки
+    журнала (log.*) владельцу не показываются — их не проверяем. Тексты
+    ошибок вида «peer flood» сюда не входят: по ним классифицируют отказ."""
+    services = ROOT / "services"
+    bad = []
+    for p in sorted(services.rglob("*.py")):
+        src = p.read_text(encoding="utf-8")
+        lines = src.split("\n")
+        for ln, part in _russian_literal_parts(src):
+            if re.search(r"log\.|log_exc|logger|exc_swallow|UPDATE |--", lines[ln - 1] + part):
+                continue
+            if _SERVICE_LABELS.search(re.sub(r"<[^>]*>", "", part)):
+                bad.append(f"{p.relative_to(services)}:{ln}: {part.strip()[:90]}")
+    assert not bad, "английские подписи в текстах сервисов:\n" + "\n".join(bad)
+
+
+def test_service_label_probe_sees_known_examples():
+    for s in ('f"Trust score ниже {x}"', '"Высокий failure rate:"', '"Смена bio"'):
+        assert _SERVICE_LABELS.search(s), s
+    assert not _SERVICE_LABELS.search('f"доверие {trust_score:.2f}"')

@@ -108,10 +108,10 @@ async def _check_low_trust(pool: asyncpg.Pool, bot: Bot) -> None:
             "restriction",
             f"🔴 <b>Критически низкий trust_score</b>\n\n"
             f"Аккаунты: <b>{', '.join(names[:5])}</b>\n"
-            f"Trust score ниже {_LOW_TRUST_THRESHOLD:.1f} — высокий риск бана.\n\n"
+            f"Доверие ниже {_LOW_TRUST_THRESHOLD:.1f} — высокий риск бана.\n\n"
             f"Рекомендации:\n"
             f"• Не запускайте операции через эти аккаунты 48ч\n"
-            f"• Откройте Health Dashboard → 💡 Рекомендации\n"
+            f"• Откройте «❤️ Здоровье акк.» → 💡 Рекомендации\n"
             f"• Проверьте аккаунты вручную в Telegram",
             # Свой ключ: тип "restriction" у владельца общий с деактивацией
             # аккаунта и с предупреждениями теневого бана — без ключа доходило
@@ -128,7 +128,7 @@ async def _check_low_trust(pool: asyncpg.Pool, bot: Bot) -> None:
             )
         except Exception:
             log_exc_swallow(
-                log, "сбой алерта low trust — не удалось обновить last_low_trust_alert"
+                log, "сбой алерта о низком доверии — не удалось обновить last_low_trust_alert"
             )
         log.info(
             "account_monitor: low trust alert for owner=%s (%d accounts)",

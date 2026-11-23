@@ -496,7 +496,7 @@ async def _detect_trust_collapse(pool: asyncpg.Pool, owner_id: int) -> list[Anom
                     anomaly_type="trust_collapse",
                     detector="account",
                     severity="critical" if avg_trust < 0.4 else "warning",
-                    title=f"Коллапс trust score: -{dev}% за 2ч",
+                    title=f"Обвал доверия: -{dev}% за 2ч",
                     description=(
                         f"Средний trust_score системы упал с {old_trust:.2f} до {avg_trust:.2f} "
                         f"за последние 2 часа (падение {dev}%). "
