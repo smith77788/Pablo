@@ -4,7 +4,7 @@ Account Warmup UI — управление сессиями и планами р
 Сессия прогрева: несколько рабочих аккаунтов → конкретные цели
 (каналы/боты/группы из инфраструктуры или по username/ссылке).
 
-Режимы: Gentle (21 дн) / Standard (14 дн) / Aggressive (7 дн)
+Режимы: Мягкий (21 дн) / Обычный (14 дн) / Интенсивный (10 дн)
 """
 
 from __future__ import annotations
@@ -29,14 +29,23 @@ from bot.utils.event_status import mark_handled_error
 from services.logger import log_exc_swallow
 from bot.utils.op_helpers import safe_answer, terminal_kb
 
+from bot.utils.op_names import acc_status_short as _acc_short, run_status as _run_status  # noqa: E402
+
 log = logging.getLogger(__name__)
 router = Router()
 
 _PLAN_LABELS = {
-    "gentle": "🌱 Gentle (21 день, до 5 действий/день)",
-    "standard": "🌿 Standard (14 дней, до 10 действий/день)",
-    "aggressive": "🔥 Intensive (10 дней, до 12 действий/день)",
+    "gentle": "🌱 Мягкий (21 день, до 5 действий/день)",
+    "standard": "🌿 Обычный (14 дней, до 10 действий/день)",
+    "aggressive": "🔥 Интенсивный (10 дней, до 12 действий/день)",
 }
+
+
+def _plan_name(plan_type) -> str:
+    """Режим прогрева по-русски: в базе лежит ключ (gentle/standard/aggressive)."""
+    code = str(plan_type or "")
+    full = _PLAN_LABELS.get(code)
+    return full.split(" (")[0] if full else (code or "—")
 
 
 def _back_kb() -> InlineKeyboardBuilder:
@@ -129,9 +138,9 @@ async def cb_warmup_menu(callback: CallbackQuery, pool: asyncpg.Pool, state: FSM
         "📊 Голосует в опросах\n\n"
         f"Активных сессий: <b>{active_sessions}</b> · Одиночных планов: <b>{active_plans}</b>\n\n"
         "<b>Режимы:</b>\n"
-        "🌱 Gentle — 21 день, 5 действий/день\n"
-        "🌿 Standard — 14 дней, 10 действий/день\n"
-        "🔥 Aggressive — 7 дней, 20 действий/день",
+        "🌱 Мягкий — 21 день, до 5 действий/день\n"
+        "🌿 Обычный — 14 дней, до 10 действий/день\n"
+        "🔥 Интенсивный — 10 дней, до 12 действий/день",
         parse_mode="HTML",
         reply_markup=kb.as_markup(),
     )
@@ -185,7 +194,7 @@ async def cb_warmup_create_list(callback: CallbackQuery, pool: asyncpg.Pool) -> 
         icon = "✅" if acc["has_plan"] else "⚪"
         label = acc.get("first_name") or acc["phone"]
         kb.button(
-            text=f"{icon} {html.escape(label)} [{acc['acc_status']}]",
+            text=f"{icon} {html.escape(label)} {_acc_short(acc['acc_status'])}",
             callback_data=WarmupCb(action="select_plan", account_id=acc["id"]),
         )
     _cap_note(kb, accounts, _shown)
@@ -388,7 +397,7 @@ async def cb_warmup_start(
     await callback.message.edit_text(
         f"✅ <b>План разогрева создан!</b>\n\n"
         f"Аккаунт: <b>{html.escape(label)}</b>\n"
-        f"Режим: <b>🌿 Standard (14 дней, до 10 действий/день)</b>\n"
+        f"Режим: <b>🌿 Обычный (14 дней, до 10 действий/день)</b>\n"
         f"ID плана: <code>{plan_id}</code>\n\n"
         "Первый сеанс начнётся в течение часа — не в локальную ночь аккаунта. "
         "Ход прогрева — в «📋 Активные планы».",
@@ -589,7 +598,7 @@ async def cb_warmup_active_plans(callback: CallbackQuery, pool: asyncpg.Pool) ->
         lines.append(
             f"{plan_status_emoji} <b>{html.escape(label)}</b>\n"
             f"  [{bar}] День {current_day}/{target_days} ({pct}%)\n"
-            f"  Режим: <b>{plan['plan_type']}</b> | {plan['daily_actions']} действий/день\n"
+            f"  Режим: <b>{_plan_name(plan['plan_type'])}</b> | {plan['daily_actions']} действий/день\n"
             f"  {eta_str}\n"
             f"  {next_str}"
             f"{last_str}"
@@ -824,7 +833,7 @@ async def cb_warmup_plan_log(
     if plan_row:
         lines.append(
             f"День {plan_row['current_day']}/{plan_row['target_days']} | "
-            f"{plan_row['plan_type']} | {plan_row['daily_actions']} действий/день\n"
+            f"{_plan_name(plan_row['plan_type'])} | {plan_row['daily_actions']} действий/день\n"
         )
 
     if not rows:
@@ -880,16 +889,16 @@ async def cb_warmup_plan_log(
 # daily — это ПОТОЛОК действий на финальных днях; реальный объём растёт по рампе
 # (низкий→средний→высокий), поэтому свежий аккаунт не получает максимум сразу.
 _SESSION_PLAN_CONFIG = {
-    "gentle": {"days": 21, "daily": 5, "label": "🌱 Gentle (21 дн, до 5 действий/день)"},
+    "gentle": {"days": 21, "daily": 5, "label": "🌱 Мягкий (21 дн, до 5 действий/день)"},
     "standard": {
         "days": 14,
         "daily": 10,
-        "label": "🌿 Standard (14 дн, до 10 действий/день)",
+        "label": "🌿 Обычный (14 дн, до 10 действий/день)",
     },
     "aggressive": {
         "days": 10,
         "daily": 12,
-        "label": "🔥 Intensive (10 дн, до 12 действий/день)",
+        "label": "🔥 Интенсивный (10 дн, до 12 действий/день)",
     },
 }
 
@@ -1447,11 +1456,11 @@ async def cb_wu_session_list(callback: CallbackQuery, pool: asyncpg.Pool) -> Non
         lines.append(
             f"{status_icon} <b>Сессия #{s['id']}</b>\n"
             f"  [{bar}] День {day}/{days} ({pct}%)\n"
-            f"  {n_acc} акк. → {n_tgt} цел. · {s['plan_type']} · {s['daily_actions']}/день\n"
+            f"  {n_acc} акк. → {n_tgt} цел. · {_plan_name(s['plan_type'])} · {s['daily_actions']}/день\n"
             f"  {timing}"
         )
         kb.button(
-            text=f"📊 #{s['id']} {s['plan_type']}",
+            text=f"📊 #{s['id']} {_plan_name(s['plan_type'])}",
             callback_data=WarmupCb(action="sess_detail", session_id=s["id"]),
         )
 
@@ -1511,7 +1520,7 @@ async def cb_wu_sess_detail(
 
     lines = [
         f"📊 <b>Сессия #{sess_id}</b>\n",
-        f"Статус: <b>{s['status']}</b> · Режим: <b>{s['plan_type']}</b>",
+        f"Статус: <b>{_run_status(s['status'])}</b> · Режим: <b>{_plan_name(s['plan_type'])}</b>",
         f"День: <b>{day}/{days}</b> · {n_acc} акк. → {n_tgt} цел.",
         f"Действий/день: <b>{s['daily_actions']}</b>\n",
     ]
@@ -1580,7 +1589,7 @@ async def cb_wu_sess_run(
     task_registry.register(
         callback.from_user.id,
         "warmup_session",
-        f"Прогрев сессии #{sess_id} ({s['plan_type']})",
+        f"Прогрев сессии #{sess_id} ({_plan_name(s['plan_type'])})",
         task,
     )
 
@@ -2122,7 +2131,7 @@ async def cb_ract_detail(
     lines = [
         f"📡 <b>Сессия активности #{sess_id}</b>\n",
         f"Профиль: <b>{profile_label}</b>",
-        f"Статус: <b>{s['status']}</b> · День: <b>{day}/{days}</b>",
+        f"Статус: <b>{_run_status(s['status'])}</b> · День: <b>{day}/{days}</b>",
         f"Аккаунтов: <b>{len(s['account_ids'] or [])}</b> · Действий/день: <b>{s['daily_actions']}</b>\n",
     ]
 

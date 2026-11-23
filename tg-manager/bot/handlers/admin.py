@@ -1458,7 +1458,7 @@ def _provider_status_line(name: str, key_name: str, model_name: str) -> str:
     key_ok = bool(os.getenv(key_name))
     model = os.getenv(model_name, "auto")
     status = "✅" if key_ok else "❌"
-    return f"{status} <b>{name}</b> · model: <code>{_html.escape(model)}</code>"
+    return f"{status} <b>{name}</b> · модель: <code>{'авто' if model == 'auto' else _html.escape(model)}</code>"
 
 
 async def _adm_section_users(callback: CallbackQuery, pool: asyncpg.Pool) -> None:

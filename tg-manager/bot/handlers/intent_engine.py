@@ -38,6 +38,7 @@ from services.intent_planner import (
 )
 from services.logger import log_exc_swallow
 from bot.utils.op_helpers import safe_answer
+from bot.utils.op_names import run_status as _run_status  # noqa: E402
 
 log = logging.getLogger(__name__)
 router = Router(name="intent_engine")
@@ -828,7 +829,7 @@ async def cb_intent_history(
     lines = ["📜 <b>История целей</b>\n"]
     for row in intents[:5]:
         ts = row["created_at"].strftime("%d.%m %H:%M") if row.get("created_at") else ""
-        lines.append(f"• {row['status']} — {str(row['description'])[:45]} <i>{ts}</i>")
+        lines.append(f"• {_run_status(row['status'])} — {str(row['description'])[:45]} <i>{ts}</i>")
     if callback.message:
         await callback.message.edit_text(
             "\n".join(lines), reply_markup=_history_kb(intents), parse_mode="HTML"

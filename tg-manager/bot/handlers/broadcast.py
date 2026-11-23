@@ -22,6 +22,8 @@ from database import db
 from services import broadcaster
 from bot.utils.op_helpers import safe_answer
 
+from bot.utils.op_names import run_status as _run_status  # noqa: E402
+
 router = Router()
 
 
@@ -441,7 +443,7 @@ async def cb_detail(
     )
     text = (
         f"📋 <b>Рассылка #{bc['id']}</b>\n\n"
-        f"Статус: {emoji} {bc['status']}{progress_bar}\n"
+        f"Статус: {emoji} {_run_status(bc['status'])}{progress_bar}\n"
         f"Создана: {bc['created_at'].strftime('%d.%m.%Y %H:%M')}\n"
         f"Завершена: {finished}\n\n"
         f"Отправлено: <b>{bc['sent_count']}</b> / {bc['total_users']} ({success_rate}%)\n"
