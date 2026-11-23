@@ -30,3 +30,15 @@ def test_form_does_not_ask_for_utc():
     around = SRC[i - 300:i + 300]
     assert "UTC+0" not in around and "(UTC)" not in around
     assert "new Date(dateVal);  // datetime-local — ЛОКАЛЬНОЕ время" in SRC
+
+
+def test_repeat_is_shown_in_list():
+    import json
+    import subprocess
+    js = _fn("schRepeatLabel") + "console.log(JSON.stringify([0,null,1440,10080,2880,120,45].map(schRepeatLabel)))"
+    out = subprocess.run(["node", "-e", js], capture_output=True, text=True, timeout=30)
+    assert out.returncode == 0, out.stderr
+    assert json.loads(out.stdout) == ["", "", "ежедневно", "еженедельно", "каждые 2 дн.", "каждые 2 ч", "каждые 45 мин"]
+    assert "schRepeatLabel(s.repeat_interval_min)" in _fn("loadSchedules")
+    srv = (Path(__file__).resolve().parents[1] / "services/mini_app_bots.py").read_text(encoding="utf-8")
+    assert "COALESCE(repeat_interval_min, 0) AS repeat_interval_min" in srv
