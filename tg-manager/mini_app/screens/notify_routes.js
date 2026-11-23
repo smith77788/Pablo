@@ -61,7 +61,7 @@ function _nrRenderList() {
   const rows = routes.map(r => {
     const bots = r.bot_ids == null ? 'все боты' : r.bot_ids.map(_nrBotName).join(', ');
     const events = (r.events || []).map(e => ev[e] || e).join(' · ');
-    return `<div class="li tap" onclick="nrOpen(${Number(r.id)})">
+    return `<div class="li tap" onclick="nrouteOpen(${Number(r.id)})">
       <div class="ava ava-purple">${r.enabled ? '📡' : '⏸'}</div>
       <div class="li-body">
         <div class="li-name">${esc(r.name || r.chat_title || 'Канал #' + r.chat_id)}</div>
@@ -73,11 +73,11 @@ function _nrRenderList() {
   _nrModal(`<div class="modal-title">📡 Каналы уведомлений</div>
     <div style="font-size:13px;color:var(--hint);line-height:1.45;margin-bottom:8px">Отдельный канал на каждую сеть проектов: выберите ботов и события — уведомления о них придут в этот канал.</div>
     ${routes.length ? `<div class="lst">${rows}</div>` : '<div style="font-size:14px;padding:10px 0;color:var(--hint)">Пока нет ни одного канала — уведомления приходят в личку.</div>'}
-    <button class="btn btn-p" style="width:100%;margin-top:10px" onclick="nrOpen(0)">➕ Новый канал уведомлений</button>
+    <button class="btn btn-p" style="width:100%;margin-top:10px" onclick="nrouteOpen(0)">➕ Новый канал уведомлений</button>
     ${_nrHowTo()}`);
 }
 
-function nrOpen(id) {
+function nrouteOpen(id) {
   const r = (_nrData?.routes || []).find(x => Number(x.id) === Number(id));
   _nrEdit = r ? JSON.parse(JSON.stringify(r)) : {
     id: null, name: '', chat_id: (_nrData?.chats || [])[0]?.chat_id || 0,
@@ -97,13 +97,13 @@ function _nrRenderEdit() {
   const botRows = [{bot_id: 0, title: 'Каналы и чаты, где админ главный бот'}].concat(d.bots || []).map(b => `
     <label style="display:flex;align-items:center;gap:10px;padding:7px 0;border-bottom:1px solid var(--sep);cursor:pointer;${all ? 'opacity:.5' : ''}">
       <input type="checkbox" ${all || sel.has(Number(b.bot_id)) ? 'checked' : ''} ${all ? 'disabled' : ''} style="width:18px;height:18px;accent-color:var(--accent)"
-        onchange="nrToggleBot(${Number(b.bot_id)}, this.checked)">
+        onchange="nrouteToggleBot(${Number(b.bot_id)}, this.checked)">
       <span style="font-size:14px">${esc(b.title)}</span></label>`).join('');
   const evRows = Object.entries(d.events || {}).map(([k, label]) => `
     <label style="display:flex;align-items:center;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--sep);cursor:pointer">
       <span style="font-size:14px">${esc(label)}</span>
       <input type="checkbox" ${(r.events || []).includes(k) ? 'checked' : ''} style="width:18px;height:18px;accent-color:var(--accent)"
-        onchange="nrToggleEvent('${escJs(k)}', this.checked)"></label>`).join('');
+        onchange="nrouteToggleEvent('${escJs(k)}', this.checked)"></label>`).join('');
   const field = 'width:100%;min-height:38px;background:var(--bg);color:var(--text);border:1px solid var(--border);border-radius:var(--radius);padding:6px 8px;font-size:14px;box-sizing:border-box';
   _nrModal(`<div class="modal-title">${r.id ? '✏️ Канал уведомлений' : '➕ Новый канал уведомлений'}</div>
     <div class="sec" style="margin:4px 0">Название сети</div>
@@ -114,7 +114,7 @@ function _nrRenderEdit() {
     <div class="sec" style="margin:10px 0 4px">Какие боты</div>
     <label style="display:flex;align-items:center;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--sep);cursor:pointer">
       <span style="font-size:14px;font-weight:600">Все боты (и новые тоже)</span>
-      <input type="checkbox" ${all ? 'checked' : ''} style="width:18px;height:18px;accent-color:var(--accent)" onchange="nrAllBots(this.checked)"></label>
+      <input type="checkbox" ${all ? 'checked' : ''} style="width:18px;height:18px;accent-color:var(--accent)" onchange="nrouteAllBots(this.checked)"></label>
     <div style="max-height:220px;overflow:auto">${botRows}</div>
     <div class="sec" style="margin:10px 0 4px">События</div>
     ${evRows}
@@ -126,31 +126,31 @@ function _nrRenderEdit() {
       <input type="checkbox" ${r.enabled ? 'checked' : ''} style="width:18px;height:18px;accent-color:var(--accent)" onchange="_nrEdit.enabled=this.checked"></label>
     <div id="nrErr" style="color:var(--red);font-size:13px;min-height:16px"></div>
     <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:6px">
-      <button class="btn btn-p" style="flex:1 1 100%" onclick="nrSave(this)">Сохранить</button>
-      ${r.id ? `<button class="btn btn-s" style="flex:1" onclick="nrTest(${Number(r.id)}, this)">🔔 Проверить</button>
-      <button class="btn btn-d" style="flex:1" onclick="nrDelete(${Number(r.id)})">🗑 Удалить</button>` : ''}
+      <button class="btn btn-p" style="flex:1 1 100%" onclick="nrouteSave(this)">Сохранить</button>
+      ${r.id ? `<button class="btn btn-s" style="flex:1" onclick="nrouteTest(${Number(r.id)}, this)">🔔 Проверить</button>
+      <button class="btn btn-d" style="flex:1" onclick="nrouteDelete(${Number(r.id)})">🗑 Удалить</button>` : ''}
       <button class="btn btn-s" style="flex:1 1 100%" onclick="_nrEdit=null;_nrRenderList()">← К списку</button>
     </div>`);
 }
 
-function nrAllBots(on) {
+function nrouteAllBots(on) {
   _nrEdit.bot_ids = on ? null : [];
   _nrRenderEdit();
 }
 
-function nrToggleBot(id, on) {
+function nrouteToggleBot(id, on) {
   const s = new Set((_nrEdit.bot_ids || []).map(Number));
   if (on) s.add(Number(id)); else s.delete(Number(id));
   _nrEdit.bot_ids = [...s];
 }
 
-function nrToggleEvent(k, on) {
+function nrouteToggleEvent(k, on) {
   const s = new Set(_nrEdit.events || []);
   if (on) s.add(k); else s.delete(k);
   _nrEdit.events = [...s];
 }
 
-async function nrSave(btn) {
+async function nrouteSave(btn) {
   const err = document.getElementById('nrErr');
   if (err) err.textContent = '';
   if (btn) { btn.disabled = true; btn.textContent = 'Сохраняю…'; }
@@ -165,7 +165,7 @@ async function nrSave(btn) {
   }
 }
 
-async function nrTest(id, btn) {
+async function nrouteTest(id, btn) {
   if (btn) btn.disabled = true;
   try {
     await api('/api/miniapp/notify_routes/' + Number(id) + '/test', {method: 'POST', body: '{}'});
@@ -176,7 +176,7 @@ async function nrTest(id, btn) {
   } finally { if (btn) btn.disabled = false; }
 }
 
-async function nrDelete(id) {
+async function nrouteDelete(id) {
   if (!await askConfirm('Удалить этот канал уведомлений? Сам канал в Telegram не трогаем — уведомления просто перестанут туда приходить.')) return;
   try {
     await api('/api/miniapp/notify_routes/' + Number(id), {method: 'DELETE'});

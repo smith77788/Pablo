@@ -297,6 +297,7 @@ PROCESS_LOCAL: dict[str, str] = {
 # Производное состояние: расхождение стоит лишней работы или устаревшего
 # показания на экране, но не корректности и не доступа.
 CACHE: dict[str, str] = {
+    "services/mini_app_notify_routes.py:_bot_username_cache": "@username главного бота для ссылки «добавить в канал»; одинаков во всех процессах",
     "services/mass_rollout.py:_settings_cache": (
         "ключи канарейки из platform_settings на 30 секунд; источник правды — "
         "база, расхождение между процессами не дольше TTL"),
