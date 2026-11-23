@@ -322,9 +322,14 @@ def _section_buttons(key: str, plan: str = "free") -> list[tuple[str, object]]:
     return []
 
 
-def _section_kb(key: str, plan: str = "free"):
+def _section_kb(key: str, plan: str = "free", live_buttons: list | None = None):
+    """`live_buttons` — то, что требует внимания прямо сейчас (аккаунты без
+    сессии, пустой флот): они идут первыми, над обычными действиями раздела."""
     kb = InlineKeyboardBuilder()
     rows: list[int] = []
+    for text, cb in live_buttons or []:
+        kb.button(text=text, callback_data=cb)
+        rows.append(1)
     if _app_button(kb, "🌐 Открыть раздел в приложении", f"section:{key}"):
         rows.append(1)
     btns = _section_buttons(key, plan)
@@ -730,9 +735,76 @@ async def cb_section(
         return
     plan = await _get_user_plan(pool, callback.from_user.id)
     text = f"{sec.emoji} <b>{html.escape(sec.title)}</b>\n\n{html.escape(sec.desc)}"
+    try:
+        live_line, live_buttons = await asyncio.wait_for(
+            _section_live(pool, callback.from_user.id, sec.key), _SECTION_LIVE_WAIT
+        )
+    except Exception:
+        log_exc_swallow(log, "cb_section: состояние раздела не посчиталось")
+        live_line, live_buttons = "", []
+    text += live_line
     if _APP_URL:
         text += "\n\n<i>Все инструменты раздела — в приложении. Здесь — быстрые действия.</i>"
-    await _edit(callback, text, _section_kb(sec.key, plan))
+    await _edit(callback, text, _section_kb(sec.key, plan, live_buttons))
+
+
+_SECTION_LIVE_WAIT = 1.5
+
+
+async def _section_live(pool: asyncpg.Pool, uid: int, key: str) -> tuple[str, list]:
+    """Что в разделе происходит сейчас: строка-сводка и кнопки к проблемам.
+
+    Раздел «Аккаунты» раньше был только описанием: что аккаунт вылетел из
+    сессии или попал под ограничения, владелец узнавал, открыв список и
+    пролистав его. Теперь число стоит на экране раздела, а кнопка ведёт
+    ровно туда, где это чинится. Пустой флот — кнопка «добавить» первой.
+    """
+    if key == "accounts":
+        row = await pool.fetchrow(
+            """SELECT COUNT(*) AS total,
+                      COUNT(*) FILTER (WHERE cooldown_until > now()) AS paused,
+                      COUNT(*) FILTER (WHERE acc_status IN
+                          ('banned','spamblock','deactivated','restricted')) AS limited,
+                      COUNT(*) FILTER (WHERE acc_status = 'session_expired') AS expired
+               FROM tg_accounts WHERE owner_id=$1""",
+            uid,
+        )
+        total = int(row["total"] or 0) if row else 0
+        if not total:
+            return (
+                "\n\n<i>Аккаунтов пока нет — без них не работают ни инвайт, "
+                "ни рассылка в личку, ни публикация.</i>",
+                [("➕ Добавить первый аккаунт", AccCb(action="add"))],
+            )
+        paused, limited, expired = (int(row[k] or 0) for k in ("paused", "limited", "expired"))
+        parts = [f"{total} {plural(total, 'аккаунт', 'аккаунта', 'аккаунтов')}"]
+        if paused:
+            parts.append(f"⏳ {paused} на паузе")
+        if limited:
+            parts.append(f"⚠️ {limited} с ограничениями")
+        if expired:
+            parts.append(f"🔑 {expired} без сессии")
+        buttons: list = []
+        if expired:
+            buttons.append((f"🔑 Войти заново: {expired}", AccCb(action="reauth_list")))
+        if limited:
+            buttons.append((f"⚠️ С ограничениями: {limited}", HealthCb(action="menu")))
+        return "\n\n<i>Сейчас: " + " · ".join(parts) + "</i>", buttons
+    if key == "channels":
+        row = await pool.fetchrow(
+            """SELECT (SELECT COUNT(*) FROM managed_bots WHERE added_by=$1) AS bots,
+                      (SELECT COUNT(*) FROM managed_channels WHERE owner_id=$1) AS chans""",
+            uid,
+        )
+        bots = int(row["bots"] or 0) if row else 0
+        chans = int(row["chans"] or 0) if row else 0
+        line = (
+            f"\n\n<i>Сейчас: {bots} {plural(bots, 'бот', 'бота', 'ботов')}"
+            f" · {chans} {plural(chans, 'канал', 'канала', 'каналов')}</i>"
+        )
+        buttons = [] if bots else [("➕ Подключить бота", BotCb(action="add"))]
+        return line, buttons
+    return "", []
 
 
 @router.callback_query(BmCb.filter(F.action == "tools"))
