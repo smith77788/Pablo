@@ -22569,7 +22569,7 @@ async function openContactCRM(id) {
       <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px">
         ${Object.entries(stageLabels).map(([k,v])=>`<button class="btn btn-s" style="padding:5px 10px;font-size:12px;${crm.stage===k?'background:var(--btn-solid);color:var(--btn-text);border-color:var(--btn-solid)':''}" onclick="setCrmStage('${id}','${k}')">${v}</button>`).join('')}
       </div>
-      <div style="margin-bottom:10px"><label style="font-size:12px;color:var(--hint)">Сумма сделки ($)</label><input id="crm-value" type="number" value="${crm.deal_value||0}" style="width:100%;padding:10px;border-radius:var(--radius);border:1.5px solid var(--border-input);background:var(--bg-input);color:var(--text);font-size:14px;margin-top:4px"></div>
+      <div style="margin-bottom:10px"><label style="font-size:12px;color:var(--hint)">Сумма сделки ($)</label><input id="crm-value" type="number" value="${crm.deal_value||0}" onchange="saveCrmValue('${id}')" style="width:100%;padding:10px;border-radius:var(--radius);border:1.5px solid var(--border-input);background:var(--bg-input);color:var(--text);font-size:14px;margin-top:4px"><div style="font-size:11px;color:var(--hint);margin-top:3px">Сумма сохраняется, когда уводите фокус с поля.</div></div>
       <div style="margin-bottom:10px"><label style="font-size:12px;color:var(--hint)">Напоминание</label><input id="crm-remind" type="datetime-local" style="width:100%;padding:10px;border-radius:var(--radius);border:1.5px solid var(--border-input);background:var(--bg-input);color:var(--text);font-size:14px;margin-top:4px"></div>
       <div style="margin-bottom:10px"><input id="crm-remind-text" placeholder="Текст напоминания" class="inp"></div>
       <button class="btn btn-p" data-main onclick="saveCrmReminder('${id}')" style="width:100%;margin-bottom:12px">⏰ Сохранить напоминание</button>
@@ -22624,6 +22624,22 @@ async function setCrmStage(id, stage) {
     await api('/api/miniapp/uch/contacts/'+id+'/crm', {method:'POST', body:JSON.stringify({stage})});
     toast('✅ Стадия обновлена');
     openContactCRM(id);
+  } catch(e) { toast('⚠️ '+errRu(e,'Ошибка')); }
+}
+
+async function saveCrmValue(id) {
+  // Поле «Сумма сделки» раньше рисовалось, но не сохранялось нигде: setCrmStage
+  // слал только {stage}, saveCrmReminder — только {remind_at,text}, и введённая
+  // сумма терялась при первом же перерисовывании экрана. Сервер её принимает
+  // (upsert_crm, поле deal_value — REAL). Шлём на blur, чтобы сумма легла до
+  // любой смены стадии или перехода.
+  const el = document.getElementById('crm-value');
+  if (!el) return;
+  const v = parseFloat(el.value);
+  const deal_value = isFinite(v) && v >= 0 ? v : 0;
+  try {
+    await api('/api/miniapp/uch/contacts/'+id+'/crm', {method:'POST', body:JSON.stringify({deal_value})});
+    toast('💰 Сумма сохранена');
   } catch(e) { toast('⚠️ '+errRu(e,'Ошибка')); }
 }
 
