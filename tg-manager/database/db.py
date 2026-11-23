@@ -7506,6 +7506,26 @@ async def delete_workspace_member(pool: asyncpg.Pool, ws_id: int, user_id: int) 
             target=f"ws:{ws_id} user:{user_id}")
 
 
+async def delete_workspace(pool: asyncpg.Pool, ws_id: int, owner_id: int) -> bool:
+    """Удалить пространство целиком. Может только владелец — условие стоит в
+    самом запросе, а не только в обработчике: номер пространства приходит от
+    клиента. Участники и приглашения уходят каскадом (schema_v52).
+
+    Удаление снимает доступ со ВСЕХ участников — событие того же веса, что и
+    вход (workspace_member_join), поэтому пишется в журнал. Повторное нажатие,
+    когда удалять уже нечего, записи не даёт.
+    """
+    deleted = await pool.fetchval(
+        "DELETE FROM workspaces WHERE id=$1 AND owner_id=$2 RETURNING id",
+        ws_id,
+        owner_id,
+    )
+    if deleted is None:
+        return False
+    await record_manual_action(pool, owner_id, "workspace_delete", target=f"ws:{ws_id}")
+    return True
+
+
 async def remove_workspace_member(
     pool: asyncpg.Pool, ws_id: int, actor_id: int, target_id: int
 ) -> str:
