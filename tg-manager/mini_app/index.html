@@ -24443,8 +24443,11 @@ async function openUchReminders() {
     }
     let html = '';
     if (overdue.length) {
-      html += `<div class="sec" style="color:var(--red)">⚠️ Просроченные · ${num(overdue.length)}</div>`;
+      const lateTotal = Number(d.overdue_total || overdue.length);
+      html += `<div class="sec" style="color:var(--red)">⚠️ Просроченные · ${num(lateTotal)}</div>`;
       html += overdue.map((r,i)=>remRow(r,i,true)).join('');
+      // Под потолком — самые старые; остальные появятся, когда эти снимут.
+      html += anCap(overdue.length, lateTotal, 'напоминание', 'напоминания', 'напоминаний');
     }
     if (upcoming.length) {
       html += '<div class="sec" style="margin-top:8px">⏰ Ближайшие</div>';

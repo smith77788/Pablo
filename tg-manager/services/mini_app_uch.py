@@ -28,6 +28,9 @@ from aiohttp import web
 _UUID_RE = re.compile(r'^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-'
                       r'[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$')
 
+# Потолок просроченных напоминаний на экране: самые старые, плюс итог.
+_OVERDUE_CAP = 200
+
 
 def setup_routes(app: web.Application, pool) -> None:
     """Зарегистрировать маршруты хранилища контактов на приложении мини-аппа."""
@@ -2253,10 +2256,18 @@ def setup_routes(app: web.Application, pool) -> None:
         uid = _get_uid(request)
         if not uid: return _err("Unauthorized", 401)
         try:
-            from services.contacts_hub.crm_engine import get_upcoming_reminders, get_crm_overdue
+            from services.contacts_hub.crm_engine import (
+                count_crm_overdue, get_crm_overdue, get_upcoming_reminders)
             upcoming = await get_upcoming_reminders(pool, uid)
-            overdue = await get_crm_overdue(pool, uid)
-            return _json_resp({'upcoming': upcoming, 'overdue': overdue})
+            # Просроченных бывает тысячи (импорт базы с датами): весь список
+            # был мегабайтами ответа и тысячами строк на телефоне. Отдаём
+            # самые старые под потолком и честный итог — экран говорит,
+            # сколько осталось за ним.
+            overdue = await get_crm_overdue(pool, uid, limit=_OVERDUE_CAP)
+            overdue_total = (len(overdue) if len(overdue) < _OVERDUE_CAP
+                             else await count_crm_overdue(pool, uid))
+            return _json_resp({'upcoming': upcoming, 'overdue': overdue,
+                               'overdue_total': overdue_total})
         except Exception:
             log.exception("uch_reminders")
             return _err(_INTERNAL_ERROR, 500)

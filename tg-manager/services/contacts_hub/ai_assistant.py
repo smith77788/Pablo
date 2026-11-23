@@ -113,12 +113,15 @@ async def process_ai_query(pool, owner_id: int, query: str) -> dict:
             return {'answer': f'👥 Мульти-аккаунт контактов: {len(contacts)}', 'contacts': contacts, 'type': 'list'}
 
         elif handler == 'reminders':
-            from services.contacts_hub.crm_engine import get_upcoming_reminders, get_crm_overdue
+            from services.contacts_hub.crm_engine import (
+                count_crm_overdue, get_crm_overdue, get_upcoming_reminders)
             upcoming = await get_upcoming_reminders(pool, owner_id)
-            overdue = await get_crm_overdue(pool, owner_id)
+            # Показываем пять, а число — настоящее: тянуть ради него все
+            # просроченные строки незачем.
+            overdue = await get_crm_overdue(pool, owner_id, limit=5)
             lines = []
             if overdue:
-                lines.append(f'⚠️ Просроченных: {len(overdue)}')
+                lines.append(f'⚠️ Просроченных: {await count_crm_overdue(pool, owner_id)}')
                 for r in overdue[:5]:
                     lines.append(f'  • {r.get("contact_name", "?")} — {r.get("next_reminder_text", "")}')
             if upcoming:
