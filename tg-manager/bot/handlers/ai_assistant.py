@@ -708,7 +708,7 @@ async def _call_ai_providers(
             log.exception("AI provider %s model %s error: %s", provider.name, model, e)
             return (
                 f"⚠️ Ошибка AI-ассистента ({provider.name}/{model}): "
-                f"{type(e).__name__}: {str(e)[:120]}"
+                f"{owner_error(e)}"
             )
 
     return (

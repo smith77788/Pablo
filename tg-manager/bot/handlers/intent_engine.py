@@ -37,7 +37,7 @@ from services.intent_planner import (
     format_plan_card,
 )
 from services.logger import log_exc_swallow
-from bot.utils.op_helpers import safe_answer
+from bot.utils.op_helpers import safe_answer, terminal_kb
 from bot.utils.op_names import run_status as _run_status  # noqa: E402
 
 log = logging.getLogger(__name__)
@@ -308,8 +308,9 @@ async def _process_intent(
     except Exception as exc:
         log_exc_swallow(log, f"_process_intent failed: {exc}")
         await wait_msg.edit_text(
-            f"⚠️ Не удалось собрать план: {type(exc).__name__}\n"
-            "Попробуй сформулировать цель короче или открой нужный раздел вручную через /menu."
+            f"⚠️ Не удалось собрать план: {owner_error(exc)}\n"
+            "Попробуй сформулировать цель короче или открой нужный раздел вручную через /menu.",
+            reply_markup=terminal_kb(),
         )
 
 
@@ -510,7 +511,7 @@ async def _execute_gp_intent(
         log_exc_swallow(log, f"_execute_gp_intent: {exc}")
         await _show_manual_hint(
             callback,
-            f"Не удалось запустить GP: {type(exc).__name__}",
+            f"Не удалось запустить Global Presence: {owner_error(exc, html_escape=False)}",
             "gp_factory",
         )
 
@@ -557,7 +558,7 @@ async def _execute_audit_intent(
     except Exception as exc:
         log_exc_swallow(log, f"_execute_audit_intent: {exc}")
         await _show_manual_hint(
-            callback, f"Аудит упал: {type(exc).__name__}", "health_dashboard"
+            callback, f"Аудит не выполнен: {owner_error(exc, html_escape=False)}", "health_dashboard"
         )
 
 
@@ -604,7 +605,7 @@ async def _execute_sync_intent(
         await db.update_intent_status(pool, intent_id, owner_id, "ready")
         await _show_manual_hint(
             callback,
-            f"Не удалось поставить синхронизацию в очередь: {type(exc).__name__}",
+            f"Не удалось поставить синхронизацию в очередь: {owner_error(exc, html_escape=False)}",
             "mass_ops",
         )
 
@@ -704,8 +705,7 @@ async def _execute_op_intent(
         log_exc_swallow(log, f"_execute_op_intent: submit failed: {exc}")
         if callback.message:
             await callback.message.edit_text(
-                f"❌ Не удалось поставить операцию в очередь: {type(exc).__name__}\n"
-                f"{owner_error(exc)}",
+                f"❌ Не удалось поставить операцию в очередь: {owner_error(exc)}",
                 reply_markup=_plan_kb(intent_id, plan, "balanced"),
             )
         return

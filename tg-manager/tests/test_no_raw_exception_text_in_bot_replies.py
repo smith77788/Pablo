@@ -97,3 +97,21 @@ def test_ast_detector_sees_planted_multiline_reply(tmp_path):
         encoding="utf-8",
     )
     assert _ast_hits(tmp_path) == ["planted.py:5"]
+
+
+def test_exception_class_name_is_not_shown_to_owner():
+    """«Не удалось собрать план: KeyError» — имя класса тоже английское слово,
+    и оно ничего не говорит владельцу. Подробности — в журнале."""
+    hits = []
+    for f in sorted(HANDLERS.glob("*.py")):
+        tree = ast.parse(f.read_text(encoding="utf-8"))
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.JoinedStr):
+                continue
+            for part in node.values:
+                if (isinstance(part, ast.FormattedValue) and isinstance(part.value, ast.Attribute)
+                        and part.value.attr == "__name__"
+                        and isinstance(part.value.value, ast.Call)
+                        and ast.unparse(part.value.value.func) == "type"):
+                    hits.append(f"{f.name}:{node.lineno}")
+    assert not hits, "имя класса исключения в тексте:\n" + "\n".join(hits)

@@ -19,7 +19,7 @@ from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import CallbackQuery, Message
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
-from bot.callbacks import GSearchCb
+from bot.callbacks import BmCb, GSearchCb
 from bot.utils.op_helpers import safe_answer, terminal_kb
 from services.security import sanitize_search_query
 
@@ -31,6 +31,15 @@ _TYPE_ICON = {"channel": "📢", "group": "👥", "user": "👤", "bot": "🤖"}
 
 class GlobalSearchFSM(StatesGroup):
     waiting_query = State()
+
+
+def _again_kb():
+    """Неудачный поиск ведёт к новому поиску, а не только в корень меню."""
+    kb = InlineKeyboardBuilder()
+    kb.button(text="🔎 Искать снова", callback_data=GSearchCb(action="open"))
+    kb.button(text="🏠 Главное меню", callback_data=BmCb(action="main"))
+    kb.adjust(2)
+    return kb.as_markup()
 
 
 def _cancel_kb():
@@ -75,7 +84,7 @@ async def msg_search_query(message: Message, state: FSMContext, pool: asyncpg.Po
     await state.clear()
     query = sanitize_search_query(message.text or "")
     if not query:
-        await message.answer("⚠️ Пустой запрос. Попробуйте /search снова.")
+        await message.answer("⚠️ Пустой запрос — введите название или @username.", reply_markup=_again_kb())
         return
 
     try:
@@ -101,20 +110,20 @@ async def msg_search_query(message: Message, state: FSMContext, pool: asyncpg.Po
             timeout=40,
         )
     except asyncio.TimeoutError:
-        await status.edit_text("⚠️ Аккаунт не ответил за 40с — проверьте прокси/сессию.", reply_markup=terminal_kb())
+        await status.edit_text("⚠️ Аккаунт не ответил за 40 секунд — проверьте его прокси и сессию.", reply_markup=_again_kb())
         return
     except Exception as exc:
         log.exception("global_search uid=%s q=%r", message.from_user.id, query)
-        await status.edit_text(f"⚠️ Ошибка: {owner_error(exc)}", reply_markup=terminal_kb())
+        await status.edit_text(f"⚠️ Ошибка: {owner_error(exc)}", reply_markup=_again_kb())
         return
 
     if not res.get("ok"):
-        await status.edit_text(f"⚠️ {html.escape(str(res.get('error') or 'Поиск не выполнен'))}", reply_markup=terminal_kb())
+        await status.edit_text(f"⚠️ {owner_error(res.get('error') or 'Поиск не выполнен')}", reply_markup=_again_kb())
         return
 
     results = res.get("results") or []
     if not results:
-        await status.edit_text(f"🔎 По запросу «{html.escape(query)}» ничего не найдено.", reply_markup=terminal_kb())
+        await status.edit_text(f"🔎 По запросу «{html.escape(query)}» ничего не найдено. Попробуйте другое слово или @username.", reply_markup=_again_kb())
         return
 
     lines = [f"🔎 <b>Результаты по «{html.escape(query)}»</b>\n"]
