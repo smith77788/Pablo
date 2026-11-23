@@ -131,3 +131,24 @@ def test_contact_trust_recalc(monkeypatch):
     seen = _spy(monkeypatch, te, "compute_trust_score", None)
     _run(te.update_trust_scores(_P(), 1))
     _off_main(seen)
+
+
+def test_smart_tags(monkeypatch):
+    """Умные метки: 30 000 контактов × 1000 правил держали цикл 6,4 с, в потоке — 125 мс."""
+    from services.contacts_hub import smart_tags_engine as st
+    seen = _spy(monkeypatch, st, "_match_all", None)
+    _run(st.apply_smart_tags(_Pool(), 1))
+    _off_main(seen)
+
+
+def test_country_filter(monkeypatch):
+    """Фильтр «страна по номеру» разбирает телефоны всей базы — в потоке."""
+    from services.contacts_hub import bulk_ops_engine as b
+
+    class _P(_Pool):
+        async def fetch(self, q, *a):
+            return [{"id": "x", "phones": '["+79990000000"]'}]
+
+    seen = _spy(monkeypatch, b, "_ids_in_country", None)
+    _run(b.count_by_filter(_P(), 1, country="RU"))
+    _off_main(seen)

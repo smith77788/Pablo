@@ -27,6 +27,10 @@ from services.logger import log_exc_swallow
 log = logging.getLogger(__name__)
 from bot.utils.op_helpers import terminal_kb  # noqa: E402
 
+from bot.utils.fmt import num_ru  # noqa: E402
+from bot.utils.op_helpers import cancel_kb
+from bot.utils.op_helpers import show_no_accounts
+
 router = Router()
 
 
@@ -166,7 +170,7 @@ async def msg_inviter_preflight(
     from services.mass_inviter_engine import parse_group_ref, validate_group_ref
     _ok, _why = validate_group_ref(message.text or "")
     if not _ok:
-        await message.answer(f"⚠️ {_why}")
+        await message.answer(f"⚠️ {_why}", reply_markup=cancel_kb())
         return
     group = parse_group_ref(message.text or "")
     # Не чистим data — сохраняем группу для возможного «Вступить всеми».
@@ -253,7 +257,7 @@ async def cb_inviter_from_run(
     await state.set_state(InviterFSM.group)
     await _edit(
         callback,
-        f"👥 <b>Инвайт базы #{run_id}</b> ({int(count):,} чел.)\n\n"
+        f"👥 <b>Инвайт базы #{run_id}</b> ({num_ru(int(count))} чел.)\n\n"
         "Введите @username или ссылку группы, <b>куда</b> добавляем:\n\n"
         "<i>Аккаунты должны уже быть участниками этой группы.</i>",
         _cancel_kb(),
@@ -269,7 +273,7 @@ async def msg_inviter_group(message: Message, state: FSMContext) -> None:
     from services.mass_inviter_engine import parse_group_ref, validate_group_ref
     _ok, _why = validate_group_ref(message.text or "")
     if not _ok:
-        await message.answer(f"⚠️ {_why}")
+        await message.answer(f"⚠️ {_why}", reply_markup=cancel_kb())
         return
     group = parse_group_ref(message.text or "")
     await state.update_data(group=group)
@@ -378,9 +382,9 @@ async def _inv_offer_gender(
         kb = InlineKeyboardBuilder()
         kb.button(text="👥 Все", callback_data=InviterCb(action="gender", item="all"))
         if m_cnt:
-            kb.button(text=f"👨 Только муж. ({m_cnt:,})", callback_data=InviterCb(action="gender", item="m"))
+            kb.button(text=f"👨 Только муж. ({num_ru(m_cnt)})", callback_data=InviterCb(action="gender", item="m"))
         if f_cnt:
-            kb.button(text=f"👩 Только жен. ({f_cnt:,})", callback_data=InviterCb(action="gender", item="f"))
+            kb.button(text=f"👩 Только жен. ({num_ru(f_cnt)})", callback_data=InviterCb(action="gender", item="f"))
         kb.adjust(1)
         await _edit(
             callback,
@@ -419,7 +423,7 @@ async def cb_inviter_classify(
         await gc.classify_audience(pool, callback.from_user.id, _pr)
     except Exception:
         log_exc_swallow(log, "invite classify failed")
-        await callback.answer("Ошибка разметки пола", show_alert=True)
+        await callback.answer("⚠️ Не удалось разметить пол аудитории. Попробуйте ещё раз через минуту.", show_alert=True)
         return
     await _inv_offer_gender(callback, state, pool, data.get("total_users", 0))
 
@@ -605,7 +609,7 @@ async def msg_inviter_manual(
     refs = parse_user_refs(message.text or "")
     if not refs:
         await message.answer("⚠️ Не удалось распознать пользователей. Введите @username "
-                             "или числовые ID — либо пришлите файл .txt/.csv/.xlsx/.db.")
+                             "или числовые ID — либо пришлите файл .txt/.csv/.xlsx/.db.", reply_markup=cancel_kb())
         return
     await _accept_refs(message, state, pool, refs, phones=False)
 
@@ -618,7 +622,7 @@ async def msg_inviter_manual_file(
     if refs is None:
         return
     if not refs:
-        await message.answer("⚠️ В файле не нашлось ни одного @username / ID.")
+        await message.answer("⚠️ В файле не нашлось ни одного @username / ID.", reply_markup=cancel_kb())
         return
     await _accept_refs(message, state, pool, refs, phones=False)
 
@@ -661,7 +665,7 @@ async def msg_inviter_phones_file(
     if phones is None:
         return
     if not phones:
-        await message.answer("⚠️ В файле не нашлось ни одного номера телефона.")
+        await message.answer("⚠️ В файле не нашлось ни одного номера телефона.", reply_markup=cancel_kb())
         return
     await _accept_refs(message, state, pool, phones, phones=True)
 
@@ -712,7 +716,7 @@ async def _refs_from_document(message: Message, mode: str):
     from services import invite_list_parser as ilp
     doc = message.document
     if not doc:
-        await message.answer("⚠️ Пришлите файл документом.")
+        await message.answer("⚠️ Пришлите файл документом.", reply_markup=cancel_kb())
         return None
     if doc.file_size and doc.file_size > ilp.MAX_FILE_BYTES:
         await message.answer(f"⚠️ Файл слишком большой "
@@ -768,7 +772,7 @@ async def msg_inviter_acc_count(
     try:
         n = int(message.text or "0")
     except ValueError:
-        await message.answer("⚠️ Введите число")
+        await message.answer("⚠️ Введите число", reply_markup=cancel_kb())
         return
     owner_id = message.from_user.id
     total = await _acc_count(pool, owner_id)
@@ -1191,7 +1195,7 @@ async def cb_inviter_confirm(
     )
     account_ids = [r["id"] for r in rows]
     if not account_ids:
-        await callback.answer("⚠️ Нет доступных аккаунтов", show_alert=True)
+        await show_no_accounts(callback)
         return
 
     # Собрать список пользователей для добавления

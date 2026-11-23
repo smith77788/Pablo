@@ -57,6 +57,10 @@ router = Router()
 from bot.utils.op_names import op_name as _op_name  # noqa: E402
 
 from bot.utils.op_names import status_label as _ost_label  # noqa: E402
+from bot.utils.op_helpers import no_accounts_kb
+from bot.utils.op_helpers import ask_to_confirm
+from bot.utils.op_helpers import cancel_kb
+from bot.utils.op_helpers import show_no_accounts
 
 
 # ── Timing options ──────────────────────────────────────────────────────────
@@ -230,7 +234,7 @@ async def cb_mass_menu(callback: CallbackQuery, state: FSMContext) -> None:
         "🛠️ <b>Построитель операций</b>\n\n"
         "🛠️ <b>Построитель</b> — пошаговый wizard для создания любой операции\n"
         "📤 <b>Публикация</b> — отправить пост во все каналы\n"
-        "🔗 <b>Join</b> — вступить в список каналов/групп несколькими аккаунтами\n"
+        "🔗 <b>Вступление</b> — вступить в список каналов/групп несколькими аккаунтами\n"
         "🚪 <b>Leave</b> — выйти из каналов/групп несколькими аккаунтами\n"
         "✏️ <b>Редактирование ботов</b> — изменить имя/описание всех ботов сразу\n\n"
         "Выберите тип операции:",
@@ -344,7 +348,7 @@ async def cb_mp_filter_chosen(
             await safe_edit(
                 callback,
                 "⚠️ Нет активных аккаунтов.",
-                reply_markup=_back_menu_kb().as_markup(),
+                reply_markup=no_accounts_kb(back=MassOpCb(action="menu")),
             )
             return
         kb = InlineKeyboardBuilder()
@@ -517,7 +521,7 @@ async def _proceed_mp_text(text: str, message: Message, state: FSMContext) -> No
 async def fsm_mp_text(message: Message, state: FSMContext) -> None:
     text = (message.text or "").strip()
     if not text:
-        await message.answer("⚠️ Введите текст поста:")
+        await message.answer("⚠️ Введите текст поста:", reply_markup=cancel_kb())
         return
     await _proceed_mp_text(text, message, state)
 
@@ -526,10 +530,10 @@ async def fsm_mp_text(message: Message, state: FSMContext) -> None:
 async def fsm_mp_text_file(message: Message, state: FSMContext) -> None:
     doc = message.document
     if not doc or (doc.mime_type and not doc.mime_type.startswith("text")):
-        await message.answer("⚠️ Отправьте текстовый .txt файл с текстом поста.")
+        await message.answer("⚠️ Отправьте текстовый .txt файл с текстом поста.", reply_markup=cancel_kb())
         return
     if doc.file_size and doc.file_size > 50_000:
-        await message.answer("⚠️ Файл слишком большой. Максимум 50 КБ.")
+        await message.answer("⚠️ Файл слишком большой. Максимум 50 КБ.", reply_markup=cancel_kb())
         return
     try:
         file_info = await message.bot.get_file(doc.file_id)
@@ -539,7 +543,7 @@ async def fsm_mp_text_file(message: Message, state: FSMContext) -> None:
         await message.answer(f"⚠️ Не удалось прочитать файл: {owner_error(e)}", reply_markup=terminal_kb())
         return
     if not text:
-        await message.answer("⚠️ Файл пустой.")
+        await message.answer("⚠️ Файл пустой.", reply_markup=cancel_kb())
         return
     if len(text) > 4000:
         text = text[:4000]
@@ -683,7 +687,7 @@ async def cb_mp_confirm(
             callback,
             f"⚠️ Нет активных аккаунтов для {filter_hint}.\n"
             "Проверьте аккаунты в разделе 📱 Аккаунты.",
-            reply_markup=_back_menu_kb().as_markup(),
+            reply_markup=no_accounts_kb(back=MassOpCb(action="menu")),
         )
         return
 
@@ -1360,7 +1364,7 @@ async def cb_queue(
     if has_completed:
         kb.button(
             text="🗑 Очистить завершённые",
-            callback_data=MassOpCb(action="clear_completed"),
+            callback_data=MassOpCb(action="clear_completed_ask"),
         )
     kb.button(text="🔄 Обновить", callback_data=MassOpCb(action="queue", op_type=status_filter_key, page=page))
     kb.button(text="◀️ Назад", callback_data=MassOpCb(action="menu"))
@@ -1416,7 +1420,7 @@ async def cb_clear_completed(callback: CallbackQuery, pool: asyncpg.Pool) -> Non
             deleted = 0
     except Exception as e:
         log.warning("clear_completed error: %s", e)
-        await callback.answer("Ошибка при очистке.", show_alert=True)
+        await callback.answer("⚠️ Не удалось очистить завершённые. Попробуйте ещё раз через минуту.", show_alert=True)
         return
 
     if deleted == 0:
@@ -1508,7 +1512,7 @@ async def cb_bbe_field_chosen(
 async def fsm_bbe_value(message: Message, state: FSMContext) -> None:
     value = (message.text or "").strip()
     if not value:
-        await message.answer("⚠️ Введите значение:")
+        await message.answer("⚠️ Введите значение:", reply_markup=cancel_kb())
         return
     await state.update_data(bbe_value=value)
     await state.set_state(BulkBotEditFSM.previewing)
@@ -1874,10 +1878,10 @@ async def fsm_bulk_join_links_file(
 ) -> None:
     doc = message.document
     if not doc or (doc.mime_type and not doc.mime_type.startswith("text")):
-        await message.answer("⚠️ Отправьте текстовый файл (.txt) со списком ссылок.")
+        await message.answer("⚠️ Отправьте текстовый файл (.txt) со списком ссылок.", reply_markup=cancel_kb())
         return
     if doc.file_size and doc.file_size > 100_000:
-        await message.answer("⚠️ Файл слишком большой. Максимум 100 КБ.")
+        await message.answer("⚠️ Файл слишком большой. Максимум 100 КБ.", reply_markup=cancel_kb())
         return
     try:
         file_info = await message.bot.get_file(doc.file_id)
@@ -1888,7 +1892,7 @@ async def fsm_bulk_join_links_file(
         return
     links = [ln.strip() for ln in raw.splitlines() if ln.strip()]
     if not links:
-        await message.answer("⚠️ Файл пустой или не содержит ссылок.")
+        await message.answer("⚠️ Файл пустой или не содержит ссылок.", reply_markup=cancel_kb())
         return
     if len(links) > 200:
         links = links[:200]
@@ -1935,7 +1939,7 @@ async def cb_bulk_join_accs(
         acc_list_preview = f"  👤 {html.escape(acc_label)}"
 
     if not acc_ids:
-        await callback.answer("Нет активных аккаунтов", show_alert=True)
+        await show_no_accounts(callback)
         return
     await safe_answer(callback)
 
@@ -2113,7 +2117,7 @@ async def cb_bulk_join_confirm(
         )
     except Exception as e:
         log.error("bulk_join confirm error: %s", e)
-        await callback.answer("Ошибка создания операции", show_alert=True)
+        await callback.answer("⚠️ Не удалось создать операцию. Попробуйте ещё раз через минуту.", show_alert=True)
         return
 
     icon, delay_str, _ = _DELAY_LABELS.get(delay_mode, ("🧠 Умный", "авто", ""))
@@ -2238,10 +2242,10 @@ async def fsm_bulk_leave_channels_file(
 ) -> None:
     doc = message.document
     if not doc or (doc.mime_type and not doc.mime_type.startswith("text")):
-        await message.answer("⚠️ Отправьте текстовый файл (.txt) со списком каналов.")
+        await message.answer("⚠️ Отправьте текстовый файл (.txt) со списком каналов.", reply_markup=cancel_kb())
         return
     if doc.file_size and doc.file_size > 100_000:
-        await message.answer("⚠️ Файл слишком большой. Максимум 100 КБ.")
+        await message.answer("⚠️ Файл слишком большой. Максимум 100 КБ.", reply_markup=cancel_kb())
         return
     try:
         file_info = await message.bot.get_file(doc.file_id)
@@ -2252,7 +2256,7 @@ async def fsm_bulk_leave_channels_file(
         return
     channels = [ln.strip() for ln in raw.splitlines() if ln.strip()]
     if not channels:
-        await message.answer("⚠️ Файл пустой или не содержит каналов.")
+        await message.answer("⚠️ Файл пустой или не содержит каналов.", reply_markup=cancel_kb())
         return
     if len(channels) > 200:
         channels = channels[:200]
@@ -2299,7 +2303,7 @@ async def cb_bulk_leave_accs(
         bl_acc_list_preview = f"  👤 {html.escape(acc_label)}"
 
     if not acc_ids:
-        await callback.answer("Нет активных аккаунтов", show_alert=True)
+        await show_no_accounts(callback)
         return
     await safe_answer(callback)
 
@@ -2478,7 +2482,7 @@ async def cb_bulk_leave_confirm(
         )
     except Exception as e:
         log.error("bulk_leave confirm error: %s", e)
-        await callback.answer("Ошибка создания операции", show_alert=True)
+        await callback.answer("⚠️ Не удалось создать операцию. Попробуйте ещё раз через минуту.", show_alert=True)
         return
 
     icon, delay_str, _ = _DELAY_LABELS_LEAVE.get(delay_mode, ("🧠 Умный", "авто", ""))
@@ -2556,7 +2560,7 @@ async def cb_build_start(
         "🛠️ <b>Построитель операций</b>\n\n"
         "Шаг 1/4: Выберите тип операции\n\n"
         "📤 <b>Публикация</b> — разослать пост по каналам\n"
-        "🔗 <b>Join</b> — вступить в каналы (💎 подписка)\n"
+        "🔗 <b>Вступление</b> — вступить в каналы (💎 подписка)\n"
         "🚪 <b>Leave</b> — выйти из каналов (💎 подписка)\n"
         "✏️ <b>Редактирование ботов</b> — обновить профиль ботов (PRO)\n",
         reply_markup=kb.as_markup(),
@@ -2579,7 +2583,7 @@ async def cb_ob_type_chosen(
     op_type = callback_data.op_type or ""
     meta = _OP_TYPE_META.get(op_type)
     if not meta:
-        await callback.answer("Неизвестный тип операции", show_alert=True)
+        await callback.answer("⚠️ Кнопка устарела. Откройте раздел заново.", show_alert=True)
         return
 
     # Проверка подписки
@@ -2726,7 +2730,7 @@ async def fsm_ob_entering_params(
 ) -> None:
     text = (message.text or "").strip()
     if not text:
-        await message.answer("⚠️ Введите значение:")
+        await message.answer("⚠️ Введите значение:", reply_markup=cancel_kb())
         return
 
     sd = await state.get_data()
@@ -2736,10 +2740,10 @@ async def fsm_ob_entering_params(
     if op_type in ("bulk_join", "bulk_leave"):
         lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
         if not lines:
-            await message.answer("⚠️ Введите хотя бы одну запись:")
+            await message.answer("⚠️ Введите хотя бы одну запись:", reply_markup=cancel_kb())
             return
         if len(lines) > 50:
-            await message.answer("⚠️ Максимум 50 записей за одну операцию.")
+            await message.answer("⚠️ Максимум 50 записей за одну операцию.", reply_markup=cancel_kb())
             return
         await state.update_data(ob_links=lines)
     else:
@@ -2838,7 +2842,7 @@ async def _ob_show_preview(
             eta_min = eta_secs // 60
             eta_h = eta_min // 60
             eta_str = f"~{eta_h}ч {eta_min % 60}м" if eta_h else f"~{eta_min}м"
-            lines.append(f"⏱️ Примерное время: <b>{eta_str}</b> (safe режим)")
+            lines.append(f"⏱️ Примерное время: <b>{eta_str}</b> (бережный режим)")
         lines.append(f"\n<b>Список:</b>\n{link_preview}")
     elif op_type == "bulk_bot_edit":
         _FIELD_LABELS_OB = {
@@ -2968,4 +2972,15 @@ async def cb_ob_confirm(
         f"Воркер запустит операцию автоматически.\n"
         f"Следить за прогрессом: <b>Очередь операций</b>",
         reply_markup=kb.as_markup(),
+    )
+
+
+@router.callback_query(MassOpCb.filter(F.action == "clear_completed_ask"))
+async def cb_massopcb_clear_completed_ask(callback: CallbackQuery, callback_data: MassOpCb) -> None:
+    await ask_to_confirm(
+        callback,
+        question="🗑 <b>Очистить завершённые операции?</b>\n\nИз очереди уйдут записи об уже законченных операциях.",
+        yes=callback_data.model_copy(update={"action": "clear_completed"}),
+        no=MassOpCb(action="queue"),
+        yes_text="🗑 Да, очистить",
     )

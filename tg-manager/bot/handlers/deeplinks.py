@@ -16,6 +16,7 @@ from bot.utils.subscription import require_plan, locked_text
 from database import db
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from bot.utils.op_helpers import safe_answer, terminal_kb
+from bot.utils.op_helpers import cancel_kb
 
 router = Router()
 
@@ -138,7 +139,7 @@ async def cb_dl_create(
     await callback.message.edit_text(
         "🔗 <b>Новый диплинк</b>\n\n"
         "Введите название ссылки (для вашего удобства):\n"
-        "Например: <code>Instagram bio</code>, <code>VK post</code>, <code>YouTube desc</code>",
+        "Например: <code>Instagram профиль</code>, <code>VK пост</code>, <code>YouTube описание</code>",
         parse_mode="HTML",
         reply_markup=_dl_cancel_kb(callback_data.bot_id),
     )
@@ -196,6 +197,7 @@ async def msg_dl_param(message: Message, state: FSMContext, pool: asyncpg.Pool) 
         await message.answer(
             "❌ Параметр <b>{}</b> уже занят. Введите другой:".format(param),
             parse_mode="HTML",
+            reply_markup=cancel_kb(),
         )
         return  # keep state active
     await state.clear()

@@ -16,6 +16,8 @@ from services import graph_engine
 from bot.utils.op_helpers import safe_answer
 
 log = logging.getLogger(__name__)
+from bot.utils.fmt import num_ru  # noqa: E402
+
 router = Router()
 
 
@@ -125,7 +127,7 @@ async def cb_graph_my_nodes(
         for n in nodes:
             title   = n.get("title") or n.get("username") or n.get("entity_id") or "?"
             members = int(n.get("member_count") or 0)
-            lines.append(f"• <b>{title}</b> — {members:,} участников")
+            lines.append(f"• <b>{title}</b> — {num_ru(members)} участников")
         text = "\n".join(lines)
 
     kb = InlineKeyboardBuilder()

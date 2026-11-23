@@ -28,6 +28,11 @@ from database import db
 from services import broadcaster, bot_api
 from bot.utils.op_helpers import safe_answer
 
+from bot.utils.fmt import num_ru  # noqa: E402
+from bot.utils.op_helpers import no_bots_kb
+from bot.utils.op_helpers import cancel_kb
+from bot.utils.op_helpers import show_no_bots
+
 router = Router()
 
 _ROLE_LABELS = {
@@ -62,13 +67,13 @@ async def cb_net_menu(
         f"🤖 Ботов: <b>{ov['total_bots']}</b> | "
         f"🧬 Рой: <b>{ov['swarm_bots']}</b> ({swarm_pct}%)\n"
         f"🌐 Кластеров: <b>{ov['clusters']}</b>\n"
-        f"👤 Уникальных юзеров: <b>{ov['unique_users']:,}</b>\n"
-        f"📢 Сообщений отправлено: <b>{ov['total_sent']:,}</b>\n\n"
+        f"👤 Уникальных пользователей: <b>{num_ru(ov['unique_users'])}</b>\n"
+        f"📢 Сообщений отправлено: <b>{num_ru(ov['total_sent'])}</b>\n\n"
         "── <b>Управление сетью (💎 подписка)</b> ──\n"
         "📊 Аналитика — сводка по всей сети ботов\n"
         "🏆 Рейтинг — боты по размеру аудитории\n"
         "❤️ Здоровье — проверка доступности ботов\n"
-        "👥 Пересечение — общие юзеры между ботами\n"
+        "👥 Пересечение — общие пользователи между ботами\n"
         "⚖️ Роутинг — распределение нагрузки (💎 подписка)\n"
         "🌐 Кластеры — группировка ботов (💎 подписка)\n\n"
         "── <b>Массовые правки</b> ──\n"
@@ -104,7 +109,7 @@ async def cb_net_analytics(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
     for i, b in enumerate(top3):
         label = f"@{b['username']}" if b["username"] else b["first_name"]
         top3_lines.append(
-            f"  {medals[i]} {label} — {b['audience']:,} юз. / score {b['score']:.3f}"
+            f"  {medals[i]} {label} — {num_ru(b['audience'])} чел. · оценка {b['score']:.3f}"
         )
 
     kb = InlineKeyboardBuilder()
@@ -120,10 +125,10 @@ async def cb_net_analytics(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
         f"🌐 Кластеров: <b>{ov['clusters']}</b>\n"
         f"🌐 Режим: <b>{mode.upper()}</b>\n\n"
         f"<b>Аудитория:</b>\n"
-        f"  Записей: {ov['total_users']:,}\n"
-        f"  Уникальных: {ov['unique_users']:,}\n"
-        f"  Пересечений: {overlap['multi_bot_users']:,} ({overlap['overlap_pct']}%)\n\n"
-        f"<b>Рассылки отправлено:</b> {ov['total_sent']:,}\n"
+        f"  Записей: {num_ru(ov['total_users'])}\n"
+        f"  Уникальных: {num_ru(ov['unique_users'])}\n"
+        f"  Пересечений: {num_ru(overlap['multi_bot_users'])} ({overlap['overlap_pct']}%)\n\n"
+        f"<b>Рассылки отправлено:</b> {num_ru(ov['total_sent'])}\n"
         f"<b>Средняя оценка:</b> {ov['avg_score']:.3f}\n\n"
         + ("<b>Топ-3 по аудитории:</b>\n" + "\n".join(top3_lines) if top3 else ""),
         parse_mode="HTML",
@@ -179,7 +184,7 @@ async def cb_cluster_view(
 
     lines = [
         f"🌐 <b>Кластер: {cluster}</b>\n",
-        f"Ботов: {len(bots)} | В «Рое»: {swarm_on} | Аудитория: {total_aud:,}",
+        f"Ботов: {len(bots)} | В «Рое»: {swarm_on} | Аудитория: {num_ru(total_aud)}",
         f"Режим: <b>{mode.upper()}</b>\n",
         "<b>Боты:</b>",
     ]
@@ -189,7 +194,7 @@ async def cb_cluster_view(
         swarm_icon = "🟢" if b["swarm_enabled"] else "⚫"
         role = _ROLE_LABELS.get(b.get("bot_role", "general"), "⚙️")
         lines.append(
-            f"  {swarm_icon} {label} [{role}] — {b['audience_count']:,} юз. | score {b['score']:.3f}"
+            f"  {swarm_icon} {label} [{role}] — {num_ru(b['audience_count'])} чел. · оценка {b['score']:.3f}"
         )
     _cap_text_note(lines, bots, _shown_t, "ботов")
 
@@ -213,7 +218,7 @@ async def cb_bulk_swarm_on(
     mode = await db.get_system_mode(pool)
     lines = [
         f"🌐 <b>Кластер: {cluster}</b>\n",
-        f"Ботов: {len(bots)} | В «Рое»: {n} | Аудитория: {total_aud:,}",
+        f"Ботов: {len(bots)} | В «Рое»: {n} | Аудитория: {num_ru(total_aud)}",
         f"Режим: <b>{mode.upper()}</b>\n",
         "<b>Боты:</b>",
     ]
@@ -222,7 +227,7 @@ async def cb_bulk_swarm_on(
         label = f"@{b['username']}" if b["username"] else b["first_name"]
         swarm_icon = "🟢" if b["swarm_enabled"] else "⚫"
         role = _ROLE_LABELS.get(b.get("bot_role", "general"), "⚙️")
-        lines.append(f"  {swarm_icon} {label} [{role}] — {b['audience_count']:,} юз.")
+        lines.append(f"  {swarm_icon} {label} [{role}] — {num_ru(b['audience_count'])} чел.")
     _cap_text_note(lines, bots, _shown_t, "ботов")
     await callback.message.edit_text(
         "\n".join(lines),
@@ -295,7 +300,7 @@ async def cb_cluster_assign_start(
 
     bots = await db.get_bots(pool, callback.from_user.id)
     if not bots:
-        await callback.answer("Нет ботов.", show_alert=True)
+        await show_no_bots(callback)
         return
     await safe_answer(callback)
     cluster = callback_data.cluster or ""
@@ -339,7 +344,7 @@ async def cb_cluster_assign_confirm(
     for b in _shown_t:
         lbl = f"@{b['username']}" if b["username"] else b["first_name"]
         swarm_icon = "🟢" if b["swarm_enabled"] else "⚫"
-        lines.append(f"  {swarm_icon} {lbl} — {b['audience_count']:,} юз.")
+        lines.append(f"  {swarm_icon} {lbl} — {num_ru(b['audience_count'])} чел.")
     _cap_text_note(lines, bots, _shown_t, "ботов")
     await callback.message.edit_text(
         "\n".join(lines),
@@ -372,7 +377,7 @@ async def cb_net_ranking(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
         cluster = b.get("cluster") or "default"
         lines.append(
             f"{medals[i]} <b>{label}</b> {swarm}\n"
-            f"   👥 {b['audience']:,} | 📈 {b['score']:.3f} | {role} [{cluster}]"
+            f"   👥 {num_ru(b['audience'])} | 📈 {b['score']:.3f} | {role} [{cluster}]"
         )
     if not bots:
         lines.append("Нет ботов.")
@@ -471,7 +476,7 @@ async def msg_set_weight(
         if weight < 0 or weight > 10:
             raise ValueError
     except ValueError:
-        await message.answer("❌ Введите число от 0 до 10 (например: 1.5):")
+        await message.answer("❌ Введите число от 0 до 10 (например: 1.5):", reply_markup=cancel_kb())
         return
     data = await state.get_data()
     await state.clear()
@@ -524,7 +529,7 @@ async def cb_net_health(
     if not bots:
         kb = InlineKeyboardBuilder()
         kb.button(text="◀️ Назад", callback_data=NetworkCb(action="menu"))
-        await callback.message.edit_text("❤️ Нет ботов.", reply_markup=kb.as_markup())
+        await callback.message.edit_text("❤️ <b>Здоровье сети</b>\n\nУ вас пока нет ботов.", reply_markup=no_bots_kb(back=NetworkCb(action="menu")))
         return
 
     # Batch check all tokens concurrently
@@ -547,7 +552,7 @@ async def cb_net_health(
         init = "⚡" if b["last_update_id"] > 1 else "💤"
         lines.append(
             f"{status} {label} [{cluster}] {init}\n"
-            f"   👥 {b['audience']:,} | offset: {b['last_update_id']}"
+            f"   👥 {num_ru(b['audience'])} | offset: {b['last_update_id']}"
         )
 
     lines.append(f"\n✅ Работают: {ok_count} | ❌ Ошибка: {fail_count}")
@@ -597,7 +602,7 @@ async def cb_net_broadcast(
     kb.adjust(1)
     await callback.message.edit_text(
         f"📢 <b>Сетевая рассылка</b>\n\n"
-        f"Охват: <b>{len(users):,}</b> уникальных пользователей по всем ботам.\n\n"
+        f"Охват: <b>{num_ru(len(users))}</b> уникальных пользователей по всем ботам.\n\n"
         "Каждый пользователь получит сообщение от бота, с которым взаимодействовал последним.\n\n"
         "Напишите текст рассылки (HTML поддерживается):",
         parse_mode="HTML",
@@ -612,7 +617,7 @@ async def msg_net_broadcast_text(message: Message, state: FSMContext) -> None:
     await state.set_state(NetworkBroadcast.confirming)
     await message.answer(
         f"📢 <b>Предпросмотр сетевой рассылки:</b>\n\n{message.text}\n\n"
-        f"Получателей: <b>{data['unique_count']:,}</b>\n\nЗапустить?",
+        f"Получателей: <b>{num_ru(data['unique_count'])}</b>\n\nЗапустить?",
         parse_mode="HTML",
         reply_markup=network_broadcast_confirm(),
     )
@@ -671,7 +676,7 @@ async def cb_net_broadcast_confirm(
     kb.button(text="◀️ К сети", callback_data=NetworkCb(action="menu"))
     await callback.message.edit_text(
         f"🚀 <b>Сетевая рассылка запущена!</b>\n\n"
-        f"Получателей: <b>{total_users:,}</b>\n"
+        f"Получателей: <b>{num_ru(total_users)}</b>\n"
         f"Задействовано ботов: <b>{started_bots}</b>\n\n"
         "Прогресс доступен в разделе «История рассылок» каждого бота.",
         parse_mode="HTML",
@@ -763,7 +768,7 @@ async def cb_net_clone_confirm(
     src_id = data.get("src_id")
     dst_id = callback_data.bot_id
     if not src_id or src_id == dst_id:
-        await callback.answer("Ошибка: некорректные боты.", show_alert=True)
+        await callback.answer("⚠️ Выбранные боты не найдены. Откройте список заново.", show_alert=True)
         return
 
     src_row = await db.get_bot(pool, src_id, callback.from_user.id)
@@ -817,20 +822,20 @@ async def cb_net_overlap(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
 
     lines = [
         "👥 <b>Пересечение аудиторий</b>\n",
-        f"Записей в БД: <b>{stats['total_entries']:,}</b>",
-        f"Уникальных юзеров: <b>{stats['unique_users']:,}</b>",
-        f"В нескольких ботах: <b>{stats['multi_bot_users']:,}</b> ({stats['overlap_pct']}%)\n",
+        f"Записей в БД: <b>{num_ru(stats['total_entries'])}</b>",
+        f"Уникальных пользователей: <b>{num_ru(stats['unique_users'])}</b>",
+        f"В нескольких ботах: <b>{num_ru(stats['multi_bot_users'])}</b> ({stats['overlap_pct']}%)\n",
         "<b>Аудитория по ботам:</b>",
     ]
     for b in bots[:10]:
         label = f"@{b['username']}" if b["username"] else b["first_name"]
         cluster = b.get("cluster") or "default"
-        lines.append(f"  • {label} [{cluster}] — {b['audience']:,} юз.")
+        lines.append(f"  • {label} [{cluster}] — {num_ru(b['audience'])} чел.")
 
     if stats["multi_bot_users"] > 0:
         lines.append(
-            f"\n💡 <i>{stats['multi_bot_users']:,} пользователей присутствуют в нескольких ботах.\n"
-            f"Сетевая рассылка отправит им только 1 сообщение (дедупликация).</i>"
+            f"\n💡 <i>{num_ru(stats['multi_bot_users'])} пользователей присутствуют в нескольких ботах.\n"
+            f"Сетевая рассылка отправит им только 1 сообщение (без повторов).</i>"
         )
 
     kb = InlineKeyboardBuilder()

@@ -34,7 +34,7 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from bot.callbacks import BmCb, SpinCb
 from bot.states import SpinFlow
-from bot.utils.op_helpers import safe_answer, terminal_kb
+from bot.utils.op_helpers import safe_answer, terminal_kb, cancel_kb
 
 from services import spintax_ai, spintax_service
 from services.logger import log_exc_swallow
@@ -120,7 +120,7 @@ async def cb_new(callback: CallbackQuery, state: FSMContext) -> None:
     await safe_answer(callback)
     await callback.message.answer(
         "✍️ Пришлите обычный текст сообщения — соберу из него spintax-шаблоны.\n\n"
-        "Отмена — /cancel"
+        "Отмена — /cancel", reply_markup=cancel_kb()
     )
 
 
@@ -133,7 +133,7 @@ async def cb_expand(callback: CallbackQuery, state: FSMContext) -> None:
         "<code>{Привет|Здравствуйте} {мир|друг}</code> — "
         "раскрою его в несколько случайных вариантов.\n\n"
         "Отмена — /cancel",
-        parse_mode="HTML",
+        parse_mode="HTML", reply_markup=cancel_kb(),
     )
 
 
@@ -193,7 +193,7 @@ async def msg_expand(message: Message, state: FSMContext) -> None:
 
 async def _run_spin(message: Message, state: FSMContext, script: str) -> None:
     if not script:
-        await message.answer("✍️ Пришлите текст сценария.")
+        await message.answer("✍️ Пришлите текст сценария.", reply_markup=cancel_kb())
         return
     if len(script) > _MAX_SCRIPT_LEN:
         await message.answer(

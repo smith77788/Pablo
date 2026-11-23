@@ -218,7 +218,10 @@ def test_confirmed_guess_moves_bots_to_webhook(mbw, monkeypatch):
         return True
 
     async def info(http, token, method, **kw):
-        return {"result": {"url": mbw.hook_url("https://app.example.com", 7)}}
+        # Вебхук стоит правильно: наш адрес и полный набор типов обновлений.
+        from services.auto_responder import _MANAGED_BOT_ALLOWED_UPDATES
+        return {"result": {"url": mbw.hook_url("https://app.example.com", 7),
+                           "allowed_updates": list(_MANAGED_BOT_ALLOWED_UPDATES)}}
 
     monkeypatch.setattr(mbw, "_guessed_base_is_ours", yes)
     monkeypatch.setattr(mbw, "register_webhook", reg)

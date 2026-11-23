@@ -42,6 +42,7 @@ from bot.utils.op_names import run_status as _run_status  # noqa: E402
 
 log = logging.getLogger(__name__)
 from bot.utils.owner_error import owner_error  # noqa: E402
+from bot.utils.op_helpers import cancel_kb
 
 router = Router(name="intent_engine")
 
@@ -67,7 +68,7 @@ _PRESET_DESCRIPTIONS: dict[str, str] = {
 _NAVIGATE_LABELS: dict[str, str] = {
     "gp_factory": "🌍 Открыть гео-сеть",
     "factory": "🏭 Открыть фабрику",
-    "mass_ops": "⚙️ Открыть Mass Ops",
+    "mass_ops": "⚡ Открыть массовые действия",
     "health_dashboard": "🩺 Открыть здоровье",
     "ecosystems": "🧠 Открыть экосистемы",
     "strike": "⚔️ Открыть массовые жалобы",
@@ -256,7 +257,7 @@ async def fsm_intent_description(
 ) -> None:
     description = (message.text or "").strip()
     if not description:
-        await message.answer("Опиши цель текстом.")
+        await message.answer("Опиши цель текстом.", reply_markup=cancel_kb())
         return
 
     await state.clear()
@@ -360,7 +361,7 @@ async def cb_intent_strategy(
     intent_id = callback_data.intent_id
     new_strategy = callback_data.value or ""
     if new_strategy not in ("safest", "balanced", "fastest", "scalable"):
-        await callback.answer("Неизвестная стратегия", show_alert=True)
+        await callback.answer("⚠️ Кнопка устарела. Откройте раздел заново.", show_alert=True)
         return
 
     row = await db.get_intent(pool, intent_id, callback.from_user.id)
@@ -675,7 +676,7 @@ async def _execute_op_intent(
         if not targets:
             await _show_manual_hint(
                 callback,
-                "Для массового вступления укажи список каналов в Mass Ops.",
+                "Для массового вступления укажи список каналов в «⚡ Массовых действиях».",
                 "mass_ops",
             )
             return
@@ -685,7 +686,7 @@ async def _execute_op_intent(
         if not targets:
             await _show_manual_hint(
                 callback,
-                "Для массового выхода укажи список каналов в Mass Ops.",
+                "Для массового выхода укажи список каналов в «⚡ Массовых действиях».",
                 "mass_ops",
             )
             return
@@ -844,7 +845,7 @@ async def cb_intent_detail(
 ) -> None:
     row = await db.get_intent(pool, callback_data.intent_id, callback.from_user.id)
     if not row:
-        await callback.answer("Не найдено", show_alert=True)
+        await callback.answer("Запись не найдена. Уже удалено или недоступно. Откройте список заново.", show_alert=True)
         return
     await safe_answer(callback)
     if callback.message:

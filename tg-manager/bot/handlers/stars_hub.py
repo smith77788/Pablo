@@ -17,7 +17,7 @@ from bot.utils.picker_cap import cap_slice as _cap, cap_note_button as _cap_note
 from bot.states import StarsExperimentFSM
 from database import db
 from services import stars_optimizer
-from bot.utils.op_helpers import safe_answer, terminal_kb
+from bot.utils.op_helpers import safe_answer, terminal_kb, cancel_kb
 
 log = logging.getLogger(__name__)
 
@@ -452,13 +452,13 @@ async def cb_create_ctype(callback: CallbackQuery, state: FSMContext) -> None:
     ctype = action_part.replace("create_ctype_", "")
 
     if ctype not in CONTENT_TYPES:
-        await callback.answer("Неверный тип", show_alert=True)
+        await callback.answer("⚠️ Кнопка устарела. Откройте раздел заново.", show_alert=True)
         return
     await state.update_data(content_type=ctype)
     await state.set_state(StarsExperimentFSM.waiting_price_a)
     await callback.message.edit_text(
         f"🧪 Шаг 4/5 — Введите цену <b>варианта A</b> в Stars (число):",
-        parse_mode="HTML",
+        parse_mode="HTML", reply_markup=cancel_kb(),
     )
 
 
@@ -466,13 +466,13 @@ async def cb_create_ctype(callback: CallbackQuery, state: FSMContext) -> None:
 async def fsm_waiting_price_a(message: Message, state: FSMContext) -> None:
     text = message.text.strip() if message.text else ""
     if not text.isdigit() or int(text) < 1:
-        await message.answer("⚠️ Введите целое положительное число Stars.")
+        await message.answer("⚠️ Введите целое положительное число Stars.", reply_markup=cancel_kb())
         return
     await state.update_data(price_a=int(text))
     await state.set_state(StarsExperimentFSM.waiting_price_b)
     await message.answer(
         "🧪 Шаг 5/5 — Введите цену <b>варианта B</b> в Stars (число):",
-        parse_mode="HTML",
+        parse_mode="HTML", reply_markup=cancel_kb(),
     )
 
 
@@ -480,13 +480,13 @@ async def fsm_waiting_price_a(message: Message, state: FSMContext) -> None:
 async def fsm_waiting_price_b(message: Message, state: FSMContext, pool: asyncpg.Pool) -> None:
     text = message.text.strip() if message.text else ""
     if not text.isdigit() or int(text) < 1:
-        await message.answer("⚠️ Введите целое положительное число Stars.")
+        await message.answer("⚠️ Введите целое положительное число Stars.", reply_markup=cancel_kb())
         return
     data = await state.get_data()
     price_b = int(text)
     price_a = data["price_a"]
     if price_a == price_b:
-        await message.answer("⚠️ Цены A и B должны быть разными. Введите другую цену.")
+        await message.answer("⚠️ Цены A и B должны быть разными. Введите другую цену.", reply_markup=cancel_kb())
         return
 
     exp = await stars_optimizer.create_experiment(
@@ -512,7 +512,7 @@ async def fsm_waiting_price_b(message: Message, state: FSMContext, pool: asyncpg
     kb.adjust(1)
     await message.answer(
         f"✅ <b>Эксперимент создан!</b>\n\n"
-        f"Название: <b>{exp.name}</b>\n"
+        f"Название: <b>{_html.escape(str(exp.name))}</b>\n"
         f"Вариант A: <b>{exp.price_a} Stars</b>\n"
         f"Вариант B: <b>{exp.price_b} Stars</b>\n\n"
         f"Используйте API record_impression / record_conversion для сбора данных.",

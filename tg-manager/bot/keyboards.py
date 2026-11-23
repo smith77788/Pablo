@@ -49,6 +49,7 @@ from bot.callbacks import (
     TaskCb,
     BotFactCb,
 )
+from bot.utils.fmt import num_ru, plural  # noqa: E402
 
 PAGE_SIZE: int = 5
 
@@ -160,7 +161,7 @@ def net_broadcast_target_menu() -> InlineKeyboardMarkup:
         callback_data=NetBcCb(action="choose_segment", segment="all_each"),
     )
     kb.button(
-        text="🎯 Уникальным юзерам (дедупликация)",
+        text="🎯 Уникальным пользователям (без повторов)",
         callback_data=NetBcCb(action="choose_segment", segment="unique"),
     )
     kb.button(
@@ -366,7 +367,7 @@ def audience_menu(bot_id: int) -> InlineKeyboardMarkup:
     kb.button(text="⚡ Собрать всех", callback_data=AudCb(action="scan", bot_id=bot_id))
     kb.button(text="📊 Статистика", callback_data=AudCb(action="stats", bot_id=bot_id))
     kb.button(
-        text="📤 Написать юзеру", callback_data=AudCb(action="send_user", bot_id=bot_id)
+        text="📤 Написать пользователю", callback_data=AudCb(action="send_user", bot_id=bot_id)
     )
     kb.button(
         text="📤 Экспорт CSV", callback_data=AudCb(action="export", bot_id=bot_id)
@@ -1310,7 +1311,7 @@ def engagement_menu(bot_id: int, segs: dict) -> InlineKeyboardMarkup:
         callback_data=EngageCb(action="heatmap", bot_id=bot_id),
     )
     kb.button(
-        text="🏆 Топ-10 активных юзеров",
+        text="🏆 Топ-10 активных пользователей",
         callback_data=EngageCb(action="top_users", bot_id=bot_id),
     )
     kb.button(
@@ -1329,7 +1330,7 @@ def seo_menu(bot_id: int) -> InlineKeyboardMarkup:
         callback_data=SeoCb(action="analyze", bot_id=bot_id),
     )
     kb.button(
-        text="🔑 Ключевые слова юзеров",
+        text="🔑 Ключевые слова пользователей",
         callback_data=SeoCb(action="keywords", bot_id=bot_id),
     )
     kb.button(
@@ -1365,7 +1366,7 @@ def network_clusters_menu(clusters: list) -> InlineKeyboardMarkup:
     kb = InlineKeyboardBuilder()
     for c in clusters:
         kb.button(
-            text=f"🌐 {c['cluster']} — {c['bot_count']} бот. · {c['total_audience']:,} юз.",
+            text=f"🌐 {c['cluster']} — {c['bot_count']} {plural(c['bot_count'], 'бот', 'бота', 'ботов')} · {num_ru(c['total_audience'])} чел.",
             callback_data=ClusterCb(action="view", cluster=c["cluster"]),
         )
     kb.button(text="◀️ Назад", callback_data=NetworkCb(action="menu"))

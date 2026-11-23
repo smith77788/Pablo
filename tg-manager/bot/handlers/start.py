@@ -787,6 +787,7 @@ async def cmd_find(message: Message, pool: asyncpg.Pool | None = None) -> None:
             "<code>/find позиции</code>\n"
             "<code>/find прокси</code>",
             parse_mode="HTML",
+            reply_markup=terminal_kb(),
         )
         return
 
@@ -895,5 +896,5 @@ async def cmd_pair(message: Message, pool) -> None:
         f"само примерно {DEVICE_TTL_DAYS} дней — код больше не понадобится.\n\n"
         "Код одноразовый. Никому его не передавайте: тот, кто введёт код, "
         "получит доступ к вашей панели.",
-        parse_mode="HTML",
+        parse_mode="HTML", reply_markup=terminal_kb(),
     )

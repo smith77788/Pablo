@@ -165,6 +165,91 @@ async def safe_answer(callback: "CallbackQuery", text: str = "", show_alert: boo
 # ── Выход с терминального экрана ─────────────────────────────────────────────
 
 
+def no_accounts_kb(*, back: object | None = None):
+    """Клавиатура экрана «нет активных аккаунтов».
+
+    Экран объясняет, что без аккаунта дальше нельзя, и раньше предлагал только
+    «Назад»: человеку приходилось самому искать, где аккаунт добавляется. Здесь
+    первая кнопка ведёт прямо к добавлению.
+    """
+    from aiogram.utils.keyboard import InlineKeyboardBuilder
+    from bot.callbacks import AccCb, BmCb
+
+    kb = InlineKeyboardBuilder()
+    kb.button(text="➕ Добавить аккаунт", callback_data=AccCb(action="add"))
+    if back is not None:
+        kb.button(text="◀️ Назад", callback_data=back)
+    kb.button(text="🏠 Главное меню", callback_data=BmCb(action="main"))
+    kb.adjust(1, 2)
+    return kb.as_markup()
+
+
+def no_bots_kb(*, back: object | None = None):
+    """Клавиатура экрана «у вас нет ботов»: первая кнопка — добавить бота,
+    а не «Назад» и поиск раздела по подсказке в тексте."""
+    from aiogram.utils.keyboard import InlineKeyboardBuilder
+    from bot.callbacks import BmCb, BotCb
+
+    kb = InlineKeyboardBuilder()
+    kb.button(text="➕ Добавить бота", callback_data=BotCb(action="add"))
+    if back is not None:
+        kb.button(text="◀️ Назад", callback_data=back)
+    kb.button(text="🏠 Главное меню", callback_data=BmCb(action="main"))
+    kb.adjust(1, 2)
+    return kb.as_markup()
+
+
+async def show_no_accounts(callback, *, back: object | None = None) -> None:
+    """Экран «нет аккаунтов» вместо всплывашки.
+
+    Всплывашка «Нет аккаунтов.» закрывается, и человек остаётся на том же
+    экране, не зная, где аккаунт добавляется. Здесь тот же ответ — экраном с
+    кнопкой «➕ Добавить аккаунт» первой.
+    """
+    await safe_edit(
+        callback,
+        "📱 <b>Нет активных аккаунтов</b>\n\n"
+        "Для этого действия нужен хотя бы один подключённый Telegram-аккаунт. "
+        "Добавьте его — это займёт пару минут.",
+        reply_markup=no_accounts_kb(back=back),
+    )
+
+
+async def show_no_bots(callback, *, back: object | None = None) -> None:
+    """Экран «нет ботов» вместо всплывашки — с кнопкой «➕ Добавить бота»."""
+    await safe_edit(
+        callback,
+        "🤖 <b>Нет подключённых ботов</b>\n\n"
+        "Для этого действия нужен хотя бы один бот. Подключите его по токену "
+        "от @BotFather.",
+        reply_markup=no_bots_kb(back=back),
+    )
+
+
+async def ask_to_confirm(callback, *, question: str, yes, no,
+                         yes_text: str = "🗑 Да, удалить") -> None:
+    """Шаг «вы уверены?» перед необратимым действием.
+
+    Кнопка «🗑 Удалить» у кампании, плана прогрева, ДНК-шаблона, вотчера и
+    очереди операций удаляла с первого нажатия: промах пальцем по соседней
+    «▶️ Запустить» стоил записи целиком. `yes` — исходный callback действия
+    (обычно `callback_data.model_copy(update={"action": ...})`), `no` — куда
+    вернуться.
+    """
+    from aiogram.utils.keyboard import InlineKeyboardBuilder
+
+    await safe_answer(callback)
+    kb = InlineKeyboardBuilder()
+    kb.button(text=yes_text, callback_data=yes)
+    kb.button(text="◀️ Отмена", callback_data=no)
+    kb.adjust(1)
+    await callback.message.edit_text(
+        f"{question}\n\nОтменить это будет нельзя.",
+        parse_mode="HTML",
+        reply_markup=kb.as_markup(),
+    )
+
+
 def terminal_kb(*, back: object | None = None, back_text: str = "◀️ Назад"):
     """Клавиатура для финального экрана — «готово», «ошибка», «отменено».
 
@@ -207,4 +292,42 @@ def retry_kb(retry_cb: object, *, retry_text: str = "🔄 Попробовать
         kb.button(text="◀️ Назад", callback_data=back)
     kb.button(text="🏠 Главное меню", callback_data=BmCb(action="main"))
     kb.adjust(1)
+    return kb.as_markup()
+
+
+def queued_op_kb(op_id: int, *, back: object | None = None):
+    """Клавиатура экрана «операция поставлена в очередь».
+
+    Раньше такие экраны заканчивались строкой «Прогресс: /ops» без единой
+    кнопки: чтобы увидеть свою операцию, надо было помнить команду и потом
+    искать её в списке. Первая кнопка открывает именно эту операцию.
+    """
+    from aiogram.utils.keyboard import InlineKeyboardBuilder
+    from bot.callbacks import BmCb
+
+    kb = InlineKeyboardBuilder()
+    kb.button(text="📋 Детали операции", callback_data=BmCb(action="op_detail", op_id=op_id))
+    if back is not None:
+        kb.button(text="◀️ Назад", callback_data=back)
+    kb.button(text="🏠 Главное меню", callback_data=BmCb(action="main"))
+    kb.adjust(1, 2)
+    return kb.as_markup()
+
+
+def cancel_kb(*, back: object | None = None):
+    """Клавиатура под запросом ввода («Введите…», «Пришлите…»).
+
+    Без неё человек, передумавший на шаге мастера, оставался в состоянии
+    ввода: любое следующее сообщение уходило в брошенный шаг, а выйти можно
+    было только командой /cancel, которую надо знать. «Отменить» ведёт в
+    главное меню, а оно само завершает мастер (`state.clear()`).
+    """
+    from aiogram.utils.keyboard import InlineKeyboardBuilder
+    from bot.callbacks import BmCb
+
+    kb = InlineKeyboardBuilder()
+    if back is not None:
+        kb.button(text="◀️ Назад", callback_data=back)
+    kb.button(text="✖️ Отменить", callback_data=BmCb(action="main"))
+    kb.adjust(2 if back is not None else 1)
     return kb.as_markup()

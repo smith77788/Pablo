@@ -39,6 +39,10 @@ from database.db import fetch_bots
 from bot.utils.op_helpers import safe_answer
 
 log = logging.getLogger(__name__)
+from bot.utils.fmt import num_ru, plural  # noqa: E402
+from bot.utils.op_helpers import no_accounts_kb
+from bot.utils.op_helpers import show_no_accounts
+
 router = Router()
 
 
@@ -520,7 +524,7 @@ async def cb_health_accounts(callback: CallbackQuery, pool: asyncpg.Pool) -> Non
         if grp_cooldown:
             summary_parts.append(f"⏸ {len(grp_cooldown)} на паузе")
         if grp_low_trust:
-            summary_parts.append(f"⚠️ {len(grp_low_trust)} низкий trust")
+            summary_parts.append(f"⚠️ {len(grp_low_trust)} с низким доверием")
         if grp_no_session:
             summary_parts.append(f"📵 {len(grp_no_session)} без сессии")
         lines.append("  ".join(summary_parts) if summary_parts else "Нет данных")
@@ -580,7 +584,7 @@ async def cb_health_accounts(callback: CallbackQuery, pool: asyncpg.Pool) -> Non
                 trust = float(acc["trust_score"] or 1.0)
                 flood_cnt = int(acc["flood_count_7d"] or 0)
                 lines.append(
-                    f"  ⏸ <b>{name}</b> | {human_cd} | trust: {trust:.2f} | флудов: {flood_cnt}"
+                    f"  ⏸ <b>{name}</b> | {human_cd} | доверие: {trust:.2f} | флудов: {flood_cnt}"
                 )
             lines.append("")
 
@@ -599,7 +603,7 @@ async def cb_health_accounts(callback: CallbackQuery, pool: asyncpg.Pool) -> Non
                 health = acc["health_score"]
                 hs_str = f" | 🩺{float(health):.0f}" if health is not None else ""
                 lines.append(
-                    f"  ⚠️ <b>{name}</b> | trust: <b>{trust:.2f}</b> | флудов: {flood_cnt}{hs_str}"
+                    f"  ⚠️ <b>{name}</b> | доверие: <b>{trust:.2f}</b> | флудов: {flood_cnt}{hs_str}"
                 )
             lines.append("")
 
@@ -655,7 +659,7 @@ async def cb_health_real_check(
         await safe_edit(
             callback,
             "📱 Нет активных аккаунтов для проверки.",
-            reply_markup=_back_kb().as_markup(),
+            reply_markup=no_accounts_kb(back=HealthCb(action="menu")),
         )
         return
 
@@ -849,7 +853,7 @@ async def cb_health_bots(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
             if isinstance(result, Exception) or not result[0]:
                 lines.append(f"❌ @{name} — токен недействителен")
             else:
-                lines.append(f"✅ @{name} — активен | {user_count:,} пользователей")
+                lines.append(f"✅ @{name} — активен | {num_ru(user_count)} пользователей")
 
     kb = _back_kb()
     kb.adjust(1)
@@ -1028,7 +1032,7 @@ async def cb_health_trend(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
 
             lines.append(
                 f"{status} {trend} @{html.escape(name)}  [{bar}] {h7:.0f}/100\n"
-                f"   <i>24ч: {h24:.0f} | min: {hmin:.0f} | trust: {trust:.2f}</i>"
+                f"   <i>24ч: {h24:.0f} | мин.: {hmin:.0f} | доверие: {trust:.2f}</i>"
             )
 
     kb = _back_kb()
@@ -1299,7 +1303,7 @@ async def cb_health_recommendations(
             critical_count += 1
         elif trust < 0.15:
             recs.append(
-                f"🔴 <b>{name}</b> — trust {trust:.2f} (экстренно).\n"
+                f"🔴 <b>{name}</b> — доверие {trust:.2f} (экстренно).\n"
                 "   ↳ НЕМЕДЛЕННО прекратите все операции.\n"
                 "   ↳ Дайте отдых 72+ часов. Проверьте прокси.\n"
                 "   ↳ Риск перманентного бана высокий."
@@ -1309,7 +1313,7 @@ async def cb_health_recommendations(
         elif trust < 0.3:
             hs_line = f"   ↳ Health score: {health_s:.0f}/100\n" if health_s else ""
             recs.append(
-                f"🔴 <b>{name}</b> — trust {trust:.2f} (критично).\n"
+                f"🔴 <b>{name}</b> — доверие {trust:.2f} (критично).\n"
                 f"{hs_line}"
                 "   ↳ Дайте отдохнуть 48-72ч без операций.\n"
                 "   ↳ Проверьте вручную — возможен shadowban."
@@ -1319,7 +1323,7 @@ async def cb_health_recommendations(
         elif trust < 0.6:
             hs_line = f"   ↳ Health score: {health_s:.0f}/100\n" if health_s else ""
             recs.append(
-                f"🟡 <b>{name}</b> — trust {trust:.2f} (низкий).\n"
+                f"🟡 <b>{name}</b> — доверие {trust:.2f} (низкое).\n"
                 f"{hs_line}"
                 f"   ↳ Снизьте интенсивность на 50%.\n"
                 f"   ↳ Только read-only операции 24ч.\n"
@@ -1330,7 +1334,7 @@ async def cb_health_recommendations(
             recs.append(
                 f"🟡 <b>{name}</b> — {flood_cnt} flood-событий за 7д.\n"
                 "   ↳ Увеличьте задержки до 60-90s.\n"
-                "   ↳ Используйте pacing_mode=safe.\n"
+                "   ↳ Включите бережный темп.\n"
                 "   ↳ Чередуйте с другими аккаунтами."
             )
             health_tips.add("pacing_safe")
@@ -1343,13 +1347,13 @@ async def cb_health_recommendations(
         )
     elif critical_count == 0 and not recs:
         general.append("✅ <b>Все аккаунты в норме</b> — проблем не обнаружено.")
-        general.append("💪 Продолжайте соблюдать safe pacing и мониторинг.")
+        general.append("💪 Продолжайте соблюдать бережный темп и следить за аккаунтами.")
 
     if flood_7d_total > 20:
         general.append(
             f"⚠️ <b>Высокая flood-активность</b>: {flood_7d_total} событий за неделю.\n"
             "   ↳ Снизьте параллельность операций.\n"
-            "   ↳ Используйте pacing_mode=safe (120-180s задержки).\n"
+            "   ↳ Включите бережный темп (паузы 120–180 с).\n"
             "   ↳ Проверьте расписания на предмет пересечений."
         )
 
@@ -1357,7 +1361,7 @@ async def cb_health_recommendations(
     low_trust = sum(1 for a in accounts if float(a["trust_score"] or 1) < 0.5)
     if active_count > 0 and low_trust / active_count > 0.5:
         general.append(
-            "🔴 <b>Критическая ситуация</b>: >50% аккаунтов с низким trust.\n"
+            "🔴 <b>Критическая ситуация</b>: >50% аккаунтов с низким доверием.\n"
             "   ↳ Приостановите ВСЕ bulk-операции на 48 часов.\n"
             "   ↳ Запустите 🔄 Авто-ротацию для защиты аккаунтов.\n"
             "   ↳ Проверьте прокси — возможно, они скомпрометированы."
@@ -1380,7 +1384,7 @@ async def cb_health_recommendations(
             )
         if "proxy_check" in health_tips:
             tips_text.append(
-                "💡 <b>Совет:</b> Проверьте прокси в ⚙️ Мониторинг → 🌐 Прокси. Скомпрометированные IP снижают trust."
+                "💡 <b>Совет:</b> Проверьте прокси в ⚙️ Мониторинг → 🌐 Прокси. Скомпрометированные IP снижают доверие."
             )
         if "shadowban_check" in health_tips:
             tips_text.append(
@@ -1388,7 +1392,7 @@ async def cb_health_recommendations(
             )
         if "intensity_reduce" in health_tips:
             tips_text.append(
-                "💡 <b>Совет:</b> Используйте pacing_mode=safe в bulk-операциях для автоматических безопасных задержек."
+                "💡 <b>Совет:</b> Включайте бережный темп в массовых операциях для автоматических безопасных задержек."
             )
         if "pacing_safe" in health_tips:
             tips_text.append(
@@ -1466,9 +1470,9 @@ async def cb_auto_rotate_confirm(callback: CallbackQuery, pool: asyncpg.Pool) ->
         callback,
         "🔄 <b>Авто-ротация аккаунтов</b>\n\n"
         "Система проверит все аккаунты и применит защитные меры:\n\n"
-        f"🔴 Критически низкий trust (<0.3): <b>{critical}</b> акк.\n"
+        f"🔴 Критически низкое доверие (<0.3): <b>{critical}</b> акк.\n"
         "   → Поставить кулдаун 72 часа\n"
-        f"🟡 Низкий trust (0.3–0.6): <b>{low}</b> акк.\n"
+        f"🟡 Низкое доверие (0.3–0.6): <b>{low}</b> акк.\n"
         "   → Поставить кулдаун 24 часа\n"
         f"🌊 Уже в кулдауне: <b>{cooldown}</b> акк.\n"
         "   → Пропустить\n\n"
@@ -1525,9 +1529,9 @@ async def cb_auto_rotate(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
         callback,
         "✅ <b>Авто-ротация выполнена</b>\n\n"
         f"🔴 Критических → 72ч кулдаун: <b>{crit_n}</b>\n"
-        f"🟡 С низким trust → 24ч кулдаун: <b>{low_n}</b>\n\n"
+        f"🟡 С низким доверием → кулдаун 24ч: <b>{low_n}</b>\n\n"
         "Эти аккаунты не будут использоваться в операциях до окончания кулдауна.\n"
-        "Trust score восстановится со временем при отсутствии операций.",
+        "Доверие восстановится со временем при отсутствии операций.",
         reply_markup=kb.as_markup(),
     )
 
@@ -1551,7 +1555,7 @@ async def cb_health_export_csv(callback: CallbackQuery, pool: asyncpg.Pool) -> N
     except Exception:
         accounts = []
     if not accounts:
-        await callback.answer("Нет аккаунтов для экспорта", show_alert=True)
+        await show_no_accounts(callback)
         return
     await callback.answer("⏳ Генерирую CSV...")
 
@@ -1710,7 +1714,7 @@ async def cb_reconnect_menu(callback: CallbackQuery, pool: asyncpg.Pool) -> None
     if not rows:
         kb = _back_kb()
         await safe_edit(
-            callback, "📱 Нет подключённых аккаунтов.", reply_markup=kb.as_markup()
+            callback, "📱 Нет подключённых аккаунтов.", reply_markup=no_accounts_kb(back=HealthCb(action="menu"))
         )
         return
 
@@ -1768,7 +1772,7 @@ async def cb_set_cooldown_menu(callback: CallbackQuery, pool: asyncpg.Pool) -> N
     if not rows:
         kb = _back_kb()
         await safe_edit(
-            callback, "📱 Нет активных аккаунтов.", reply_markup=kb.as_markup()
+            callback, "📱 Нет активных аккаунтов.", reply_markup=no_accounts_kb(back=HealthCb(action="menu"))
         )
         return
 
@@ -1930,7 +1934,7 @@ async def cb_reset_cooldown_menu(callback: CallbackQuery, pool: asyncpg.Pool) ->
 
     lines = [
         "🔓 <b>Снять паузы и карантин</b>\n",
-        f"Не берутся в работу: <b>{len(rows)}</b> аккаунт(ов)\n",
+        f"Не берутся в работу: <b>{len(rows)}</b> {plural(len(rows), 'аккаунт', 'аккаунта', 'аккаунтов')}\n",
     ]
     _shown = _cap(rows)
     for acc in _shown:

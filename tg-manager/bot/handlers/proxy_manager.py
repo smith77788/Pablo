@@ -35,6 +35,8 @@ from bot.utils.op_helpers import safe_answer
 log = logging.getLogger(__name__)
 from bot.utils.owner_error import owner_error  # noqa: E402
 
+from bot.utils.fmt import plural  # noqa: E402
+
 router = Router()
 
 _PROXY_RE = re.compile(
@@ -766,7 +768,7 @@ async def cb_check_ip_unique(callback: CallbackQuery, pool: asyncpg.Pool) -> Non
         lines.append(f"✅ Все {len(rows)} прокси указывают на разные хосты. Пересечений нет.")
     else:
         lines.append(
-            f"⚠️ Найдено {len(dupes)} хост(ов), на которые указывают несколько "
+            f"⚠️ Найдено {len(dupes)} {plural(len(dupes), 'хост', 'хоста', 'хостов')}, на которые указывают несколько "
             "разных прокси-записей — аккаунты на них будут выглядеть с одного "
             "и того же IP, даже если формально привязаны к «разным» прокси:\n"
         )
@@ -804,7 +806,7 @@ async def cb_proxy_delete(
         )
     except Exception as exc:
         mark_handled_error(f"proxy_delete fetch: {exc}")
-        await callback.answer("Ошибка при загрузке прокси.", show_alert=True)
+        await callback.answer("⚠️ Не удалось загрузить прокси. Попробуйте ещё раз через минуту.", show_alert=True)
         return
     if not row:
         await callback.answer("Прокси не найден.", show_alert=True)
@@ -866,7 +868,7 @@ async def cb_proxy_toggle_backup(
         )
     except Exception as exc:
         mark_handled_error(f"proxy_toggle_backup: {exc}")
-        await callback.answer("Ошибка переключения резерва.", show_alert=True)
+        await callback.answer("⚠️ Не удалось переключить резерв. Попробуйте ещё раз через минуту.", show_alert=True)
         return
     if new_val is None:
         await callback.answer("Прокси не найден.", show_alert=True)

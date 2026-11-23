@@ -175,6 +175,18 @@ def webhook_broken(info: dict, now: datetime | None = None) -> bool:
     return now - when <= _ERROR_FRESH
 
 
+def allowed_updates_current(info: dict) -> bool:
+    """Вебхук получает ВСЕ типы, которые мы запрашиваем? ЧИСТАЯ.
+
+    Пустой/отсутствующий список у Telegram значит «набор по умолчанию», а в
+    него не входят ни chat_member, ни chat_join_request, ни message_reaction.
+    """
+    from services.auto_responder import _MANAGED_BOT_ALLOWED_UPDATES
+
+    have = set(info.get("allowed_updates") or [])
+    return set(_MANAGED_BOT_ALLOWED_UPDATES) <= have
+
+
 async def register_webhook(
     http: aiohttp.ClientSession,
     bot_token: str,
@@ -281,7 +293,12 @@ async def sync(pool: asyncpg.Pool, http: aiohttp.ClientSession) -> dict:
             if await unregister_webhook(http, r["token"], r["bot_id"]):
                 await _set_mode(pool, r["bot_id"], False, failed=True)
                 stats["fallback"] += 1
-        elif info.get("url") != hook_url(base, r["bot_id"]):
+        elif (info.get("url") != hook_url(base, r["bot_id"])
+              or not allowed_updates_current(info)):
+            # Набор типов обновлений вебхук ЗАПОМИНАЕТ на момент установки.
+            # Добавили тип в коде (так появилась заявка на вступление) — у ботов,
+            # уже стоявших на вебхуке, Telegram его не присылает, пока вебхук
+            # не поставят заново. Раньше сверка смотрела только адрес.
             # Вебхук сняли или поставили чужой — возвращаем свой; не вышло —
             # бот уходит на опрос, а не глохнет.
             if not await register_webhook(http, r["token"], r["bot_id"], base):

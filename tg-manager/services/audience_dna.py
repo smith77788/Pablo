@@ -391,7 +391,7 @@ def generate_recommendations(
     # Audience size context
     if dna.total_users_analyzed > 0:
         recs.append(
-            f"👥 <b>Проанализировано пользователей:</b> {dna.total_users_analyzed:,}"
+            f"👥 <b>Проанализировано пользователей:</b> {format(dna.total_users_analyzed, ',').replace(',', ' ')}"
         )
 
     # Actionable tip based on peak hours

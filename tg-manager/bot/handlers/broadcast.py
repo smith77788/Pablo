@@ -23,6 +23,7 @@ from services import broadcaster
 from bot.utils.op_helpers import safe_answer
 
 from bot.utils.op_names import run_status as _run_status  # noqa: E402
+from bot.utils.op_helpers import cancel_kb
 
 router = Router()
 
@@ -301,7 +302,7 @@ async def msg_button_text(message: Message, state: FSMContext) -> None:
     await state.set_state(Broadcast.waiting_button_url)
     data = await state.get_data()
     await message.answer(
-        f"🔗 Текст кнопки: <b>{btn_text}</b>\n\n"
+        f"🔗 Текст кнопки: <b>{html.escape(btn_text)}</b>\n\n"
         "Теперь введите URL:\n"
         "💡 Должен начинаться с <code>http://</code>, <code>https://</code> "
         "или <code>tg://</code>\n"
@@ -318,7 +319,8 @@ async def msg_button_url(
     url = message.text.strip()
     if not url.startswith(("http://", "https://", "tg://")):
         await message.answer(
-            "❌ Неверный URL. Должен начинаться с http:// или https://"
+            "❌ Неверный URL. Должен начинаться с http:// или https://",
+            reply_markup=cancel_kb(),
         )
         return
 

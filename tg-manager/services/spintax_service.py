@@ -21,6 +21,7 @@ import unicodedata
 from typing import Awaitable, Callable
 
 from services.spintax_engine import Context, SpintaxEngine
+from bot.utils.fmt import plural
 
 log = logging.getLogger(__name__)
 
@@ -416,7 +417,7 @@ def check_minimum_variants(template: str) -> list[str]:
     for i, count in enumerate(variants):
         if count < MIN_VARIANTS_PER_GROUP:
             errors.append(
-                f"группа #{i+1} содержит только {count} вариант(ов), "
+                f"группа #{i+1} содержит только {count} {plural(count, 'вариант', 'варианта', 'вариантов')}, "
                 f"нужно минимум {MIN_VARIANTS_PER_GROUP}"
             )
     return errors

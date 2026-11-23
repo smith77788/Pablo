@@ -43,6 +43,7 @@ from bot.utils.op_helpers import safe_answer, terminal_kb
 
 log = logging.getLogger(__name__)
 from bot.utils.owner_error import owner_error  # noqa: E402
+from bot.utils.op_helpers import cancel_kb
 
 router = Router()
 
@@ -119,7 +120,7 @@ async def cb_nodes_add(callback: CallbackQuery, state: FSMContext) -> None:
     await state.set_state(NodesAddFSM.waiting_chat_id)
     await callback.message.edit_text(
         "<b>📡 Новый воркспейс — шаг 1/3</b>\n\n"
-        "Отправьте <b>Chat ID</b> форум-супергруппы.\n\n"
+        "Отправьте <b>ID чата</b> форум-супергруппы.\n\n"
         "Как получить ID:\n"
         "• Добавьте @userinfobot в группу\n"
         "• Или используйте <code>getUpdates</code> в Bot API\n\n"
@@ -136,7 +137,7 @@ async def msg_nodes_chat_id(message: Message, state: FSMContext) -> None:
         chat_id = int(raw)
     except (TypeError, ValueError):
         await message.answer(
-            "❌ Неверный формат. Введите числовой Chat ID, например <code>-1001234567890</code>",
+            "❌ Неверный формат. Введите числовой ID чата, например <code>-1001234567890</code>",
             parse_mode="HTML",
             reply_markup=_cancel_kb(),
         )
@@ -177,7 +178,7 @@ async def cb_nodes_add_type(
 
     node_type = callback_data.action.removeprefix("add_type_")
     if node_type not in NODE_TYPE_LABELS:
-        await callback.answer("Неизвестный тип.", show_alert=True)
+        await callback.answer("⚠️ Кнопка устарела. Откройте раздел заново.", show_alert=True)
         return
 
     await safe_answer(callback)
@@ -476,7 +477,7 @@ async def cb_prov_type(
 ) -> None:
     entity_type = callback_data.action.removeprefix("prov_type_")
     if entity_type not in ENTITY_LABELS:
-        await callback.answer("Неизвестный тип.", show_alert=True)
+        await callback.answer("⚠️ Кнопка устарела. Откройте раздел заново.", show_alert=True)
         return
 
     fsm_data = await state.get_data()
@@ -533,7 +534,7 @@ async def msg_prov_topic_name(
 ) -> None:
     topic_name = (message.text or "").strip()[:128]
     if not topic_name:
-        await message.answer("❌ Название не может быть пустым.")
+        await message.answer("❌ Название не может быть пустым.", reply_markup=cancel_kb())
         return
 
     fsm_data = await state.get_data()
@@ -585,7 +586,7 @@ async def msg_prov_topic_name(
             "Проверьте:\n"
             "• Бот является администратором форум-группы\n"
             "• Группа включена в форум-режим\n"
-            "• Chat ID корректен",
+            "• ID чата указан верно",
             parse_mode="HTML",
             reply_markup=kb.as_markup(),
         )
@@ -636,7 +637,7 @@ async def cb_bulk_etype(
 ) -> None:
     entity_type = callback_data.action.removeprefix("bulk_etype_")
     if entity_type not in ENTITY_LABELS:
-        await callback.answer("Неизвестный тип.", show_alert=True)
+        await callback.answer("⚠️ Кнопка устарела. Откройте раздел заново.", show_alert=True)
         return
 
     fsm_data = await state.get_data()
@@ -671,15 +672,15 @@ async def msg_bulk_ids(
     try:
         ids = [int(x.strip()) for x in raw.replace("\n", ",").split(",") if x.strip()]
     except (TypeError, ValueError):
-        await message.answer("❌ Неверный формат. Пример: <code>101, 102, 103</code>", parse_mode="HTML")
+        await message.answer("❌ Неверный формат. Пример: <code>101, 102, 103</code>", parse_mode="HTML", reply_markup=cancel_kb())
         return
 
     if not ids:
-        await message.answer("❌ Список пустой.")
+        await message.answer("❌ Список пустой.", reply_markup=cancel_kb())
         return
 
     if len(ids) > 500:
-        await message.answer("❌ Максимум 500 сущностей за один запуск.")
+        await message.answer("❌ Максимум 500 сущностей за один запуск.", reply_markup=cancel_kb())
         return
 
     fsm_data = await state.get_data()
@@ -773,7 +774,7 @@ async def msg_broadcast_text(
 ) -> None:
     text = (message.text or "").strip()
     if not text:
-        await message.answer("❌ Текст не может быть пустым.")
+        await message.answer("❌ Текст не может быть пустым.", reply_markup=cancel_kb())
         return
 
     fsm_data = await state.get_data()

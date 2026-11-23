@@ -37,6 +37,7 @@ from services.account_manager import normalize_telegram_join_ref
 from services import op_status
 from services.logger import log_exc_swallow
 from services import account_status as _acc_status
+from bot.utils.fmt import plural
 
 log = logging.getLogger(__name__)
 
@@ -269,7 +270,7 @@ def build_infra_takedown_kit(target: str, domains: list[str], reason: str) -> di
                 "key": "apwg", "title": "APWG (email — авто)", "priority": 1,
                 "url": "mailto:reportphishing@apwg.org",
                 "how": "Письмо на reportphishing@apwg.org. Если подключён SMTP в "
-                       "настройках Strike — движок шлёт это автоматически при ударе.",
+                       "настройках жалоб — движок шлёт это автоматически при ударе.",
                 "subject": f"Phishing/fraud site report — {d} (via Telegram @{clean})",
                 "body": _build_apwg_report_body(d, clean, ""),
             },
@@ -2244,7 +2245,7 @@ async def staggered_strike(
                         await progress_cb(
                             "strike_infra",
                             f"🕸 {_telegram_target_display(target)}: внешняя "
-                            f"инфраструктура ({len(_domains)} домен(ов)) — "
+                            f"инфраструктура ({len(_domains)} {plural(len(_domains), 'домен', 'домена', 'доменов')}) — "
                             f"APWG / Safe Browsing / хостинг...",
                         )
                     try:
@@ -2500,7 +2501,7 @@ async def submit_abuse_form(
             f"Channel: https://t.me/{clean}\n"
             f"Username: @{clean}\n"
             f"Title: {title}\n"
-            f"Subscribers: {members:,}\n\n"
+            f"Subscribers: {format(members, ',').replace(',', ' ')}\n\n"
             f"This Telegram channel systematically violates Telegram ToS through {en_text}. "
             f"The violations are active, ongoing and publicly accessible to all users including minors. "
             f"The channel is not merely borderline — it explicitly and openly engages in {en_text}. "
@@ -2513,7 +2514,7 @@ async def submit_abuse_form(
             f"Канал: https://t.me/{clean}\n"
             f"Юзернейм: @{clean}\n"
             f"Название: {title}\n"
-            f"Подписчиков: {members:,}\n\n"
+            f"Подписчиков: {format(members, ',').replace(',', ' ')}\n\n"
             f"Данный Telegram-канал систематически нарушает Условия использования: {ru_text}. "
             f"Нарушение носит публичный, постоянный характер и доступно всем пользователям. "
             f"Требуем немедленного рассмотрения и удаления."
@@ -2977,7 +2978,7 @@ def _build_vector_diagnostics(r: StrikeResult) -> list[str]:
 
 def format_strike_summary(results: list[StrikeResult]) -> str:
     """Форматирует итоговый отчёт об атаке в HTML."""
-    lines = ["⚔️ <b>Strike — Итоговый отчёт</b>\n"]
+    lines = ["⚔️ <b>Массовые жалобы — итоговый отчёт</b>\n"]
     for r in results:
         # Приоритет: если подтверждено удаление → 🟢, иначе оцениваем эффективность удара.
         # 🔴 только если peer_reported=0 (удар вообще не прошёл).
@@ -3122,7 +3123,7 @@ def _strike_effectiveness_verdict(r: "StrikeResult") -> list[str]:
         out.append(
             f"  📧 <b>Юридический вектор НЕ отправлен</b> (<i>{html.escape(_hint)}</i>) — "
             "именно письма в abuse@/dmca@ Telegram и жалоба в App Store/Google Play "
-            "приводят к удалению. Подключите SMTP-ящики в настройках Strike и повторите."
+            "приводят к удалению. Подключите SMTP-ящики в настройках жалоб и повторите."
         )
     else:
         out.append(
@@ -3236,7 +3237,7 @@ def build_takedown_kit(
         "key": "telegram_abuse", "title": "Telegram Abuse (email)", "priority": 4,
         "url": "mailto:abuse@telegram.org",
         "how": "Письмо на abuse@telegram.org и dmca@telegram.org с текстом ниже. Если "
-               "у вас подключён SMTP в настройках Strike — движок шлёт это автоматически "
+               "у вас подключён SMTP в настройках жалоб — движок шлёт это автоматически "
                "при каждом ударе.",
         "subject": cat.get("email_subject", f"Report: illegal content on Telegram — @{clean}"),
         "body": _legal_body("Telegram Trust & Safety (abuse@telegram.org)", "Telegram Terms of Service and Apple/Google store policies"),
@@ -4057,7 +4058,7 @@ async def execute_mini_strike(
                 "to": "abuse@telegram.org",
                 "label": "abuse",
                 "ok": False,
-                "err": "Email не настроены. Добавьте в Strike → ⚙️ Настройки → 📧 Email аккаунты",
+                "err": "Email не настроены. Добавьте в «Массовые жалобы» → ⚙️ Настройки → 📧 Email аккаунты",
             }
         )
 

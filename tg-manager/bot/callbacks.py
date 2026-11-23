@@ -481,7 +481,7 @@ class ApprovalCb(CallbackData, prefix="appr"):
 
 
 class WorkspaceCb(CallbackData, prefix="ws"):
-    action: str  # menu, create, view, invite, join, members, leave
+    action: str  # menu, create, view, invite, join, members, leave, leave_yes, delete_yes
     ws_id: int = 0
     page: int = 0
 
@@ -813,6 +813,15 @@ class GuardCb(CallbackData, prefix="guard"):
     action: str          # menu|how|list|view|toggle|welcome_clear
     chat_id: int = 0     # id охраняемого чата (для view/toggle)
     key: str = ""        # ключ настройки (для toggle)
+
+
+class JoinReqCb(CallbackData, prefix="jreq"):
+    """Одобрить/отклонить заявку на вступление из уведомления владельцу."""
+
+    action: str          # a — одобрить, d — отклонить
+    bot_id: int = 0      # 0 — главный бот, иначе подключённый (managed_bots)
+    chat_id: int = 0
+    user_id: int = 0
 
 
 class ManagedBotCb(CallbackData, prefix="mbot"):

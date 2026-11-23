@@ -36,6 +36,7 @@ from bot.utils.template_validator import (
 )
 from bot.utils.event_status import mark_handled_error
 from bot.utils.op_helpers import safe_answer, terminal_kb
+from bot.utils.op_helpers import cancel_kb
 
 log = logging.getLogger(__name__)
 router = Router()
@@ -310,6 +311,7 @@ async def msg_qp_text(message: Message, state: FSMContext, pool: asyncpg.Pool) -
         await message.answer(
             "⚠️ Текст не может быть пустым. Отправьте текст публикации:",
             parse_mode="HTML",
+            reply_markup=cancel_kb(),
         )
         return
 
@@ -440,7 +442,7 @@ async def cb_qp_use_template(
         )
     except Exception as exc:
         mark_handled_error(f"qp_use_template: {exc}")
-        await callback.answer("Ошибка загрузки шаблона.", show_alert=True)
+        await callback.answer("⚠️ Не удалось загрузить шаблон. Попробуйте ещё раз через минуту.", show_alert=True)
         return
     if not row:
         await callback.answer("Шаблон не найден.", show_alert=True)
@@ -657,7 +659,7 @@ async def msg_qp_media(message: Message, state: FSMContext) -> None:
         file_id = message.document.file_id
         media_type = "document"
     else:
-        await message.answer("⚠️ Неподдерживаемый тип медиа. Отправьте фото, видео или документ.")
+        await message.answer("⚠️ Неподдерживаемый тип медиа. Отправьте фото, видео или документ.", reply_markup=cancel_kb())
         return
 
     await state.update_data(media_file_id=file_id, media_type=media_type)

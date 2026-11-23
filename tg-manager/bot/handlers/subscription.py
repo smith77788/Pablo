@@ -49,7 +49,7 @@ PLAN_DETAILED_FEATURES: dict[str, list[str]] = {
         "📺 Фабрика каналов (создание, управление, публикация)",
         "👥 Фабрика групп",
         "🔍 Парсер аудитории из каналов и групп",
-        "🌐 Массовые операции (bulk join/leave/edit)",
+        "🌐 Массовые операции (вступление, выход, правка)",
         "🧪 A/B тесты сообщений",
         "🌍 Мультигео (имена/описания по языку)",
         "📱 Личные Telegram-аккаунты — по тарифу: 10, 50 или без лимита",
@@ -77,6 +77,9 @@ _PAY_SETTING_LABELS: dict[str, str] = {
     "CARD_CURRENCY": "💱 Валюта оплаты картой (RUB, USD…)",
     "CARD_PER_USD": "📈 Единиц этой валюты за $1",
 }
+
+from bot.utils.fmt import num_ru  # noqa: E402
+import html as _html
 
 router = Router()
 
@@ -407,7 +410,7 @@ async def _build_menu_text_and_kb(pool: asyncpg.Pool, user_id: int, promo_disc: 
     if today_ops > 5:
         social_lines.append(f"⚡ {today_ops} операций выполнено сегодня")
     elif weekly_ops > 20:
-        wops = f"{weekly_ops:,}".replace(",", " ")
+        wops = f"{num_ru(weekly_ops)}".replace(",", " ")
         social_lines.append(f"⚡ {wops} операций за 7 дней")
     social_block = ("\n<i>" + " · ".join(social_lines) + "</i>\n") if social_lines else "\n"
 
@@ -1532,7 +1535,6 @@ async def cb_request_sub(callback: CallbackQuery, callback_data: SubCb) -> None:
         else callback.from_user.first_name or str(uid)
     )
     # Уходит админам с parse_mode=HTML, а имя пишет сам пользователь.
-    import html as _html
     user_label = _html.escape(user_label)
 
     admin_ids = [
@@ -1749,11 +1751,11 @@ async def cb_pay_edit(
     callback: CallbackQuery, callback_data: SubCb, state: FSMContext
 ) -> None:
     if not sub_utils.is_platform_admin(callback.from_user.id):
-        await callback.answer("⛔️", show_alert=True)
+        await callback.answer("⛔ Только для администраторов платформы.", show_alert=True)
         return
     key = callback_data.plan or ""  # reused field for the setting key
     if key not in _PAY_SETTING_LABELS:
-        await callback.answer("Неизвестный параметр.", show_alert=True)
+        await callback.answer("⚠️ Кнопка устарела. Откройте раздел заново.", show_alert=True)
         return
     await safe_answer(callback)
 
@@ -1990,7 +1992,7 @@ async def cb_promo_clear(
     callback: CallbackQuery, pool: asyncpg.Pool
 ) -> None:
     if not sub_utils.is_platform_admin(callback.from_user.id):
-        await callback.answer("⛔️", show_alert=True)
+        await callback.answer("⛔ Только для администраторов платформы.", show_alert=True)
         return
     await safe_answer(callback)
     from database.db import set_platform_setting
@@ -2005,7 +2007,7 @@ async def cb_promo_set(
     callback: CallbackQuery, state: FSMContext
 ) -> None:
     if not sub_utils.is_platform_admin(callback.from_user.id):
-        await callback.answer("⛔️", show_alert=True)
+        await callback.answer("⛔ Только для администраторов платформы.", show_alert=True)
         return
     await safe_answer(callback)
     await state.set_state(PromoSettingsFSM.waiting_discount)
@@ -2080,7 +2082,7 @@ async def msg_promo_until(
     await message.answer(
         f"✅ <b>Акция запущена!</b>\n\n"
         f"Скидка: <b>−{disc}%</b> на 3, 6, 12 месяцев\n"
-        f"Действует до: <b>{raw}</b> (включительно)\n\n"
+        f"Действует до: <b>{_html.escape(raw)}</b> (включительно)\n\n"
         f"<i>Пользователи увидят новые цены немедленно.</i>",
         parse_mode="HTML",
         reply_markup=kb.as_markup(),

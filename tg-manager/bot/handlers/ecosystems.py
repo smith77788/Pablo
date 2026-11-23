@@ -33,6 +33,8 @@ from bot.utils.op_helpers import safe_answer, terminal_kb
 
 log = logging.getLogger(__name__)
 from bot.utils.owner_error import owner_error  # noqa: E402
+from bot.utils.op_helpers import ask_to_confirm
+from bot.utils.op_helpers import cancel_kb
 
 router = Router()
 
@@ -55,7 +57,7 @@ _MEMBER_TYPES = {
 _DNA_TYPES = {
     "regional": ("🌍", "Региональная", "Регион, геопресеты, локальные настройки"),
     "publishing": ("📝", "Публикации", "Шаблоны постов, связанные каналы"),
-    "visibility": ("👁", "Видимость", "Снимок Health/Stability/аккаунтов"),
+    "visibility": ("👁", "Видимость", "Снимок здоровья, устойчивости и аккаунтов"),
     "custom": ("🛠️", "Универсальная", "Полный слепок экосистемы"),
 }
 
@@ -178,7 +180,7 @@ async def cb_eco_create(callback: CallbackQuery, state: FSMContext) -> None:
 async def fsm_eco_name(message: Message, state: FSMContext) -> None:
     name = (message.text or "").strip()
     if not name or len(name) > 64:
-        await message.answer("Название от 1 до 64 символов. Попробуйте ещё раз:")
+        await message.answer("Название от 1 до 64 символов. Попробуйте ещё раз:", reply_markup=cancel_kb())
         return
     await state.update_data(name=name)
     await state.set_state(EcosystemCreateFSM.description)
@@ -245,7 +247,7 @@ async def cb_eco_create_type(
 ) -> None:
     eco_type = callback_data.action.replace("create_type_", "")
     if eco_type not in _ECO_TYPES:
-        await callback.answer("Неверный тип", show_alert=True)
+        await callback.answer("⚠️ Кнопка устарела. Откройте раздел заново.", show_alert=True)
         return
 
     data = await state.get_data()
@@ -1299,7 +1301,7 @@ async def cb_eco_dna_save(
         )
     except Exception:
         log_exc_swallow(log, "cb_eco_dna_save: dna INSERT failed")
-        await callback.answer("❌ Ошибка сохранения ДНК", show_alert=True)
+        await callback.answer("⚠️ Не удалось сохранить ДНК. Попробуйте ещё раз через минуту.", show_alert=True)
         return
 
     try:
@@ -1508,7 +1510,7 @@ async def cb_eco_sync(
             "\n<b>Что будет сделано:</b>",
             "• Проверка активности аккаунтов и прокси",
             "• Удаление удалённых / заблокированных объектов",
-            "• Пересчёт Health · Pressure · Risk",
+            "• Пересчёт здоровья · нагрузки · риска",
         ]
     )
 
@@ -1629,7 +1631,7 @@ async def fsm_eco_clone_name(
 ) -> None:
     new_name = (message.text or "").strip()[:80]
     if not new_name:
-        await message.answer("Название не может быть пустым. Введите название клона:")
+        await message.answer("Название не может быть пустым. Введите название клона:", reply_markup=cancel_kb())
         return
     await state.update_data(clone_new_name=new_name)
     await state.set_state(EcosystemCloneFSM.region)
@@ -1814,7 +1816,7 @@ async def cb_eco_dna_type(
 ) -> None:
     dtype = callback_data.action[len("dna_type_") :]
     if dtype not in _DNA_TYPES:
-        await callback.answer("Неверный тип", show_alert=True)
+        await callback.answer("⚠️ Кнопка устарела. Откройте раздел заново.", show_alert=True)
         return
     eco_id = callback_data.eco_id
     await state.update_data(dna_type=dtype)
@@ -1841,7 +1843,7 @@ async def fsm_eco_dna_name(
     dna_type = sd.get("dna_type", "custom")
     name = (message.text or "").strip()[:80]
     if not name:
-        await message.answer("Название не может быть пустым. Введите название шаблона:")
+        await message.answer("Название не может быть пустым. Введите название шаблона:", reply_markup=cancel_kb())
         return
 
     await state.clear()
@@ -1915,7 +1917,7 @@ async def cb_eco_dna_view(
     if is_mine:
         kb.button(
             text="🗑 Удалить ДНК",
-            callback_data=EcoCb(action="dna_delete", eco_id=eco_id, page=dna_id),
+            callback_data=EcoCb(action="dna_delete_ask", eco_id=eco_id, page=dna_id),
         )
     kb.button(
         text="◀️ Назад к ДНК", callback_data=EcoCb(action="dna_menu", eco_id=eco_id)
@@ -2186,3 +2188,14 @@ async def cb_ecopick_add(
         )
     except Exception as e:
         log.warning('handler error in cb_ecopick_add: %s', e)
+
+
+@router.callback_query(EcoCb.filter(F.action == "dna_delete_ask"))
+async def cb_ecocb_dna_delete_ask(callback: CallbackQuery, callback_data: EcoCb) -> None:
+    await ask_to_confirm(
+        callback,
+        question="🗑 <b>Удалить ДНК-шаблон?</b>",
+        yes=callback_data.model_copy(update={"action": "dna_delete"}),
+        no=EcoCb(action="dna_menu", eco_id=callback_data.eco_id),
+        yes_text="🗑 Да, удалить",
+    )

@@ -29,6 +29,7 @@ from services import geo_tempo
 from services import replica_guard as _rguard
 from services.pacing_engine import get_pacing_engine
 from services.secret_masking import mask_bot_token, redact_secrets
+from bot.utils.fmt import plural
 
 log = logging.getLogger(__name__)
 
@@ -601,8 +602,13 @@ _OP_CEILING_RESUME_DELAY_S = _int_env("OP_CEILING_RESUME_DELAY_SEC", 120, 10, 36
 _OP_CEILING_MAX_LIFETIME_S = _int_env(
     "OP_CEILING_MAX_LIFETIME_SEC", 30 * 24 * 3600, 6 * 3600, 365 * 24 * 3600)
 
+def _times(n) -> str:
+    """«3 раза», «5 раз» — для текстов предела воскрешений."""
+    return f"{n} {plural(n, 'раз', 'раза', 'раз')}"
+
+
 _POISON_ERROR = (
-    "Операция {n} раз(а) прерывалась вместе с воркером и не дошла до конца — "
+    "Операция {n} прерывалась вместе с воркером и не дошла до конца — "
     "остановлена, чтобы не занимать флот бесконечно. Запустите её заново."
 )
 # Второй предел (schema_v299) гасит операцию, которая ПРОДВИГАЕТСЯ, но её
@@ -610,7 +616,7 @@ _POISON_ERROR = (
 # продвигавшейся операции «не продвигалась» — то же вранье, из-за которого
 # предел и переписан.
 _POISON_ERROR_TOTAL = (
-    "Операцию воскрешали {n} раз(а), и за все эти разы она почти не сдвинулась "
+    "Операцию воскрешали {n}, и за все эти разы она почти не сдвинулась "
     "— остановлена, чтобы не занимать флот бесконечно. Запустите её заново: "
     "уже отработанные цели повтор пропустит."
 )
@@ -3660,20 +3666,20 @@ async def _finish_poisoned_op(pool: "asyncpg.Pool", row, *, source: str,
     )
     if _by_total:
         summary = (
-            f"⚠️ Успело {ok_n}, операцию воскрешали {_MAX_REVIVES_TOTAL} раз(а) "
+            f"⚠️ Успело {ok_n}, операцию воскрешали {_times(_MAX_REVIVES_TOTAL)} "
             f"почти без движения — предел, остановлена"
         )
     else:
         summary = (
-            f"⚠️ Успело {ok_n}, дальше операция {_MAX_REVIVES} раз(а) прерывалась "
+            f"⚠️ Успело {ok_n}, дальше операция {_times(_MAX_REVIVES)} прерывалась "
             f"и была остановлена"
             if ok_n else
-            f"❌ Остановлена: {_MAX_REVIVES} раз(а) прерывалась, не сделав ни одной цели"
+            f"❌ Остановлена: {_times(_MAX_REVIVES)} прерывалась, не сделав ни одной цели"
         )
     result = _normalize_result(
         {"status": status, "ok": ok_n, "failed": failed_n,
-         "reason": (_POISON_ERROR_TOTAL.format(n=_MAX_REVIVES_TOTAL) if _by_total
-                    else _POISON_ERROR.format(n=_MAX_REVIVES)),
+         "reason": (_POISON_ERROR_TOTAL.format(n=_times(_MAX_REVIVES_TOTAL)) if _by_total
+                    else _POISON_ERROR.format(n=_times(_MAX_REVIVES))),
          "summary": summary},
         op_type, 0.0)
     # Тот же случай, что у `_finish_cancelled_op`: строка УЖЕ терминальна
@@ -3708,16 +3714,16 @@ async def _finish_poisoned_op(pool: "asyncpg.Pool", row, *, source: str,
     await _notify_owner_about_op(
         pool, bot, owner_id,
         (f"⚠️ <b>Операция #{op_id}</b> остановлена: её воскрешали "
-         f"{_MAX_REVIVES_TOTAL} раз(а), и за все эти разы она почти не "
+         f"{_times(_MAX_REVIVES_TOTAL)}, и за все эти разы она почти не "
          f"сдвинулась ({ok_n} целей).\n\nЗапустите её заново — уже "
          f"отработанные цели повтор пропустит."
          if _by_total else
          f"⚠️ <b>Операция #{op_id}</b> остановлена: {ok_n} целей успело "
-         f"отработать, дальше она {_MAX_REVIVES} раз(а) прерывалась и не "
+         f"отработать, дальше она {_times(_MAX_REVIVES)} прерывалась и не "
          f"продвигалась.\n\nЗапустите её заново — уже отработанные цели "
          f"повтор пропустит."
          if ok_n else
-         f"❌ <b>Операция #{op_id}</b> остановлена: {_MAX_REVIVES} раз(а) "
+         f"❌ <b>Операция #{op_id}</b> остановлена: {_times(_MAX_REVIVES)} "
          f"подряд она прерывалась, не сделав ни одной цели.\n\nПроверьте "
          f"аккаунты и прокси — обычно причина там."),
         dedup_key=f"poisoned:{op_id}",
@@ -3766,9 +3772,9 @@ async def _reset_stale_running(pool: asyncpg.Pool, bot=None) -> None:
         RETURNING id, owner_id, op_type, params, done_items, total_items,
                   revive_count, revive_total""",
         _MAX_REVIVES,
-        _POISON_ERROR.format(n=_MAX_REVIVES),
+        _POISON_ERROR.format(n=_times(_MAX_REVIVES)),
         _MAX_REVIVES_TOTAL,
-        _POISON_ERROR_TOTAL.format(n=_MAX_REVIVES_TOTAL),
+        _POISON_ERROR_TOTAL.format(n=_times(_MAX_REVIVES_TOTAL)),
         *_scope_args,
         log_ctx="[reset_stale_poison]",
     )
@@ -3924,9 +3930,9 @@ async def _watchdog_stale(pool: asyncpg.Pool, bot=None) -> None:
             _age,
             active_ids_list,
             _MAX_REVIVES,
-            _POISON_ERROR.format(n=_MAX_REVIVES),
+            _POISON_ERROR.format(n=_times(_MAX_REVIVES)),
             _MAX_REVIVES_TOTAL,
-            _POISON_ERROR_TOTAL.format(n=_MAX_REVIVES_TOTAL),
+            _POISON_ERROR_TOTAL.format(n=_times(_MAX_REVIVES_TOTAL)),
             *_scope_args,
         )
         poisoned_n = len(poisoned_rows)
@@ -4697,7 +4703,7 @@ def _protective_alert_text(fresh: list) -> str:
         title = "⚠️ <b>Сообщение не доставлено</b>\n"
     lines = [title]
     for _name, what, delta in db_items + avail_items + delivery_items:
-        lines.append(f"• {what} — {int(delta)} раз(а)")
+        lines.append(f"• {what} — {int(delta)} {plural(int(delta), 'раз', 'раза', 'раз')}")
     if db_items:
         lines.append(
             "\n<i>Запись, которая не даёт сделать действие второй раз, не легла "
@@ -7141,7 +7147,7 @@ async def _run_op_task(pool: asyncpg.Pool, bot: Bot, row: dict) -> None:
             # For strike operations add a direct shortcut to strike history
             if op_type == "strike":
                 kb.button(
-                    text="📜 История Strike",
+                    text="📜 История жалоб",
                     callback_data=StrikeCb(action="history"),
                 )
             kb.adjust(1)
@@ -9076,7 +9082,7 @@ async def _exec_bulk_join(
     if not accounts:
         return {
             "status": "requeue",
-            "summary": "⏳ Bulk Join: флот занят другими операциями или исчерпал суточный лимит действий — операция в очереди",
+            "summary": "⏳ Массовое вступление: флот занят другими операциями или исчерпал суточный лимит действий — операция в очереди",
         }
 
     try:
@@ -12269,7 +12275,7 @@ async def _exec_bulk_create_channels(
             return {
                 "status": "failed",
                 "reason": (
-                    f"Аккаунт уже создал {created_today} канал(ов) за последние 24ч. "
+                    f"Аккаунт уже создал {created_today} {plural(created_today, 'канал', 'канала', 'каналов')} за последние 24ч. "
                     f"Безопасный лимит: {_MAX_CHANNELS_PER_DAY}/день. "
                     "Используйте другой аккаунт или подождите."
                 ),
@@ -13350,7 +13356,7 @@ async def _exec_strike(
             log.warning("_exec_strike op=%d: invalid mailbox_id=%r, skipped", op_id, _m)
 
     if not target:
-        return {"status": "failed", "summary": "⚠️ Strike: не указана цель (target)"}
+        return {"status": "failed", "summary": "⚠️ Жалобы: не указана цель"}
 
     # ── Anti-detection (3A): не бить одну цель повторно в короткий интервал ────
     # Повторные удары по одной цели за короткое время — детекшн-паттерн и лишний
@@ -13459,8 +13465,8 @@ async def _exec_strike(
             return {
                 "status": "failed",
                 "summary": (
-                    "⚠️ Strike: нет ни пригодных аккаунтов, ни SMTP-ящиков. "
-                    "Подключите SMTP в настройках Strike — юридические письма "
+                    "⚠️ Жалобы: нет ни пригодных аккаунтов, ни SMTP-ящиков. "
+                    "Подключите SMTP в настройках жалоб — юридические письма "
                     "(abuse@/dmca@ Telegram) не требуют аккаунтов и это единственный "
                     "вектор, который реально удаляет канал."
                 ),
@@ -13558,7 +13564,7 @@ async def _exec_strike(
         log.exception("op_worker _exec_strike #%d failed: %s", op_id, e)
         return {
             "status": "failed",
-            "summary": f"❌ Strike завершился с ошибкой: {str(e)[:200]}",
+            "summary": f"❌ Жалобы завершились с ошибкой: {str(e)[:200]}",
         }
 
     await _safe_execute(
@@ -13636,9 +13642,9 @@ async def _exec_strike(
         "total_reported": total_reported,
         "emails_sent": total_emails,
         "summary": (
-            (summary_text or f"⚡ Strike по {target} завершён. Аккаунтов: {len(viable)}")
+            (summary_text or f"⚡ Жалобы на {target} отправлены. Аккаунтов: {len(viable)}")
             if _strike_did_anything else
-            f"⚠️ Strike по {target}: не отправлено ни одной жалобы и ни одного письма (0). "
+            f"⚠️ Жалобы на {target}: не отправлено ни одной жалобы и ни одного письма (0). "
             "Операция не выполнена."
         ),
     }
@@ -14189,7 +14195,7 @@ async def _exec_network_broadcast(
         "lost_all": "Потерянные (30+ дн)",
         "lang": f"По языку: {lang}",
         "selected_bots": f"Выбранные боты ({total_started})",
-        "cluster": f"Кластер «{cluster_name}» ({total_started} бот(ов))",
+        "cluster": f"Кластер «{cluster_name}» ({total_started} {plural(total_started, 'бот', 'бота', 'ботов')})",
     }
     label = segment_labels.get(segment, segment)
 
@@ -14201,7 +14207,7 @@ async def _exec_network_broadcast(
     res["summary"] = (
         f"{res.get('summary') or ''}\n"
         f"Сегмент: {label}\n"
-        f"Ботов: {total_started}, получателей: {total_users:,}"
+        f"Ботов: {total_started}, получателей: {format(total_users, ',').replace(',', ' ')}"
     ).strip()
     if deferred:
         # Работа была, но не доведена — это 'partial', а не «готово». Молчать
@@ -14412,7 +14418,7 @@ async def _exec_seed_presence_pack(
                 "_exec_seed_presence_pack op=%d: mark_presence_pack_seeded failed", op_id
             )
 
-    missing_hint = f"\n⚠️ Не найдено в БД: {missing_count} канал(ов) — возможно удалены" if missing_count else ""
+    missing_hint = f"\n⚠️ Не найдено в БД: {missing_count} {plural(missing_count, 'канал', 'канала', 'каналов')} — возможно удалены" if missing_count else ""
     fail_hint = ""
     if fail_names:
         names = ", ".join(fail_names[:3])
@@ -24651,7 +24657,7 @@ async def _exec_content_clone(
                         "ok": ok_count,
                         "failed": fail_count + (total - idx),
                         "summary": (
-                            f"🚫 Аккаунт ограничен Telegram (peer flood) на {idx}/{total}.\n"
+                            f"🚫 Аккаунт ограничен Telegram (флуд-ограничение) на {idx}/{total}.\n"
                             f"✅ Успели: {ok_count}"
                         ),
                     }
@@ -24679,7 +24685,7 @@ async def _exec_content_clone(
     mode_label = "Пересылка" if mode == "forward" else "Копирование"
     summary = (
         f"📋 {mode_label} из {source_ref}\n"
-        f"📨 Сообщений: {len(msg_ids)} → {total} канал(ов)\n"
+        f"📨 Сообщений: {len(msg_ids)} → {total} {plural(total, 'канал', 'канала', 'каналов')}\n"
         f"✅ Успешно: {ok_count}"
         # Пропущенные называем прямо: иначе повтор выглядит мгновенным успехом,
         # и непонятно, отправилось что-то заново или нет.
@@ -25232,7 +25238,7 @@ async def _exec_compliance_scan(
             f"\n✅ Чисто: {clean_count}" + (f"\n⚠️ Ошибок: {err_count}" if err_count else ""))
     if flagged_lines:
         head += "\n\n" + "\n".join(flagged_lines[:20])
-        head += "\n\nℹ️ Досье в журнале операции. Жалобу подавайте адресно (раздел Strike)."
+        head += "\n\nℹ️ Досье в журнале операции. Жалобу подавайте адресно (раздел «Массовые жалобы»)."
     # Успешная единица здесь — ПРОВЕРЕННАЯ цель, и найденное нарушение тоже
     # проверка: досье собрано, работа сделана. Без `ok` скан, наткнувшийся на
     # пару недоступных целей, закрывался полным провалом вместе со всеми

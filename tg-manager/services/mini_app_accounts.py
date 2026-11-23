@@ -674,9 +674,9 @@ def setup_routes(app: web.Application, pool) -> None:
         if op == "bio":
             about = (body.get("about") or "").strip()
             if not about:
-                return None, "Укажите текст bio"
+                return None, "Укажите текст «О себе»"
             params["about"] = about[:70]
-            return params, "Смена bio"
+            return params, "Смена «О себе»"
         if op == "close_sessions":
             return params, "Закрыть сторонние сессии"
         if op == "privacy":
@@ -693,7 +693,7 @@ def setup_routes(app: web.Application, pool) -> None:
             params["current_password"] = cp
             return params, "Снятие 2FA"
         if op in ("clear_bio", "remove_username", "remove_avatar", "set_online", "check_restriction"):
-            return params, {"clear_bio": "Очистка bio", "remove_username": "Снятие username",
+            return params, {"clear_bio": "Очистка «О себе»", "remove_username": "Снятие username",
                             "remove_avatar": "Удаление фото", "set_online": "В сети",
                             "check_restriction": "Проверка ограничений"}[op]
         return None, "Неизвестная операция"
@@ -963,7 +963,7 @@ def setup_routes(app: web.Application, pool) -> None:
             params["current_password"] = cp
             label = "Снятие 2FA"
         elif op in ("clear_bio", "remove_username", "remove_avatar", "set_online", "check_restriction"):
-            label = {"clear_bio": "Очистка bio", "remove_username": "Снятие username",
+            label = {"clear_bio": "Очистка «О себе»", "remove_username": "Снятие username",
                      "remove_avatar": "Удаление фото", "set_online": "В сети",
                      "check_restriction": "Проверка ограничений"}[op]
         else:

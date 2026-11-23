@@ -215,3 +215,147 @@ def test_message_texts_call_modules_in_russian():
     assert not bad, (
         "английские названия модулей в текстах бота:\n" + "\n".join(sorted(set(bad)))
     )
+
+
+_SLANG = re.compile(r"(?<![а-яё])(юзер(ов|ам|а|у|ы)?(?![а-яё])|юз\.)|\bscore \{")
+
+
+def test_no_user_slang_or_score_label_in_bot_texts():
+    """«Рассылка всем юзерам», «1 234 юз. / score 0.812» — жаргон и английская
+    подпись вместо «пользователей», «чел.» и «оценка»."""
+    bad = []
+    for p in sorted(BOT.rglob("*.py")):
+        for n, line in enumerate(p.read_text(encoding="utf-8").splitlines(), 1):
+            if line.lstrip().startswith("#"):
+                continue
+            if _SLANG.search(line):
+                bad.append(f"{p.relative_to(BOT)}:{n}: {line.strip()[:90]}")
+    assert not bad, "жаргон в текстах бота:\n" + "\n".join(bad)
+
+
+def test_slang_probe_sees_known_examples_and_spares_username():
+    assert _SLANG.search('kb.button(text="🚫 Заблокировать юзера")')
+    assert _SLANG.search('f"{label} — {n} юз. / score {s:.3f}"')
+    assert not _SLANG.search('"Введите юзернейм (без @)"')
+
+
+_BARE_USERNAME = re.compile(r"(?<![@_\w/.])[Uu]sername(?![_\w(=])")
+
+
+def _russian_literal_parts(src: str):
+    """Литеральные куски строк с кириллицей (без кода внутри {…} f-строк,
+    без докстрингов и SQL)."""
+    import ast
+    import io
+    import tokenize
+    tree = ast.parse(src)
+    doc_lines = {
+        n.body[0].value.lineno for n in ast.walk(tree)
+        if isinstance(n, (ast.Module, ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))
+        and n.body and isinstance(n.body[0], ast.Expr)
+        and isinstance(getattr(n.body[0], "value", None), ast.Constant)
+    }
+    lines = src.split("\n")
+    kinds = {tokenize.STRING, getattr(tokenize, "FSTRING_MIDDLE", -1)}
+    for tok in tokenize.generate_tokens(io.StringIO(src).readline):
+        if tok.type not in kinds:
+            continue
+        if tok.type == tokenize.STRING and tok.start[0] in doc_lines:
+            continue
+        text = tok.string if tok.type == tokenize.STRING else lines[tok.start[0] - 1]
+        if not re.search(r"[А-Яа-яЁё]", text) or re.search(r"SELECT|FROM |first_name", tok.string):
+            continue
+        yield tok.start[0], tok.string
+
+
+def test_no_bare_english_username_in_bot_texts():
+    """«⏭ Без username», «Введите username» — английское слово в тексте для
+    владельца; по-русски «юзернейм». «@username» в примерах — это образец
+    ввода, его не трогаем."""
+    bad = []
+    for p in sorted(BOT.rglob("*.py")):
+        if p.name == "ai_tools.py":
+            continue
+        for ln, part in _russian_literal_parts(p.read_text(encoding="utf-8")):
+            if _BARE_USERNAME.search(part):
+                bad.append(f"{p.relative_to(BOT)}:{ln}: {part.strip()[:90]}")
+    assert not bad, "английское «username» в тексте:\n" + "\n".join(bad)
+
+
+def test_username_probe_sees_a_known_example():
+    src = 'kb.button(text="⏭ Без username")\nx = f"Юзер @{username} — пример @username"\n'
+    hits = [part for _, part in _russian_literal_parts(src) if _BARE_USERNAME.search(part)]
+    assert hits == ['"⏭ Без username"']
+
+
+_ENGLISH_LABELS = re.compile(
+    r"(?<![\w@/_.-])(trust|Trust score|risk|Mass Ops|Health Dashboard|snippet|"
+    r"search authority|authority|invite link|safe pacing|pacing_mode=safe|flood|Join|"
+    r"Free|FREE|User ID|Chat ID|CTA|About|Bio|bio|\[enterprise\]|retention score|freshness score|quality score|"
+    r"Host-Server|Strike Module)(?![\w_-])"
+)
+
+
+def test_no_english_labels_in_bot_texts():
+    """«trust 0.42», «risk 70%», «Откройте Mass Ops», «snippet в поиске» —
+    подписи, которых владелец не прочтёт. Названия чужих продуктов
+    (Railway Dashboard, Telegram Trust &amp; Safety) — не подписи, их не трогаем."""
+    bad = []
+    for p in sorted(BOT.rglob("*.py")):
+        if p.name == "ai_tools.py":
+            continue
+        for ln, part in _russian_literal_parts(p.read_text(encoding="utf-8")):
+            text = re.sub(r"<[^>]*>", "", part).replace("Trust &amp; Safety", "")
+            if _ENGLISH_LABELS.search(text):
+                bad.append(f"{p.relative_to(BOT)}:{ln}: {part.strip()[:90]}")
+    assert not bad, "английские подписи в тексте:\n" + "\n".join(bad)
+
+
+def test_english_label_probe_sees_known_examples():
+    for s in ('f"🔴 {name} — trust {t:.2f}"', '"⚙️ Открыть Mass Ops"', '"или invite link"'):
+        assert _ENGLISH_LABELS.search(s), s
+    assert not _ENGLISH_LABELS.search('"доверие {trust_score:.2f}"')
+
+
+_SERVICE_LABELS = re.compile(
+    r"(?<![\w@/_.-])(trust|Trust score|Mass Ops|Health Dashboard|failure rate|"
+    r"success rate|retention|Bulk Join|bio|Host-Server|Strike Module|Strike)(?![\w_-])"
+)
+
+
+# Модуль в меню бота называется «⚔️ Массовые жалобы», а «🖥️ Аренда сервера» —
+# не «Host-Server» (23.11.2026: «Strike Module активирован! Перейти: /menu →
+# ⚔️ Strike» — такой кнопки в меню нет). Исключения: рекламные посты канала
+# платформы (brand_injection, botmother_channel) — отдельный текст для
+# подписчиков канала, и ручки мини-аппа (mini_app_protection) — их ведёт
+# поток мини-аппа.
+_SERVICE_LABEL_EXEMPT = {"brand_injection.py", "botmother_channel.py", "mini_app_protection.py"}
+
+
+def test_no_english_labels_in_service_texts_for_the_owner():
+    """Советы и алерты, которые сервисы присылают владельцу («Trust score
+    ниже 0.3», «Высокий failure rate», «Откройте Health Dashboard»). Строки
+    журнала (log.*) владельцу не показываются — их не проверяем. Тексты
+    ошибок вида «peer flood» сюда не входят: по ним классифицируют отказ."""
+    services = ROOT / "services"
+    bad = []
+    for p in sorted(services.rglob("*.py")):
+        if p.name in _SERVICE_LABEL_EXEMPT:
+            continue
+        src = p.read_text(encoding="utf-8")
+        lines = src.split("\n")
+        for ln, part in _russian_literal_parts(src):
+            if re.search(r"log\.|log_exc|logger|exc_swallow|UPDATE |--", lines[ln - 1] + part):
+                continue
+            if "|" in part:
+                continue  # шаблон распознавания запроса («Strike|жалоб»), не подпись
+            if _SERVICE_LABELS.search(re.sub(r"<[^>]*>", "", part)):
+                bad.append(f"{p.relative_to(services)}:{ln}: {part.strip()[:90]}")
+    assert not bad, "английские подписи в текстах сервисов:\n" + "\n".join(bad)
+
+
+def test_service_label_probe_sees_known_examples():
+    for s in ('f"Trust score ниже {x}"', '"Высокий failure rate:"', '"Смена bio"',
+              '"Перейти: /menu → ⚔️ Strike"', '"🖥️ <b>Модуль Host-Server активирован!</b>"'):
+        assert _SERVICE_LABELS.search(s), s
+    assert not _SERVICE_LABELS.search('f"доверие {trust_score:.2f}"')

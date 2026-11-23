@@ -18,6 +18,7 @@ from bot.keyboards import subscription_locked_markup
 from bot.utils.subscription import require_plan, locked_text
 from database import db
 from bot.utils.op_helpers import safe_answer, terminal_kb
+from bot.utils.fmt import plural
 
 router = Router()
 log = logging.getLogger(__name__)
@@ -340,18 +341,61 @@ async def msg_ws_invite_code(
 async def cb_ws_leave(
     callback: CallbackQuery, callback_data: WorkspaceCb, pool: asyncpg.Pool
 ) -> None:
+    """Подтверждение перед выходом или удалением.
+
+    Раньше «🚪 Покинуть» выводило из пространства сразу, с первого нажатия, а
+    владелец под кнопкой «🗑 Удалить» получал «владелец не может покинуть» —
+    кнопка обещала удаление, которого в боте не было вовсе.
+    """
+    await safe_answer(callback)
+    ws_id = callback_data.ws_id
+    ws = await db.get_workspace(pool, ws_id, viewer_id=callback.from_user.id)
+    if not ws:
+        await callback.message.edit_text(
+            "⚠️ Пространство не найдено или вы в нём уже не состоите.",
+            reply_markup=terminal_kb(back=WorkspaceCb(action="menu")),
+        )
+        return
+    name = _esc(ws.get("name"))
+    kb = InlineKeyboardBuilder()
+    if ws["owner_id"] == callback.from_user.id:
+        members = await db.get_workspace_members(pool, ws_id, viewer_id=callback.from_user.id)
+        others = max(len(members or []) - 1, 0)
+        kb.button(text="🗑 Да, удалить", callback_data=WorkspaceCb(action="delete_yes", ws_id=ws_id))
+        kb.button(text="◀️ Отмена", callback_data=WorkspaceCb(action="view", ws_id=ws_id))
+        kb.adjust(1)
+        who = (f"{others} {plural(others, 'участник потеряет', 'участника потеряют', 'участников потеряют')} "
+               "доступ к его ботам и каналам." if others else "Других участников в нём нет.")
+        await callback.message.edit_text(
+            f"🗑 <b>Удалить пространство «{name}»?</b>\n\n{who}\n\n"
+            "Отменить удаление будет нельзя.",
+            parse_mode="HTML",
+            reply_markup=kb.as_markup(),
+        )
+        return
+    kb.button(text="🚪 Да, покинуть", callback_data=WorkspaceCb(action="leave_yes", ws_id=ws_id))
+    kb.button(text="◀️ Отмена", callback_data=WorkspaceCb(action="view", ws_id=ws_id))
+    kb.adjust(1)
+    await callback.message.edit_text(
+        f"🚪 <b>Покинуть пространство «{name}»?</b>\n\n"
+        "Вы потеряете доступ к его ботам и каналам. Вернуться можно будет только "
+        "по новому приглашению владельца.",
+        parse_mode="HTML",
+        reply_markup=kb.as_markup(),
+    )
+
+
+@router.callback_query(WorkspaceCb.filter(F.action == "leave_yes"))
+async def cb_ws_leave_yes(
+    callback: CallbackQuery, callback_data: WorkspaceCb, pool: asyncpg.Pool
+) -> None:
     await safe_answer(callback)
     ws = await db.get_workspace(pool, callback_data.ws_id, viewer_id=callback.from_user.id)
     if ws and ws["owner_id"] == callback.from_user.id:
-        kb = InlineKeyboardBuilder()
-        kb.button(
-            text="◀️ Назад",
-            callback_data=WorkspaceCb(action="view", ws_id=callback_data.ws_id),
-        )
+        # владелец сюда попасть не должен: его путь — удаление
         await callback.message.edit_text(
-            "⚠️ Вы являетесь <b>владельцем</b> этого пространства. Владелец не может покинуть его.",
-            parse_mode="HTML",
-            reply_markup=kb.as_markup(),
+            "⚠️ Владелец не может покинуть своё пространство — его можно только удалить.",
+            reply_markup=terminal_kb(back=WorkspaceCb(action="view", ws_id=callback_data.ws_id)),
         )
         return
     await db.delete_workspace_member(pool, callback_data.ws_id, callback.from_user.id)
@@ -359,4 +403,19 @@ async def cb_ws_leave(
     kb.button(text="◀️ К списку", callback_data=WorkspaceCb(action="menu"))
     await callback.message.edit_text(
         "✅ Вы покинули пространство.", reply_markup=kb.as_markup()
+    )
+
+
+@router.callback_query(WorkspaceCb.filter(F.action == "delete_yes"))
+async def cb_ws_delete_yes(
+    callback: CallbackQuery, callback_data: WorkspaceCb, pool: asyncpg.Pool
+) -> None:
+    await safe_answer(callback)
+    ok = await db.delete_workspace(pool, callback_data.ws_id, callback.from_user.id)
+    kb = InlineKeyboardBuilder()
+    kb.button(text="◀️ К списку", callback_data=WorkspaceCb(action="menu"))
+    await callback.message.edit_text(
+        "✅ Пространство удалено." if ok
+        else "⚠️ Пространство уже удалено или вы не его владелец.",
+        reply_markup=kb.as_markup(),
     )

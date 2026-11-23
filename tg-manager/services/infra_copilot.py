@@ -21,6 +21,7 @@ import logging
 from dataclasses import dataclass, field
 
 import asyncpg
+from bot.utils.fmt import plural
 
 log = logging.getLogger(__name__)
 
@@ -184,7 +185,7 @@ async def _analyze_account_patterns(
                     severity="warning",
                     title=f"Деградация доверия: {len(degraded)} акк.",
                     explanation=(
-                        f"Trust score аккаунтов {names} снизился за 7 дней. "
+                        f"Доверие аккаунтов {names} снизилось за 7 дней. "
                         f"Худший: -{delta:.2f} пунктов."
                     ),
                     recommendation="Дайте аккаунтам отдохнуть 24-48ч, снизьте интенсивность операций.",
@@ -219,7 +220,7 @@ async def _analyze_account_patterns(
                 CopilotInsight(
                     category="account",
                     severity="critical",
-                    title=f"Двойной риск: {len(high_risk)} акк. (флуд + низкий trust)",
+                    title=f"Двойной риск: {len(high_risk)} акк. (флуд + низкое доверие)",
                     explanation=(
                         f"Аккаунты {names} одновременно имеют высокую флуд-активность "
                         f"(более 5 за 7д) и низкий trust_score (ниже 0.5). "
@@ -310,7 +311,7 @@ async def _analyze_account_patterns(
                     severity="opportunity",
                     title=f"Неиспользуемые ресурсы: {len(underused)} акк.",
                     explanation=(
-                        f"Аккаунты {names} с высоким trust (>0.7) не использовались "
+                        f"Аккаунты {names} с высоким доверием (>0.7) не использовались "
                         f"более 7 дней. Простаивающий ресурс."
                     ),
                     recommendation=(
@@ -378,7 +379,7 @@ async def _analyze_proxy_patterns(
                     severity="warning",
                     title=f"Деградация прокси: {len(degrading)} шт.",
                     explanation=(
-                        f"Прокси {names} показывают падение success rate за последние 3 дня. "
+                        f"Прокси {names} показывают падение доли успешных запросов за последние 3 дня. "
                         f"Тренд ухудшения устойчивый."
                     ),
                     recommendation=(
@@ -563,7 +564,7 @@ async def _analyze_operation_patterns(
                 CopilotInsight(
                     category="pattern",
                     severity="warning",
-                    title=f"Высокий failure rate: {len(failed_types)} тип(а) операций",
+                    title=f"Много сбоев: {len(failed_types)} {plural(len(failed_types), 'тип', 'типа', 'типов')} операций",
                     explanation=(
                         f"Операции {types_list} за последние 7 дней имеют >30% ошибок. "
                         f"Худший: {worst['op_type']} — {round(worst['fail_rate'] or 0)}% отказов "
@@ -709,7 +710,7 @@ async def _analyze_capacity_risks(
                     severity="critical",
                     title=f"Критически мало готовых аккаунтов: {ready}/{total}",
                     explanation=(
-                        f"Только {ready} аккаунт(а) готовы к работе прямо сейчас. "
+                        f"Только {ready} {plural(ready, 'аккаунт', 'аккаунта', 'аккаунтов')} готовы к работе прямо сейчас. "
                         f"Остальные {total - ready} находятся в кулдауне. "
                         f"Параллельные операции невозможны."
                     ),
@@ -874,14 +875,14 @@ async def _analyze_memory_performance(
                 CopilotInsight(
                     category="account",
                     severity="info",
-                    title="Расхождение: высокий trust, низкая реальная эффективность",
+                    title="Расхождение: высокое доверие, низкая реальная эффективность",
                     explanation=(
-                        f"Аккаунт {label}: trust {trust}%, но реальная эффективность "
-                        f"{mem_rate}% по данным памяти. Метрика trust может быть устаревшей."
+                        f"Аккаунт {label}: доверие {trust}%, но реальная эффективность "
+                        f"{mem_rate}% по данным памяти. Оценка доверия может быть устаревшей."
                     ),
                     recommendation=(
                         "Проверьте аккаунт реальной проверкой. "
-                        "Trust score обновляется периодически, память — в реальном времени."
+                        "Доверие пересчитывается периодически, память — в реальном времени."
                     ),
                     data={"account_label": label, "trust": trust, "mem_rate": mem_rate},
                     score_impact=0.30,
@@ -1073,10 +1074,10 @@ async def predict_operation_outcome(
 
             if avg_trust < 0.4:
                 risk_score += 0.3
-                risk_reasons.append(f"Низкий средний trust: {round(avg_trust, 2)}")
+                risk_reasons.append(f"Низкое среднее доверие: {round(avg_trust, 2)}")
             elif avg_trust < 0.6:
                 risk_score += 0.15
-                risk_reasons.append(f"Умеренный средний trust: {round(avg_trust, 2)}")
+                risk_reasons.append(f"Умеренное среднее доверие: {round(avg_trust, 2)}")
 
             if avg_flood > 8:
                 risk_score += 0.2
@@ -1187,7 +1188,7 @@ def format_copilot_report(
 
     if len(insights) > max_items:
         remaining = len(insights) - max_items
-        lines.append(f"<i>...и ещё {remaining} инсайт(ов)</i>")
+        lines.append(f"<i>...и ещё {remaining} {plural(remaining, 'инсайт', 'инсайта', 'инсайтов')}</i>")
 
     return "\n".join(lines).strip()
 

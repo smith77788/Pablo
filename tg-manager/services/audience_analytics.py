@@ -910,7 +910,7 @@ def _generate_insight_recommendations(
         )
     elif quality_score >= 70:
         recs.append(
-            "🟢 <b>Отличное качество аудитории:</b> высокий retention и активность"
+            "🟢 <b>Отличное качество аудитории:</b> высокое удержание и активность"
         )
 
     return recs
@@ -924,8 +924,8 @@ def format_overview(overview: AudienceOverview) -> str:
     lines = [
         f"👥 <b>Обзор аудитории</b>",
         f"",
-        f"📊 Подписчики: <b>{overview.total_subscribers:,}</b>",
-        f"🟢 Активные (7д): <b>{overview.active_users:,}</b> ({overview.active_rate}%)",
+        f"📊 Подписчики: <b>{format(overview.total_subscribers, ',').replace(',', ' ')}</b>",
+        f"🟢 Активные (7д): <b>{format(overview.active_users, ',').replace(',', ' ')}</b> ({overview.active_rate}%)",
         f"⏱ Средняя сессия: <b>{overview.avg_session_duration_min} мин</b>",
         f"",
         f"📅 Пик активности: <b>{overview.peak_hour}:00 {overview.peak_day}</b>",

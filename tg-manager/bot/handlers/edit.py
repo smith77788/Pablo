@@ -336,7 +336,7 @@ async def cb_health(
         )
         await callback.message.edit_text(
             f"✅ <b>Бот работает нормально</b>\n\n"
-            f"Имя: <b>{info.get('first_name', '')}</b>\n"
+            f"Имя: <b>{escape(info.get('first_name') or '')}</b>\n"
             f"Username: {label}\n"
             f"ID: <code>{info['id']}</code>\n"
             f"Принимает сообщения: {'✅' if not info.get('has_private_forwards') else '⚠️'}\n"

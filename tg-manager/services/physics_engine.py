@@ -64,6 +64,48 @@ def _parse_factors(raw) -> list:
     return val if isinstance(val, list) else []
 
 
+def _risk_from_row(row) -> dict:
+    if not row:
+        return {
+            "risk_score": 0.0,
+            "ban_probability": 0.0,
+            "flood_rate_1h": 0.0,
+            "ops_24h": 0,
+            "last_flood_at": None,
+            "factors": [],
+            "computed_at": None,
+        }
+    return {
+        "risk_score": row["risk_score"],
+        "ban_probability": row["ban_probability"],
+        "flood_rate_1h": row["flood_rate_1h"],
+        "ops_24h": row["ops_24h"],
+        "last_flood_at": row["last_flood_at"],
+        "factors": _parse_factors(row.get("factors")),
+        "computed_at": row.get("computed_at"),
+    }
+
+
+async def get_account_risks(pool: asyncpg.Pool, account_ids) -> dict[int, dict]:
+    """То же, что get_account_risk, для списка — ОДНИМ запросом. Never raises.
+
+    Нет строки или база не ответила — нулевой риск, как у поштучной версии.
+    """
+    ids = [int(a) for a in account_ids]
+    rows: dict = {}
+    if ids:
+        try:
+            for r in await pool.fetch(
+                    """SELECT account_id, risk_score, ban_probability, flood_rate_1h,
+                              ops_24h, last_flood_at, factors, computed_at
+                       FROM account_risk_scores WHERE account_id = ANY($1::int[])""",
+                    ids):
+                rows[int(r["account_id"])] = r
+        except Exception as e:
+            log.debug("physics_engine.get_account_risks: %s", e)
+    return {a: _risk_from_row(rows.get(a)) for a in ids}
+
+
 async def get_account_risk(pool: asyncpg.Pool, account_id: int) -> dict:
     """Returns risk dict for one account. Never raises."""
     try:

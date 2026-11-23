@@ -311,14 +311,80 @@ def test_add_to_contacts_resolves_and_adds(_client):
         cl, _TG_ID, "Hang", deep={"chats": ["hang_group"], "name": "Hang"}))
     assert peer == ("peer", _TG_ID)
     calls = [r for r in cl.requests if r != "dialogs"]
-    assert len(calls) == 2, (
-        f"ожидались contacts.getContacts (резолв) и contacts.addContact: {calls}")
+    assert len(calls) == 3, (
+        "ожидались users.getUsers без ключа, contacts.getContacts (резолв) "
+        f"и contacts.addContact: {calls}")
 
 
 def test_add_to_contacts_unknown_person_is_unresolved(_client):
     cl = _client["client"] = _FakeClient()
     with pytest.raises(account_manager.PeerUnresolvedError):
         _run(account_manager.add_user_to_contacts(cl, _TG_ID, "Hang"))
+
+
+class _HistoryClient(_FakeClient):
+    """Список участников скрыт, но в истории чата есть след человека."""
+
+    def __init__(self, how: str):
+        super().__init__()
+        self.how = how
+        self.history_reads: list = []
+
+    async def get_entity(self, ref):
+        return type("Chan", (), {"id": 100, "ref": ref, "participants_count": 90000})()
+
+    async def get_participants(self, entity, search="", limit=None):
+        return []                     # скрытые участники
+
+    async def get_input_entity(self, peer):
+        if not isinstance(peer, int):
+            return ("chat", getattr(peer, "ref", peer))
+        return await super().get_input_entity(peer)
+
+    async def get_messages(self, entity, limit=None):
+        self.history_reads.append((entity.ref, limit))
+        other = type("M", (), {"id": 1, "sender_id": 42, "fwd_from": None, "entities": []})()
+        if self.how == "author":
+            m = type("M", (), {"id": 7, "sender_id": _TG_ID, "fwd_from": None, "entities": []})()
+        elif self.how == "forward":
+            fwd = type("F", (), {"from_id": type("P", (), {"user_id": _TG_ID})()})()
+            m = type("M", (), {"id": 8, "sender_id": 42, "fwd_from": fwd, "entities": []})()
+        else:
+            ent = type("E", (), {"user_id": _TG_ID})()
+            m = type("M", (), {"id": 9, "sender_id": 42, "fwd_from": None, "entities": [ent]})()
+        return [other, m]
+
+    async def __call__(self, request):
+        self.requests.append(type(request).__name__)
+        # users.getUsers по inputUserFromMessage отдаёт полного пользователя.
+        if len(self.history_reads) > 0:
+            self.cache[_TG_ID] = ("peer", _TG_ID)
+        return []
+
+
+@pytest.mark.parametrize("how", ["author", "forward", "mention"])
+def test_key_from_a_message_when_members_are_hidden(_client, how):
+    """Скрытые участники: человека находит его сообщение в истории чата."""
+    cl = _client["client"] = _HistoryClient(how)
+    res = _run(account_manager.send_dm(
+        "s", str(_TG_ID), "привет", deep={"chats": ["hang_group"], "name": "Hang",
+                                         "scan_groups": False}))
+    assert res == {"ok": True}, res
+    assert cl.sent_to == [("peer", _TG_ID)]
+    assert cl.history_reads == [("hang_group", account_manager._DEEP_SOURCE_HISTORY)]
+
+
+def test_zero_hash_answer_is_used(_client):
+    """Telegram отдал пользователя на запрос без ключа — берём его ключ."""
+    class _Zero(_FakeClient):
+        async def __call__(self, request):
+            self.requests.append("getUsers0")
+            return [type("U", (), {"id": _TG_ID, "access_hash": 99, "min": False})()]
+
+    cl = _client["client"] = _Zero()
+    res = _run(account_manager.send_dm("s", str(_TG_ID), "привет"))
+    assert res == {"ok": True}, res
+    assert "dialogs" not in cl.requests, "ключ уже есть — прогрев диалогов лишний"
 
 
 # ── Мини-апп ────────────────────────────────────────────────────────────────

@@ -24,6 +24,8 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 from bot.callbacks import ProfileSetterCb, BmCb
 from bot.utils.op_helpers import terminal_kb
 from bot.utils.owner_error import owner_error
+from bot.utils.op_helpers import cancel_kb
+from bot.utils.op_helpers import show_no_accounts
 
 log = logging.getLogger(__name__)
 router = Router()
@@ -45,9 +47,9 @@ _NO_INPUT_OPS = {
 _LOCAL_OPS = {"loc_versions", "loc_gender_m", "loc_gender_f", "loc_role_add", "loc_role_del"}
 # Человекочитаемые метки операций.
 _OP_LABELS = {
-    "name": "Имя/Фамилия/Bio", "avatar": "Фото", "username": "Юзернейм",
+    "name": "Имя/Фамилия/О себе", "avatar": "Фото", "username": "Юзернейм",
     "2fa": "2FA пароль", "reset_2fa": "Удалить 2FA", "remove_avatar": "Удалить фото",
-    "remove_username": "Удалить юзернейм", "clear_bio": "Удалить bio",
+    "remove_username": "Удалить юзернейм", "clear_bio": "Удалить «О себе»",
     "close_sessions": "Закрыть сессии", "set_online": "Держать онлайн",
     "check_restriction": "Проверка ограничения", "login_code": "Код авторизации",
     "privacy": "Приватность",
@@ -91,7 +93,7 @@ async def cb_setter_menu(
     total = await _total_accs(pool, callback.from_user.id)
     kb = InlineKeyboardBuilder()
     # Настройка аккаунтов
-    kb.button(text="📝 Имя/Bio", callback_data=ProfileSetterCb(action="op_name"))
+    kb.button(text="📝 Имя/О себе", callback_data=ProfileSetterCb(action="op_name"))
     kb.button(text="🖼 Фото", callback_data=ProfileSetterCb(action="op_avatar"))
     kb.button(text="🆔 Юзернейм", callback_data=ProfileSetterCb(action="op_username"))
     kb.button(text="🗑 Удалить фото", callback_data=ProfileSetterCb(action="op_remove_avatar"))
@@ -131,9 +133,9 @@ async def cb_setter_menu(
 # ── Операции С вводом значения ───────────────────────────────────────────────
 
 _INPUT_PROMPTS = {
-    "name": ("📝 <b>Имя / Фамилия / Bio</b>\n\nВведите (каждое поле с новой строки):\n\n"
+    "name": ("📝 <b>Имя / Фамилия / О себе</b>\n\nВведите (каждое поле с новой строки):\n\n"
              "<code>Имя: {Алекс|Макс|Игорь}\nФамилия: {Петров|Иванов}\n"
-             "Bio: {Предприниматель|Бизнес}</code>\n\n"
+             "О себе: {Предприниматель|Бизнес}</code>\n\n"
              "Пустое поле = не менять. Спинтакс {A|B} — рандом на каждый акк."),
     "avatar": ("🖼 <b>Фото профиля</b>\n\nПрямая ссылка на изображение (JPG/PNG):\n\n"
                "<code>https://example.com/photo.jpg</code>"),
@@ -161,7 +163,7 @@ async def cb_setter_op(callback: CallbackQuery, callback_data: ProfileSetterCb, 
         return
     prompt = _INPUT_PROMPTS.get(op)
     if not prompt:
-        await callback.answer("Неизвестная операция", show_alert=True)
+        await callback.answer("⚠️ Кнопка устарела. Откройте раздел заново.", show_alert=True)
         return
     await state.set_state(SetterFSM.value)
     await _edit(callback, prompt, _cancel_kb())
@@ -192,27 +194,27 @@ async def msg_setter_value(message: Message, state: FSMContext, pool: asyncpg.Po
     if op == "name":
         parsed = _parse_name_bio(text)
         if not any(parsed.values()):
-            await message.answer("⚠️ Не распознано. Формат:\nИмя: Текст\nФамилия: Текст\nBio: Текст",
+            await message.answer("⚠️ Не распознано. Формат:\nИмя: Текст\nФамилия: Текст\nО себе: Текст",
                                  reply_markup=terminal_kb())
             return
         await state.update_data(name_data=parsed)
     elif op == "avatar":
         url = text.strip()
         if not url.startswith("http"):
-            await message.answer("⚠️ Введите прямую ссылку на изображение (https://...)")
+            await message.answer("⚠️ Введите прямую ссылку на изображение (https://...)", reply_markup=cancel_kb())
             return
         await state.update_data(avatar_url=url)
     elif op == "username":
         uname = text.strip().lstrip("@")
         if not uname:
-            await message.answer("⚠️ Введите юзернейм (без @)")
+            await message.answer("⚠️ Введите юзернейм (без @)", reply_markup=cancel_kb())
             return
         await state.update_data(username=uname)
     elif op == "2fa":
         parts = [p.strip() for p in text.split("\n") if p.strip()]
         new_pass = parts[0] if parts else ""
         if not new_pass or len(new_pass) < 4:
-            await message.answer("⚠️ Пароль должен быть минимум 4 символа")
+            await message.answer("⚠️ Пароль должен быть минимум 4 символа", reply_markup=cancel_kb())
             return
         await state.update_data(new_password=new_pass,
                                 current_password=parts[1] if len(parts) > 1 else "",
@@ -222,7 +224,7 @@ async def msg_setter_value(message: Message, state: FSMContext, pool: asyncpg.Po
     elif op in ("loc_role_add", "loc_role_del"):
         role = text.strip()
         if not role or len(role) > 40:
-            await message.answer("⚠️ Введите название роли (до 40 символов)")
+            await message.answer("⚠️ Введите название роли (до 40 символов)", reply_markup=cancel_kb())
             return
         await state.update_data(role=role)
 
@@ -252,7 +254,7 @@ async def msg_setter_acc_count(message: Message, state: FSMContext, pool: asyncp
     try:
         n = int(message.text or "0")
     except ValueError:
-        await message.answer("⚠️ Введите число")
+        await message.answer("⚠️ Введите число", reply_markup=cancel_kb())
         return
     total = await _total_accs(pool, message.from_user.id)
     use = min(n, total) if n > 0 else total
@@ -295,7 +297,7 @@ async def cb_setter_confirm(callback: CallbackQuery, state: FSMContext, pool: as
     )
     account_ids = [r["id"] for r in rows]
     if not account_ids:
-        await callback.answer("⚠️ Нет доступных аккаунтов", show_alert=True)
+        await show_no_accounts(callback)
         return
 
     # Локальные операции (версии/пол/роль) — синхронный DB-путь, без очереди/Telegram.
@@ -356,14 +358,14 @@ async def _run_local_op(callback: CallbackQuery, op: str, owner_id: int,
             n = await aba.remove_role(pool, owner_id, account_ids, data.get("role", ""))
             what = f"Снята роль «{html.escape(data.get('role', ''))}»"
         else:
-            await callback.answer("Неизвестная операция", show_alert=True)
+            await callback.answer("⚠️ Кнопка устарела. Откройте раздел заново.", show_alert=True)
             return
     except ValueError as e:
         await callback.answer(f"⚠️ {owner_error(e, html_escape=False)}", show_alert=True)
         return
     except Exception:
         log.exception("local op %s failed", op)
-        await callback.answer("Ошибка операции", show_alert=True)
+        await callback.answer("⚠️ Не удалось изменить профиль. Попробуйте ещё раз через минуту.", show_alert=True)
         return
     kb = InlineKeyboardBuilder()
     kb.button(text="◀️ В меню", callback_data=ProfileSetterCb(action="menu"))

@@ -26,6 +26,7 @@ from bot.callbacks import BmCb, DmCb, SelfPromoCb
 from database import db
 from services import account_manager
 from bot.utils.op_helpers import safe_answer
+from bot.utils.op_helpers import cancel_kb
 
 log = logging.getLogger(__name__)
 router = Router()
@@ -270,7 +271,7 @@ async def cb_sp_del_confirm(callback: CallbackQuery, callback_data: SelfPromoCb,
     await safe_answer(callback)
     tpl = await pool.fetchrow("SELECT title FROM self_promo_templates WHERE id=$1", callback_data.item_id)
     if not tpl:
-        await callback.answer("Не найден", show_alert=True)
+        await callback.answer("Шаблон не найден. Уже удалено или недоступно. Откройте список заново.", show_alert=True)
         return
     try:
         await callback.message.edit_text(
@@ -353,7 +354,7 @@ async def cb_sp_add_style(callback: CallbackQuery, callback_data: SelfPromoCb, s
 async def fsm_sp_add_title(message: Message, state: FSMContext) -> None:
     title = (message.text or "").strip()[:100]
     if not title:
-        await message.answer("Название не может быть пустым. Введите ещё раз:")
+        await message.answer("Название не может быть пустым. Введите ещё раз:", reply_markup=cancel_kb())
         return
     await state.update_data(title=title)
     await state.set_state(SelfPromoFSM.add_content)
@@ -368,7 +369,7 @@ async def fsm_sp_add_title(message: Message, state: FSMContext) -> None:
 async def fsm_sp_add_content(message: Message, state: FSMContext) -> None:
     content = (message.text or "").strip()
     if not content:
-        await message.answer("Текст не может быть пустым. Введите ещё раз:")
+        await message.answer("Текст не может быть пустым. Введите ещё раз:", reply_markup=cancel_kb())
         return
     await state.update_data(content=content)
     await state.set_state(SelfPromoFSM.add_cta_text)

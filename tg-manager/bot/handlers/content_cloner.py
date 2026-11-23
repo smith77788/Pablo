@@ -16,6 +16,10 @@ from bot.callbacks import ContentClonerCb, BmCb
 from bot.utils.op_helpers import terminal_kb
 
 log = logging.getLogger(__name__)
+from bot.utils.fmt import plural  # noqa: E402
+from bot.utils.op_helpers import show_no_accounts
+from bot.utils.op_helpers import cancel_kb
+
 router = Router()
 
 
@@ -85,7 +89,7 @@ async def msg_cloner_source(msg: Message, state: FSMContext) -> None:
     from services.content_cloner_engine import parse_channel_ref
     raw = (msg.text or "").strip()
     if not raw:
-        await msg.answer("⚠️ Введите ссылку или username канала/группы.")
+        await msg.answer("⚠️ Введите ссылку или юзернейм канала/группы.", reply_markup=cancel_kb())
         return
     source_ref = parse_channel_ref(raw)
     await state.update_data(source_ref=source_ref)
@@ -113,7 +117,7 @@ async def msg_cloner_targets(msg: Message, state: FSMContext) -> None:
     from services.content_cloner_engine import parse_channel_ref
     raw = (msg.text or "").strip()
     if not raw:
-        await msg.answer("⚠️ Введите username или ссылку канала/группы.")
+        await msg.answer("⚠️ Введите юзернейм или ссылку канала/группы.", reply_markup=cancel_kb())
         return
 
     data = await state.get_data()
@@ -200,7 +204,7 @@ async def cb_cloner_custom_count(cb: CallbackQuery, state: FSMContext) -> None:
 async def msg_cloner_count(msg: Message, state: FSMContext) -> None:
     raw = (msg.text or "").strip()
     if not raw.isdigit() or not (1 <= int(raw) <= 200):
-        await msg.answer("⚠️ Введите число от 1 до 200.")
+        await msg.answer("⚠️ Введите число от 1 до 200.", reply_markup=cancel_kb())
         return
     count = int(raw)
     await _show_confirm(msg, state, count, via_message=True)
@@ -216,7 +220,7 @@ async def cb_cloner_confirm(cb: CallbackQuery, callback_data: ContentClonerCb, s
         count = int(sub)
         await _do_queue(cb, state, pool, count)
     else:
-        await cb.answer("⚠️ Неверный параметр.", show_alert=True)
+        await cb.answer("⚠️ Кнопка устарела. Откройте раздел заново.", show_alert=True)
 
 
 async def _show_confirm(msg_or_cb, state: FSMContext, count: int, via_message: bool = False) -> None:
@@ -274,7 +278,7 @@ async def _do_queue(cb: CallbackQuery, state: FSMContext, pool: asyncpg.Pool, ms
         owner_id,
     )
     if not acc_row:
-        await cb.answer("⚠️ Нет доступных аккаунтов", show_alert=True)
+        await show_no_accounts(cb)
         return
 
     account_ids = [acc_row["id"]]
@@ -296,7 +300,7 @@ async def _do_queue(cb: CallbackQuery, state: FSMContext, pool: asyncpg.Pool, ms
     await cb.message.edit_text(
         f"✅ <b>Клонирование поставлено в очередь</b> (#{op_id})\n\n"
         f"📋 Источник: <code>{html.escape(source_ref)}</code>\n"
-        f"📨 Режим: {mode_label} последние {msg_count} сообщений → {len(targets)} канал(ов)\n\n"
+        f"📨 Режим: {mode_label} последние {msg_count} сообщений → {len(targets)} {plural(len(targets), 'канал', 'канала', 'каналов')}\n\n"
         "<i>Следите за статусом в разделе «Операции».</i>",
         parse_mode="HTML",
         reply_markup=terminal_kb(),

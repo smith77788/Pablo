@@ -247,10 +247,10 @@ async def _auto_rotate(pool: asyncpg.Pool, bot=None) -> dict:
                         owner_id,
                         "flood_warning",
                         "🔄 <b>Авто-ротация аккаунтов</b>\n\n"
-                        f"🔴 Критических (trust &lt; {_ROTATE_CRITICAL_THRESHOLD}) → {_ROTATE_CRITICAL_HOURS}ч кулдаун: <b>{owner_crit}</b>\n"
-                        f"🟡 Низкий trust ({_ROTATE_CRITICAL_THRESHOLD}–{_ROTATE_LOW_THRESHOLD}) → {_ROTATE_LOW_HOURS}ч кулдаун: <b>{owner_low}</b>\n\n"
+                        f"🔴 Критических (доверие &lt; {_ROTATE_CRITICAL_THRESHOLD}) → {_ROTATE_CRITICAL_HOURS}ч кулдаун: <b>{owner_crit}</b>\n"
+                        f"🟡 Низкое доверие ({_ROTATE_CRITICAL_THRESHOLD}–{_ROTATE_LOW_THRESHOLD}) → {_ROTATE_LOW_HOURS}ч кулдаун: <b>{owner_low}</b>\n\n"
                         "Аккаунты не будут использоваться для операций до окончания кулдауна.\n"
-                        "Trust score восстановится со временем при отсутствии операций.",
+                        "Доверие восстановится со временем при отсутствии операций.",
                         # Свой ключ: иначе сводка по ротации делит слот с
                         # предупреждением «мало активных аккаунтов», и одно из
                         # двух владелец не увидит.

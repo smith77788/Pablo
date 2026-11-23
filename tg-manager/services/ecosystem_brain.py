@@ -663,7 +663,7 @@ async def compute_risk(
                 3,
             )
             if low_trust > 0:
-                r.reasons.append(f"Аккаунтов с низким trust: {low_trust}")
+                r.reasons.append(f"Аккаунтов с низким доверием: {low_trust}")
             if in_cd > 0:
                 r.reasons.append(f"На кулдауне: {in_cd}/{len(acc_rows)} аккаунтов")
 
@@ -797,7 +797,7 @@ async def detect_drift(
                     drift_type="config_deviation",
                     object_type="account",
                     object_id=a["id"],
-                    description=f"Аккаунт {a['label']} trust={a['trust_score']:.2f} — крайне низкий",
+                    description=f"Аккаунт {a['label']} доверие {a['trust_score']:.2f} — крайне низкое",
                     suggested_fix="Заменить аккаунт или назначить прогрев",
                     auto_fixable=False,
                 )
@@ -1658,7 +1658,7 @@ async def sync_ecosystem_members(
                             "type": otype,
                             "id": oid,
                             "label": row["label"],
-                            "issue": f"trust={row['trust_score']:.2f} критически низкий",
+                            "issue": f"доверие {row['trust_score']:.2f} — критически низкое",
                         }
                     )
                 else:

@@ -293,3 +293,137 @@ def test_section_menus_have_a_way_out():
         if 'BmCb(action="main")' not in body and "Назад" not in body:
             missing.append(f"{fname}::{fn}")
     assert not missing, f"меню раздела без выхода: {missing}"
+
+
+# ── Запрос ввода без «Отменить» ─────────────────────────────────────────────
+# «Введите цену…», «Пришлите ключи…» без единой кнопки: передумавший человек
+# оставался в мастере, и следующее же сообщение уходило в брошенный шаг.
+_ASK = re.compile(r"Введите|Отправьте|Пришлите|Укажите|Напишите")
+_ASK_RETRY = re.compile(
+    r"Попробуйте (ещё раз|снова)|Неверн|должн|символ|не может быть пуст|Формат:|❌|⚠️"
+)
+# Справка о команде, а не шаг мастера.
+_ASK_ALLOWED = {"start.py: '🔍 <b>Поиск</b>"}
+
+
+def _prompts_without_exit(root: Path) -> list[str]:
+    found = []
+    for path in sorted(root.glob("*.py")):
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        for c in ast.walk(tree):
+            if not (isinstance(c, ast.Call) and isinstance(c.func, ast.Attribute)
+                    and c.func.attr in ("answer", "edit_text") and c.args):
+                continue
+            if ast.unparse(c.func.value) not in ("message", "callback.message"):
+                continue
+            if "reply_markup" in {k.arg for k in c.keywords}:
+                continue
+            text = ast.unparse(c.args[0])
+            if not _ASK.search(text) or _ASK_RETRY.search(text):
+                continue
+            if any(f"{path.name}: {text}".startswith(a) for a in _ASK_ALLOWED):
+                continue
+            found.append(f"{path.name}:{c.lineno}: {text[:60]}")
+    return found
+
+
+def test_input_prompts_offer_cancel():
+    found = _prompts_without_exit(HANDLERS)
+    assert not found, "запрос ввода без кнопки отмены:\n" + "\n".join(found[:20])
+
+
+def test_cancel_kb_leads_to_main_menu():
+    body = _helper_src("cancel_kb")
+    assert 'BmCb(action="main")' in body and "Отменить" in body
+
+
+_NO_ACCOUNTS = re.compile(r"Нет (активных|подключённых) аккаунтов")
+_ADD_ACCOUNT_WAY = ("no_accounts_kb(", 'AccCb(action="add")', 'AccCb(action="menu")')
+
+
+def _no_accounts_screens_without_a_way_to_add(src: str) -> list[str]:
+    tree = ast.parse(src)
+    bad = []
+    for fn in ast.walk(tree):
+        if not isinstance(fn, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            continue
+        body = ast.get_source_segment(src, fn) or ""
+        if any(w in body for w in _ADD_ACCOUNT_WAY):
+            continue
+        for call in ast.walk(fn):
+            if not isinstance(call, ast.Call):
+                continue
+            name = ast.unparse(call.func)
+            # всплывашка callback.answer и сборка списка — не экран
+            if name.endswith(".append") or (name.endswith(".answer") and "message" not in name):
+                continue
+            if any(isinstance(a, (ast.Constant, ast.JoinedStr)) and _NO_ACCOUNTS.search(ast.unparse(a))
+                   for a in call.args):
+                bad.append(f"{fn.name}:{call.lineno}")
+    return bad
+
+
+def test_no_accounts_screen_offers_to_add_one():
+    """«⚠️ Нет активных аккаунтов» с одной кнопкой «Назад»: человек узнаёт, что
+    без аккаунта нельзя, и сам ищет, где его добавить. Таких экранов было 35.
+    Экран обязан вести к добавлению (`no_accounts_kb`)."""
+    bad = []
+    for p in sorted(HANDLERS.glob("*.py")):
+        bad += [f"{p.name}:{x}" for x in _no_accounts_screens_without_a_way_to_add(
+            p.read_text(encoding="utf-8"))]
+    assert not bad, "экран «нет аккаунтов» без кнопки добавления:\n" + "\n".join(bad)
+
+
+def test_no_accounts_probe_sees_a_known_dead_end():
+    dead = (
+        "async def h(callback):\n"
+        "    await callback.message.edit_text('⚠️ Нет активных аккаунтов.', reply_markup=_back_kb().as_markup())\n"
+    )
+    fixed = dead.replace("_back_kb().as_markup()", "no_accounts_kb()")
+    popup = "async def h(callback):\n    await callback.answer('Нет активных аккаунтов.', show_alert=True)\n"
+    assert _no_accounts_screens_without_a_way_to_add(dead) == ["h:2"]
+    assert _no_accounts_screens_without_a_way_to_add(fixed) == []
+    assert _no_accounts_screens_without_a_way_to_add(popup) == []
+
+
+def test_no_accounts_kb_leads_to_adding_an_account():
+    from bot.utils.op_helpers import no_accounts_kb
+    from bot.callbacks import HealthCb
+    rows = no_accounts_kb(back=HealthCb(action="menu")).inline_keyboard
+    assert rows[0][0].text == "➕ Добавить аккаунт" and rows[0][0].callback_data == "acc:add:0:0:0"
+    assert [b.text for b in rows[1]] == ["◀️ Назад", "🏠 Главное меню"]
+
+
+_NO_BOTS = re.compile(r"(У вас (пока )?нет ботов|❤️ Нет ботов|Нет ботов\.\"|Нет ботов для проверки)")
+
+
+def test_no_bots_screen_offers_to_add_one():
+    """«У вас нет ботов. Сначала добавьте бота через 🤖 Мои боты → ➕ Добавить»
+    — и одна кнопка «Назад». В «Массовых операциях» хуже: под таким текстом
+    стояло меню всех массовых действий над нулём ботов."""
+    bad = []
+    for p in sorted(HANDLERS.glob("*.py")):
+        src = p.read_text(encoding="utf-8")
+        tree = ast.parse(src)
+        for fn in ast.walk(tree):
+            if not isinstance(fn, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                continue
+            body = ast.get_source_segment(src, fn) or ""
+            if "no_bots_kb(" in body or 'BotCb(action="add")' in body:
+                continue
+            for call in ast.walk(fn):
+                if not isinstance(call, ast.Call):
+                    continue
+                name = ast.unparse(call.func)
+                if name.endswith(".append") or (name.endswith(".answer") and "message" not in name):
+                    continue
+                if any(isinstance(a, (ast.Constant, ast.JoinedStr)) and _NO_BOTS.search(ast.unparse(a))
+                       for a in call.args):
+                    bad.append(f"{p.name}:{fn.name}:{call.lineno}")
+    assert not bad, "экран «нет ботов» без кнопки добавления:\n" + "\n".join(bad)
+
+
+def test_no_bots_kb_leads_to_adding_a_bot():
+    from bot.utils.op_helpers import no_bots_kb
+    rows = no_bots_kb().inline_keyboard
+    assert rows[0][0].text == "➕ Добавить бота" and rows[0][0].callback_data.startswith("bot:add")

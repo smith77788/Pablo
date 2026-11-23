@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import html as _html
 from aiogram import Router, F
 from aiogram.types import (
     Message,
@@ -24,6 +25,8 @@ from services.gift_report import GiftTransferReportService
 from database import db
 from services.logger import log_exc_swallow
 from bot.utils.op_helpers import safe_answer
+from bot.utils.op_helpers import cancel_kb
+from bot.utils.op_helpers import show_no_accounts
 
 log = logging.getLogger(__name__)
 router = Router(name="gift_transfer")
@@ -144,7 +147,7 @@ async def cb_scan_gifts(callback: CallbackQuery, state: FSMContext, pool):
         accounts = []
 
     if not accounts:
-        await callback.answer("Нет аккаунтов", show_alert=True)
+        await show_no_accounts(callback)
         return
 
     kb = InlineKeyboardBuilder()
@@ -524,7 +527,7 @@ async def msg_add_saved_recipient(message: Message, state: FSMContext, pool) -> 
     text = message.text.strip()
     username = text.lstrip("@").split("/")[-1].split("?")[0]
     if not username or len(username) < 4:
-        await message.answer("❌ Неверный формат. Введите @username:")
+        await message.answer("❌ Неверный формат. Введите @username:", reply_markup=cancel_kb())
         return
     await db.save_gift_recipient(pool, message.from_user.id, f"@{username}", username)
     await state.set_state(GiftTransferFSM.selecting_recipient)
@@ -532,7 +535,7 @@ async def msg_add_saved_recipient(message: Message, state: FSMContext, pool) -> 
     kb.button(text="◀️ К выбору получателя", callback_data="gt:select_recipient")
     kb.adjust(1)
     await message.answer(
-        f"✅ Получатель <b>@{username}</b> сохранён!\n\nТеперь выберите его для трансфера.",
+        f"✅ Получатель <b>@{_html.escape(username)}</b> сохранён!\n\nТеперь выберите его для трансфера.",
         parse_mode="HTML",
         reply_markup=kb.as_markup(),
     )
@@ -562,7 +565,7 @@ async def msg_handle_username(message: Message, state: FSMContext, pool):
 
     # Validate format
     if not username or len(username) < 5:
-        await message.answer("❌ Неверный формат имени пользователя. Попробуйте снова:")
+        await message.answer("❌ Неверный формат имени пользователя. Попробуйте снова:", reply_markup=cancel_kb())
         return
 
     # Save to state and continue
@@ -630,7 +633,7 @@ async def cb_use_recipient(callback: CallbackQuery, state: FSMContext, pool):
 
     await callback.message.edit_text(
         "💳 <b>Источник оплаты</b>\n\n"
-        f"Получатель: <b>{recipient['name']}</b>\n\n"
+        f"Получатель: <b>{_html.escape(str(recipient['name']))}</b>\n\n"
         "Выберите способ оплаты:",
         reply_markup=kb.as_markup(),
     )
@@ -1057,7 +1060,7 @@ async def cb_edit_recipient(callback: CallbackQuery, state: FSMContext, pool):
     try:
         recipient_id = int(callback.data.split(":")[2])
     except (IndexError, ValueError):
-        await callback.answer("Некорректный получатель", show_alert=True)
+        await callback.answer("⚠️ Кнопка устарела. Откройте раздел заново.", show_alert=True)
         return
 
     recipients = await db.get_gift_recipients(pool, callback.from_user.id)
@@ -1074,8 +1077,8 @@ async def cb_edit_recipient(callback: CallbackQuery, state: FSMContext, pool):
     main_admin = " · 👑 главный админ" if rec.get("is_main_admin") else ""
     uid_line = f"\n🆔 user_id: <code>{rec['user_id']}</code>" if rec.get("user_id") else ""
     await callback.message.edit_text(
-        f"👤 <b>{rec['name']}</b>{main_admin}\n"
-        f"📎 {rec['username'] or 'нет @username'}{uid_line}",
+        f"👤 <b>{_html.escape(str(rec['name']))}</b>{main_admin}\n"
+        f"📎 {_html.escape(rec['username'] or 'нет @username')}{uid_line}",
         reply_markup=kb.as_markup(),
     )
 
@@ -1086,7 +1089,7 @@ async def cb_del_recipient(callback: CallbackQuery, state: FSMContext, pool):
     try:
         recipient_id = int(callback.data.split(":")[2])
     except (IndexError, ValueError):
-        await callback.answer("Некорректный получатель", show_alert=True)
+        await callback.answer("⚠️ Кнопка устарела. Откройте раздел заново.", show_alert=True)
         return
 
     deleted = await db.delete_gift_recipient(pool, callback.from_user.id, recipient_id)
@@ -1138,7 +1141,7 @@ async def cb_report_detail(callback: CallbackQuery, state: FSMContext, pool):
     try:
         report_id = int(callback.data.split(":")[2])
     except (IndexError, ValueError):
-        await callback.answer("Некорректный отчёт", show_alert=True)
+        await callback.answer("⚠️ Кнопка устарела. Откройте раздел заново.", show_alert=True)
         return
 
     report = await GiftTransferReportService.get_report(pool, report_id)

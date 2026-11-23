@@ -22,6 +22,9 @@ from services.logger import log_exc_swallow
 from bot.utils.op_helpers import safe_answer, terminal_kb
 
 log = logging.getLogger(__name__)
+from bot.utils.fmt import num_ru  # noqa: E402
+from bot.utils.op_helpers import cancel_kb
+
 router = Router()
 
 
@@ -46,11 +49,11 @@ def _seo_score(
             score += 3
         if ulen > 25:
             tips.append(
-                f"🔗 Username длинный ({ulen} симв.) — короткий запоминается лучше"
+                f"🔗 Юзернейм длинный ({ulen} симв.) — короткий запоминается лучше"
             )
     else:
         tips.append(
-            "🔗 Username не задан — он определяет вашу позицию в поиске Telegram по @имени"
+            "🔗 Юзернейм не задан — он определяет вашу позицию в поиске Telegram по @имени"
         )
 
     # Name: 0–20 pts
@@ -97,7 +100,7 @@ def _seo_score(
         score += 8
     if not short_desc:
         tips.append(
-            "📃 Краткое описание пустое — оно показывается в поиске! Добавьте CTA"
+            "📃 Краткое описание пустое — оно показывается в поиске! Добавьте призыв к действию"
         )
     elif short_len < 50:
         tips.append(
@@ -170,7 +173,7 @@ async def cb_seo_menu(
     try:
         row = await db.get_bot(pool, callback_data.bot_id, callback.from_user.id)
     except Exception:
-        await callback.answer("Ошибка базы данных.", show_alert=True)
+        await callback.answer("⚠️ Не удалось загрузить бота. Попробуйте ещё раз через минуту.", show_alert=True)
         return
     if not row:
         await callback.answer("Бот не найден.", show_alert=True)
@@ -179,9 +182,9 @@ async def cb_seo_menu(
     bot_uname = row.get("username") or ""
     label = f"@{bot_uname}" if bot_uname else (row.get("first_name") or "бот")
     uname_status = (
-        f"🔗 Username: <b>@{html.escape(bot_uname)}</b> — ключевой сигнал для поиска"
+        f"🔗 Юзернейм: <b>@{html.escape(bot_uname)}</b> — ключевой сигнал для поиска"
         if bot_uname
-        else "⚠️ <b>Username не задан</b> — задайте через @BotFather → /setusername"
+        else "⚠️ <b>Юзернейм не задан</b> — задайте через @BotFather → /setusername"
     )
     kb = InlineKeyboardBuilder()
     kb.button(
@@ -201,7 +204,7 @@ async def cb_seo_menu(
         callback_data=SeoCb(action="content_gap", bot_id=callback_data.bot_id),
     )
     kb.button(
-        text="🔗 Альтернативы username",
+        text="🔗 Альтернативы юзернейма",
         callback_data=SeoCb(action="uname_alts", bot_id=callback_data.bot_id),
     )
     kb.button(
@@ -226,7 +229,7 @@ async def cb_seo_menu(
         "1️⃣ <b>@username</b> — прямое совпадение = топ-позиция\n"
         "2️⃣ <b>Имя бота</b> — ключевые слова в названии\n"
         "3️⃣ <b>Описание</b> — полнотекстовый индекс\n"
-        "4️⃣ <b>Краткое описание</b> — snippet в поиске\n\n"
+        "4️⃣ <b>Краткое описание</b> — превью в поиске\n\n"
         "• <b>Анализ</b> — скор 0–100 + советы\n"
         "• <b>Превью</b> — как вы выглядите в поиске\n"
         "• <b>Динамика</b> — тренд позиций по keywords\n"
@@ -258,7 +261,7 @@ async def cb_seo_analyze(
     try:
         row = await db.get_bot(pool, callback_data.bot_id, callback.from_user.id)
     except Exception:
-        await callback.answer("Ошибка базы данных.", show_alert=True)
+        await callback.answer("⚠️ Не удалось загрузить бота. Попробуйте ещё раз через минуту.", show_alert=True)
         return
     if not row:
         await callback.answer("Бот не найден.", show_alert=True)
@@ -320,9 +323,9 @@ async def cb_seo_analyze(
         else (row.get("first_name") or str(row["bot_id"]))
     )
     uname_line = (
-        f"  🔗 Username: <b>@{html.escape(bot_username)}</b> ✅ — индексируется в поиске"
+        f"  🔗 Юзернейм: <b>@{html.escape(bot_username)}</b> ✅ — индексируется в поиске"
         if bot_username
-        else "  🔗 Username: <b>⚠️ не задан</b> — задайте через @BotFather → /setusername"
+        else "  🔗 Юзернейм: <b>⚠️ не задан</b> — задайте через @BotFather → /setusername"
     )
     lines = [
         f"📈 <b>SEO-скор профиля — {label}</b>\n",
@@ -333,7 +336,7 @@ async def cb_seo_analyze(
         f"  📄 Описание: {len(description or '')} / 512 симв.",
         f"  📃 Краткое: {len(short_desc or '')} / 120 симв.",
         f"  🤖 Команд: {len(commands or [])}",
-        f"  👥 Аудитория: {int(audience):,} чел.",
+        f"  👥 Аудитория: {num_ru(int(audience))} чел.",
     ]
     if tips:
         lines.append("\n<b>Что улучшить:</b>")
@@ -443,16 +446,16 @@ async def cb_seo_tips(callback: CallbackQuery, callback_data: SeoCb) -> None:
         "Используйте синонимы, разные формы слов, конкретные функции бота. "
         "Telegram индексирует описание для поиска.\n\n"
         "<b>3. Краткое описание — ваш заголовок в поиске</b>\n"
-        "Это первое что видит пользователь. Сделайте его конкретным: что делает бот + CTA.\n\n"
+        "Это первое что видит пользователь. Сделайте его конкретным: что делает бот + призыв к действию.\n\n"
         "<b>4. Команды = профессионализм</b>\n"
         "Боты без команд выглядят незавершёнными. Минимум: /start, /help.\n\n"
         "<b>5. Аудитория — самый весомый сигнал</b>\n"
         "Telegram продвигает популярных ботов. Растите базу через:\n"
         "  • Диплинки с UTM-трекингом\n"
-        "  • Реферальную систему (реф. ссылки для юзеров)\n"
+        "  • Реферальную систему (реф. ссылки для пользователей)\n"
         "  • Кросс-промо в каналах\n\n"
         "<b>6. Удержание важнее привлечения</b>\n"
-        "Реактивируйте холодных юзеров — engagement rate влияет на ранжирование.\n\n"
+        "Реактивируйте холодных пользователей — вовлечённость влияет на ранжирование.\n\n"
         "<b>7. A/B тесты /start сообщения</b>\n"
         "Разные приветствия дают разный retention. Используйте раздел «🧪 A/B Тесты».\n\n"
         "<b>8. Регулярность = свежесть</b>\n"
@@ -524,11 +527,11 @@ def _chan_seo_score(
             score += 5
         if ulen > 25:
             tips.append(
-                f"🔗 Username длинный ({ulen} симв.) — короткий username запоминается лучше"
+                f"🔗 Юзернейм длинный ({ulen} симв.) — короткий юзернейм запоминается лучше"
             )
     else:
         tips.append(
-            "🔗 Нет username — без него канал значительно хуже ранжируется в поиске"
+            "🔗 Нет юзернейма — без него канал значительно хуже ранжируется в поиске"
         )
 
     # Members: 0-20 pts
@@ -546,7 +549,7 @@ def _chan_seo_score(
         )
     elif members < 1_000:
         tips.append(
-            f"👥 Растущий канал! Цель — 1 000+ подписчиков (сейчас {members:,})"
+            f"👥 Растущий канал! Цель — 1 000+ подписчиков (сейчас {num_ru(members)})"
         )
 
     return min(score, 100), tips
@@ -741,7 +744,7 @@ async def cb_seo_chan_menu(
         callback_data=SeoCb(action="chan_content_gap", chan_id=chan_id, acc_id=acc_id),
     )
     kb.button(
-        text="🔗 Альтернативы username",
+        text="🔗 Альтернативы юзернейма",
         callback_data=SeoCb(action="chan_uname_alts", chan_id=chan_id, acc_id=acc_id),
     )
     kb.button(
@@ -756,15 +759,15 @@ async def cb_seo_chan_menu(
     kb.adjust(1, 2, 2, 2, 1)
     has_username = bool(chan.get("username"))
     username_hint = (
-        f"🔗 Username: <b>@{html.escape(chan['username'])}</b> — учитывается в поиске"
+        f"🔗 Юзернейм: <b>@{html.escape(chan['username'])}</b> — учитывается в поиске"
         if has_username
-        else "⚠️ <b>Username не задан</b> — это снижает видимость в поиске Telegram"
+        else "⚠️ <b>Юзернейм не задан</b> — это снижает видимость в поиске Telegram"
     )
     await callback.message.edit_text(
         f"📈 <b>SEO-оптимизация — {name}</b>\n\n"
         f"{username_hint}\n\n"
         "<b>Как Telegram ранжирует каналы:</b>\n"
-        "1️⃣ <b>Username</b> (@handle) — прямое совпадение даёт топ-позицию\n"
+        "1️⃣ <b>Юзернейм</b> (@handle) — прямое совпадение даёт топ-позицию\n"
         "2️⃣ <b>Название</b> — индексируется как заголовок\n"
         "3️⃣ <b>Описание</b> — ключевые слова повышают релевантность\n\n"
         "• <b>📊 Анализ</b> — SEO-скор по 4 критериям + советы\n"
@@ -864,9 +867,9 @@ async def cb_seo_chan_analyze(
 
     display = f"@{username}" if username else html.escape(title)
     uname_line = (
-        f"  🔗 Username: <b>@{html.escape(username)}</b> ✅ — ключевой фактор поиска"
+        f"  🔗 Юзернейм: <b>@{html.escape(username)}</b> ✅ — ключевой фактор поиска"
         if username
-        else "  🔗 Username: <b>⚠️ не задан</b> — без него канал почти не виден в поиске"
+        else "  🔗 Юзернейм: <b>⚠️ не задан</b> — без него канал почти не виден в поиске"
     )
     lines = [
         f"📊 <b>SEO-скор — {display}</b>\n",
@@ -876,12 +879,12 @@ async def cb_seo_chan_analyze(
         f"  📄 Описание: {len(about)}/255 симв."
         + (" ✅" if len(about) >= 150 else " ⚠️ мало"),
         uname_line,
-        f"  👥 Подписчиков: {members:,}",
+        f"  👥 Подписчиков: {num_ru(members)}",
     ]
     if not username:
         lines.append(
-            "\n💡 <b>Username критичен для SEO:</b> пользователи ищут каналы по @username "
-            "и ключевым словам. Без username ваш канал не попадает в прямые результаты поиска."
+            "\n💡 <b>Юзернейм критичен для SEO:</b> пользователи ищут каналы по @username "
+            "и ключевым словам. Без юзернейма ваш канал не попадает в прямые результаты поиска."
         )
     if tips:
         lines.append("\n<b>Что улучшить:</b>")
@@ -893,7 +896,7 @@ async def cb_seo_chan_analyze(
         lines.append("\n🟡 <b>Средний SEO.</b> Следуйте советам выше.")
     else:
         lines.append(
-            "\n🔴 <b>Слабый SEO.</b> Приоритет: задать username + расширить описание."
+            "\n🔴 <b>Слабый SEO.</b> Приоритет: задать юзернейм + расширить описание."
         )
 
     kb = InlineKeyboardBuilder()
@@ -1003,9 +1006,9 @@ async def cb_seo_chan_export_txt(
         "",
         f"SEO-скор: {score}/100",
         f"Название: {title} ({len(title)}/50 симв.)",
-        f"Username: {'@' + username if username else '(не задан)'}",
+        f"Юзернейм: {'@' + username if username else '(не задан)'}",
         f"Описание: {len(about)}/255 симв.",
-        f"Подписчиков: {members:,}",
+        f"Подписчиков: {num_ru(members)}",
     ]
     if tips:
         lines.append("")
@@ -1177,7 +1180,7 @@ async def cb_seo_chan_ai(
     if new_username:
         lines.append(f"🔗 <b>Username:</b> @{html.escape(new_username)}")
     else:
-        lines.append("🔗 <b>Username:</b> <i>не изменится</i>")
+        lines.append("🔗 <b>Юзернейм:</b> <i>не изменится</i>")
     if reasoning:
         lines.append(f"\n💡 <i>{html.escape(reasoning)}</i>")
     lines.append("\n✏️ <i>Напишите правки текстом — я учту их при перегенерации</i>")
@@ -1197,11 +1200,11 @@ async def cb_seo_chan_ai(
     )
     if new_username:
         kb.button(
-            text="🔗 Только username",
+            text="🔗 Только юзернейм",
             callback_data=SeoCb(action="apply_uname", chan_id=chan_id, acc_id=acc_id),
         )
     kb.button(
-        text="🔤 Задать username",
+        text="🔤 Задать юзернейм",
         callback_data=SeoCb(action="ask_username", chan_id=chan_id, acc_id=acc_id),
     )
     kb.button(
@@ -1236,7 +1239,7 @@ async def fsm_seo_feedback(
     """Пользователь написал правку — сохраняем и перегенерируем."""
     feedback = (message.text or "").strip()
     if not feedback:
-        await message.answer("⚠️ Введите текст правки:")
+        await message.answer("⚠️ Введите текст правки:", reply_markup=cancel_kb())
         return
 
     data = await state.get_data()
@@ -1365,7 +1368,7 @@ async def fsm_seo_feedback(
     if new_username:
         lines.append(f"🔗 <b>Username:</b> @{html.escape(new_username)}")
     else:
-        lines.append("🔗 <b>Username:</b> <i>не изменится</i>")
+        lines.append("🔗 <b>Юзернейм:</b> <i>не изменится</i>")
     if reasoning:
         lines.append(f"\n💡 <i>{html.escape(reasoning)}</i>")
     lines.append("\n✏️ <i>Ещё правки? Напишите их текстом</i>")
@@ -1385,11 +1388,11 @@ async def fsm_seo_feedback(
     )
     if new_username:
         kb.button(
-            text="🔗 Только username",
+            text="🔗 Только юзернейм",
             callback_data=SeoCb(action="apply_uname", chan_id=chan_id, acc_id=acc_id),
         )
     kb.button(
-        text="🔤 Задать username",
+        text="🔤 Задать юзернейм",
         callback_data=SeoCb(action="ask_username", chan_id=chan_id, acc_id=acc_id),
     )
     kb.button(
@@ -1437,14 +1440,14 @@ async def cb_seo_ask_username(
     )
     kb.adjust(1)
     await callback.message.edit_text(
-        "🔤 <b>Желаемый username для канала</b>\n\n"
-        "Введите username который хотите установить:\n"
+        "🔤 <b>Желаемый юзернейм для канала</b>\n\n"
+        "Введите юзернейм который хотите установить:\n"
         "<code>@my_channel</code> или <code>my_channel</code>\n\n"
-        "Символ @ необязателен. Username должен:\n"
+        "Символ @ необязателен. Юзернейм должен:\n"
         "• Начинаться с буквы\n"
         "• Содержать только a–z, 0–9, _\n"
         "• Быть от 5 до 32 символов\n\n"
-        "Если нажмёте «Пропустить» — AI не будет предлагать username.",
+        "Если нажмёте «Пропустить» — AI не будет предлагать юзернейм.",
         parse_mode="HTML",
         reply_markup=kb.as_markup(),
     )
@@ -1459,7 +1462,7 @@ async def fsm_seo_username(
     uname = (message.text or "").strip().lstrip("@")
     if not re.match(r"^[a-zA-Z][a-zA-Z0-9_]{4,31}$", uname):
         await message.answer(
-            "⚠️ Некорректный username. Должен начинаться с буквы, содержать только a–z/0–9/_ и быть 5–32 символа:",
+            "⚠️ Некорректный юзернейм. Должен начинаться с буквы, содержать только a–z/0–9/_ и быть 5–32 символа:",
             reply_markup=terminal_kb(),
         )
         return
@@ -1472,7 +1475,7 @@ async def fsm_seo_username(
     acc_id = data.get("seo_acc_id", 0)
 
     await message.answer(
-        f"✅ Username <code>@{html.escape(uname)}</code> запомнен.\n\n"
+        f"✅ Юзернейм <code>@{html.escape(uname)}</code> запомнен.\n\n"
         "Перегенерирую предложение...",
         parse_mode="HTML",
         reply_markup=terminal_kb(),
@@ -1519,7 +1522,7 @@ async def fsm_seo_username(
         except Exception:
             log_exc_swallow(
                 log,
-                "Не удалось получить about канала через get_full_channel_info (по username)",
+                "Не удалось получить about канала через get_full_channel_info (по юзернейму)",
             )
 
     try:
@@ -1570,10 +1573,10 @@ async def fsm_seo_username(
             uname,
         )
     except Exception:
-        log_exc_swallow(log, "Не удалось сохранить SEO-предложение в БД (по username)")
+        log_exc_swallow(log, "Не удалось сохранить SEO-предложение в БД (по юзернейму)")
 
     lines = [
-        f"🤖 <b>AI-предложение (username: @{html.escape(uname)})</b>\n",
+        f"🤖 <b>AI-предложение (юзернейм: @{html.escape(uname)})</b>\n",
         f"📛 <b>Название:</b> {html.escape(new_title)}",
         f"📄 <b>Описание:</b>\n<i>{html.escape(new_about)}</i>",
         f"🔗 <b>Username:</b> @{html.escape(uname)}",
@@ -1596,11 +1599,11 @@ async def fsm_seo_username(
         callback_data=SeoCb(action="apply_about", chan_id=chan_id, acc_id=acc_id),
     )
     kb.button(
-        text="🔗 Только username",
+        text="🔗 Только юзернейм",
         callback_data=SeoCb(action="apply_uname", chan_id=chan_id, acc_id=acc_id),
     )
     kb.button(
-        text="🔤 Изменить username",
+        text="🔤 Изменить юзернейм",
         callback_data=SeoCb(action="ask_username", chan_id=chan_id, acc_id=acc_id),
     )
     kb.button(
@@ -1748,7 +1751,7 @@ async def cb_seo_apply(
             callback_data=SeoCb(action="edit_about", chan_id=chan_id, acc_id=acc_id),
         )
         kb.button(
-            text="🔗 Изменить username",
+            text="🔗 Изменить юзернейм",
             callback_data=SeoCb(action="edit_uname", chan_id=chan_id, acc_id=acc_id),
         )
         kb.button(
@@ -1823,7 +1826,7 @@ _SEO_EDIT_PROMPTS = {
     ),
     "edit_uname": (
         "username",
-        "🔗 <b>Введите новый username</b> (без @, 5–32 символа, a–z/0–9/_):",
+        "🔗 <b>Введите новый юзернейм</b> (без @, 5–32 символа, a–z/0–9/_):",
     ),
 }
 
@@ -1868,14 +1871,14 @@ async def fsm_seo_edit_value(
     acc_id = sd.get("seo_acc_id", 0)
 
     if not value:
-        await message.answer("⚠️ Значение не может быть пустым. Попробуйте ещё раз:")
+        await message.answer("⚠️ Значение не может быть пустым. Попробуйте ещё раз:", reply_markup=cancel_kb())
         return
 
     if field == "title" and len(value) > 128:
-        await message.answer("⚠️ Название не более 128 символов. Попробуйте ещё раз:")
+        await message.answer("⚠️ Название не более 128 символов. Попробуйте ещё раз:", reply_markup=cancel_kb())
         return
     if field == "about" and len(value) > 255:
-        await message.answer("⚠️ Описание не более 255 символов. Попробуйте ещё раз:")
+        await message.answer("⚠️ Описание не более 255 символов. Попробуйте ещё раз:", reply_markup=cancel_kb())
         return
     if field == "username":
         import re as _re
@@ -1883,7 +1886,7 @@ async def fsm_seo_edit_value(
         value = value.lstrip("@")
         if not _re.match(r"^[a-zA-Z][a-zA-Z0-9_]{4,31}$", value):
             await message.answer(
-                "⚠️ Некорректный username. Должен начинаться с буквы, содержать только a–z/0–9/_ и быть 5–32 символа:",
+                "⚠️ Некорректный юзернейм. Должен начинаться с буквы, содержать только a–z/0–9/_ и быть 5–32 символа:",
                 reply_markup=terminal_kb(),
             )
             return
@@ -1900,7 +1903,7 @@ async def fsm_seo_edit_value(
     )
     if ok:
         await message.answer(
-            f"✅ <b>Обновлено успешно!</b>\nНовое значение: <code>{value[:100]}</code>",
+            f"✅ <b>Обновлено успешно!</b>\nНовое значение: <code>{html.escape(value[:100])}</code>",
             parse_mode="HTML",
             reply_markup=kb.as_markup(),
         )
@@ -1922,19 +1925,19 @@ _FULL_GUIDE_PAGES = [
         "📖 <b>Реальные факторы SEO Telegram 2026</b>\n"
         "<i>Страница 1/3 — Профиль</i>\n\n"
         "🥇 <b>USERNAME — фактор №1 (вес ~35%)</b>\n"
-        "Telegram ищет точное совпадение @username первым. Если пользователь ищет «vpn bot» и ваш username содержит «vpn» — вы в топ-3. Без username вы <b>невидимы</b> в прямом поиске по @.\n"
+        "Telegram ищет точное совпадение @username первым. Если пользователь ищет «vpn bot» и ваш юзернейм содержит «vpn» — вы в топ-3. Без юзернейма вы <b>невидимы</b> в прямом поиске по @.\n"
         "• Оптимально: 8–16 символов, ключевое слово + тема\n"
         "• Без цифр в конце — они снижают доверие алгоритма\n"
-        "• Смена username сбрасывает накопленный «search authority» на ~2 недели\n\n"
+        "• Смена юзернейма сбрасывает накопленный вес канала в поиске на ~2 недели\n\n"
         "🥈 <b>НАЗВАНИЕ / ИМЯ — фактор №2 (вес ~25%)</b>\n"
         "Telegram индексирует имя для полнотекстового поиска. 2–3 ключевых слова в начале названия — оптимум. Длина 20–40 символов.\n"
         "• ✅ «PDF Конвертер — Все форматы» → 3 сигнала\n"
         "• ❌ «Bot Helper Pro» → 0 тематических сигналов\n"
         "• Emoji в начале названия визуально выделяет в списке, но не влияет на ранг\n\n"
         "🥉 <b>ОПИСАНИЕ — фактор №3 (вес ~20%)</b>\n"
-        "Полнотекстовый индекс. Telegram читает первые 255 символов для snippet в поиске.\n"
+        "Полнотекстовый индекс. Telegram читает первые 255 символов для превью в поиске.\n"
         "• Первые 2 предложения = ваш «meta description»\n"
-        "• Включите: основное ключевое слово, 2–3 синонима, географию (если нужно), CTA\n"
+        "• Включите: основное ключевое слово, 2–3 синонима, географию (если нужно), призыв к действию\n"
         "• Повтор одного слова >4 раз = мягкий фильтр спама\n"
         "• Краткое описание (short_desc у ботов) = строчка под именем в поиске — заполните первым"
     ),
@@ -1944,22 +1947,22 @@ _FULL_GUIDE_PAGES = [
         "<i>Страница 2/3 — Сигналы вовлечённости</i>\n\n"
         "📊 <b>АУДИТОРИЯ И РОСТ (вес ~10%)</b>\n"
         "Важен не размер, а скорость роста за последние 30 дней. Канал с 500 подписчиками и +50/нед обгоняет канал с 10k и -100/нед.\n"
-        "• Join/Leave ratio: если >30% уходят за месяц — ranking penalty\n"
-        "• Premium-подписчики в вашей аудитории = повышенный trust signal\n\n"
+        "• Отписки: если за месяц уходит >30% — канал теряет позиции\n"
+        "• Premium-подписчики в вашей аудитории = выше доверие поиска\n\n"
         "🔥 <b>АКТИВНОСТЬ И СВЕЖЕСТЬ (вес ~8%)</b>\n"
         "Telegram понижает каналы без публикаций 30+ дней.\n"
-        "• Для ботов: рассылки раз в неделю поддерживают «freshness score»\n"
+        "• Для ботов: рассылки раз в неделю поддерживают «свежесть» в поиске\n"
         "• Для каналов: 3–5 постов в неделю — оптимум по алгоритму 2026\n"
         "• Пиковое время публикации (18–21 МСК) даёт больший охват в первый час\n\n"
         "💬 <b>ENGAGEMENT SIGNALS (скрытые)</b>\n"
         "• Reaction rate: >2% просмотров = сильный сигнал качества\n"
         "• Forward depth: если пост пересылают в 3+ каналов — massive boost\n"
         "• CTR из поиска: Telegram видит кто нажал на результат и кто нет. Слабый CTR снижает позицию.\n"
-        "• Time-in-bot: для ботов — чем дольше сессия, тем выше retention score\n\n"
+        "• Время в боте: чем дольше сессия, тем выше удержание\n\n"
         "🌐 <b>BACKLINKS TELEGRAM-STYLE</b>\n"
         "Telegram анализирует упоминания вашего @username в других публичных каналах.\n"
         "• Упоминание в канале с 10k+ подписчиков = «backlink высокого DA»\n"
-        "• Взаимопиар с каналами из вашей ниши — легитимный способ роста authority\n"
+        "• Взаимопиар с каналами из вашей ниши — легитимный способ нарастить вес в поиске\n"
         "• Нативные форварды ценнее прямых @mentions"
     ),
     # Страница 3: Продвинутые и малоизвестные факторы
@@ -1969,11 +1972,11 @@ _FULL_GUIDE_PAGES = [
         "🔬 <b>ФАКТОРЫ, О КОТОРЫХ НЕ ГОВОРЯТ</b>\n\n"
         "🏷 <b>Языковая консистентность</b>\n"
         "Telegram определяет язык канала и показывает его носителям этого языка. Смешанный контент снижает языковой confidence — канал перестаёт приоритизироваться в обоих сегментах.\n\n"
-        "🗺 <b>Геотаргетинг через username</b>\n"
-        'Пользователи ищут «доставка москва», «spb news», «dubai crypto». Username с geo-частью ("_msk", "_spb", "dubai") напрямую попадает в локальные запросы.\n\n'
+        "🗺 <b>Геотаргетинг через юзернейм</b>\n"
+        'Пользователи ищут «доставка москва», «spb news», «dubai crypto». Юзернейм с geo-частью ("_msk", "_spb", "dubai") напрямую попадает в локальные запросы.\n\n'
         "⚡ <b>Fragment / TON эффект</b>\n"
         "Каналы с зарезервированным @username на Fragment.com получают дополнительный verification signal. Telegram проверяет право собственности.\n\n"
-        "🤖 <b>Для ботов: Bot API quality score</b>\n"
+        "🤖 <b>Для ботов: оценка качества по Bot API</b>\n"
         "Telegram внутренне оценивает ботов по паттернам API-запросов:\n"
         "• Быстрый ответ (&lt;2с) = качественный бот\n"
         "• Частые ошибки/таймауты = снижение видимости\n"
@@ -1984,9 +1987,9 @@ _FULL_GUIDE_PAGES = [
         "Посты с хэштегами индексируются отдельно. #тема → канал попадает в поиск по хэштегу. 1–3 тематических хэштега на пост — оптимум.\n\n"
         "⚠️ <b>Антипаттерны (штрафы):</b>\n"
         "• Keyword stuffing (>5 повторов слова) → мягкий фильтр\n"
-        "• Накрутка подписчиков ботами → trust collapse\n"
+        "• Накрутка подписчиков ботами → обвал доверия поиска\n"
         "• Массовые жалобы → временное скрытие из поиска\n"
-        "• Частая смена username → потеря search authority"
+        "• Частая смена юзернейма → потеря веса в поиске"
     ),
 ]
 
@@ -2059,7 +2062,7 @@ async def cb_seo_preview(
     try:
         row = await db.get_bot(pool, callback_data.bot_id, callback.from_user.id)
     except Exception:
-        await callback.answer("Ошибка базы данных.", show_alert=True)
+        await callback.answer("⚠️ Не удалось загрузить бота. Попробуйте ещё раз через минуту.", show_alert=True)
         return
     if not row:
         await callback.answer("Бот не найден.", show_alert=True)
@@ -2088,8 +2091,8 @@ async def cb_seo_preview(
         log.warning("seo preview: failed to fetch audience count")
         audience = 0
 
-    uname_line = f"@{uname}" if uname else "⚠️ username не задан"
-    aud_str = f"{int(audience):,}" if int(audience) >= 1000 else str(int(audience))
+    uname_line = f"@{uname}" if uname else "⚠️ юзернейм не задан"
+    aud_str = f"{num_ru(int(audience))}" if int(audience) >= 1000 else str(int(audience))
     short_preview = (
         (short_desc[:72] + "…") if len(short_desc or "") > 72 else (short_desc or "")
     )
@@ -2111,7 +2114,7 @@ async def cb_seo_preview(
 
     issues = []
     if not uname:
-        issues.append("❌ Нет username — кнопка @... не отображается")
+        issues.append("❌ Нет юзернейма — кнопка @... не отображается")
     if not short_desc:
         issues.append("❌ Нет краткого описания — третья строка пустая")
     elif len(short_desc) < 40:
@@ -2204,12 +2207,12 @@ async def cb_seo_chan_preview(
     title = chan.get("title") or "Канал"
     uname = chan.get("username") or ""
     uname_line = f"@{uname}" if uname else "⚠️ без @username"
-    members_line = f"{members:,} подписчиков" if members else "подписчики скрыты"
+    members_line = f"{num_ru(members)} подписчиков" if members else "подписчики скрыты"
     if about.strip():
         about_snippet = html.escape(about.strip()[:100])
         about_line = f"│ <i>{about_snippet}{'…' if len(about.strip()) > 100 else ''}</i>"
     else:
-        about_line = "│ <i>⚠️ About не задан — пустой snippet в поиске</i>"
+        about_line = "│ <i>⚠️ Описание не задано — пустое превью в поиске</i>"
     lines = [
         "🔍 <b>Так канал выглядит в поиске Telegram:</b>\n",
         "┌─────────────────────────────────────┐",
@@ -2220,12 +2223,12 @@ async def cb_seo_chan_preview(
         "<b>Что влияет на эту карточку:</b>",
         "  1️⃣ Название — содержит ли ключевые слова?",
         f"  2️⃣ @username — {'✅ задан' if uname else '❌ НЕ ЗАДАН — критично!'}",
-        "  3️⃣ About — первые 100 символов = snippet в поиске",
+        "  3️⃣ Описание — первые 100 символов = превью в поиске",
         "  4️⃣ Подписчики — влияют на доверие при клике",
     ]
     if not uname:
         lines.append(
-            "\n💡 <b>Без username</b> канал не появляется при поиске по @имени "
+            "\n💡 <b>Без юзернейма</b> канал не появляется при поиске по @имени "
             "и теряет ~35% потенциального поискового трафика."
         )
     kb = InlineKeyboardBuilder()
@@ -2268,7 +2271,7 @@ async def cb_seo_momentum(
     try:
         row = await db.get_bot(pool, bot_id, callback.from_user.id)
     except Exception:
-        await callback.answer("Ошибка базы данных.", show_alert=True)
+        await callback.answer("⚠️ Не удалось загрузить бота. Попробуйте ещё раз через минуту.", show_alert=True)
         return
     if not row:
         await callback.answer("Бот не найден.", show_alert=True)
@@ -2397,7 +2400,7 @@ async def cb_seo_content_gap(
     try:
         row = await db.get_bot(pool, bot_id, callback.from_user.id)
     except Exception:
-        await callback.answer("Ошибка базы данных.", show_alert=True)
+        await callback.answer("⚠️ Не удалось загрузить бота. Попробуйте ещё раз через минуту.", show_alert=True)
         return
     if not row:
         await callback.answer("Бот не найден.", show_alert=True)
@@ -2614,7 +2617,7 @@ async def cb_seo_uname_alts(
     if not await require_plan(pool, callback.from_user.id, "starter"):
         await safe_answer(callback)
         await callback.message.edit_text(
-            locked_text("Альтернативы username", "starter"),
+            locked_text("Альтернативы юзернейма", "starter"),
             parse_mode="HTML",
             reply_markup=subscription_locked_markup("starter", back_callback=BmCb(action="analytics")),
         )
@@ -2632,7 +2635,7 @@ async def cb_seo_uname_alts(
             log.warning("seo uname_alts: failed to fetch channel row")
             chan = None
         if not chan:
-            await callback.answer("Не найдено.", show_alert=True)
+            await callback.answer("Канал не найден. Уже удалено или недоступно. Откройте список заново.", show_alert=True)
             return
         current = chan.get("username") or ""
         base = current or chan.get("title") or "channel"
@@ -2645,10 +2648,10 @@ async def cb_seo_uname_alts(
         try:
             row = await db.get_bot(pool, callback_data.bot_id, callback.from_user.id)
         except Exception:
-            await callback.answer("Ошибка базы данных.", show_alert=True)
+            await callback.answer("⚠️ Не удалось загрузить бота. Попробуйте ещё раз через минуту.", show_alert=True)
             return
         if not row:
-            await callback.answer("Не найдено.", show_alert=True)
+            await callback.answer("Бот не найден. Уже удалено или недоступно. Откройте список заново.", show_alert=True)
             return
         current = row.get("username") or ""
         base = current or row.get("first_name") or "bot"
@@ -2662,7 +2665,7 @@ async def cb_seo_uname_alts(
 
     current_esc = f"@{html.escape(current)}" if current else "не задан"
     lines = [
-        "🔗 <b>Альтернативные username для SEO</b>\n",
+        "🔗 <b>Альтернативные юзернеймы для SEO</b>\n",
         f"Текущий: <b>{current_esc}</b>\n",
         "<b>Варианты (от лучшего):</b>",
     ]
@@ -2672,12 +2675,12 @@ async def cb_seo_uname_alts(
         lines.append(f"  <code>@{html.escape(v)}</code> {s} ({len(v)} симв.)")
 
     lines += [
-        "\n<b>💡 Принципы хорошего username для SEO:</b>",
+        "\n<b>💡 Принципы хорошего юзернейма для SEO:</b>",
         "• 8–14 символов — оптимум для поиска",
         "• Ключевое слово в начале (не в конце)",
         "• Без цифр в конце — выглядит органически",
         "• Гео-суффикс (_msk, _spb, _dubai) = локальный трафик",
-        "• Смена сбрасывает search authority на ~2 нед.",
+        "• Смена сбрасывает вес в поиске на ~2 нед.",
         "\n🔍 Проверить доступность: введите @username в поиске Telegram",
     ]
 

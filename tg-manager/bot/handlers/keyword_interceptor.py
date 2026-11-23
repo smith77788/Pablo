@@ -19,10 +19,11 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 from bot.callbacks import KwCb, BmCb
 from bot.utils.subscription import require_plan, locked_text
 from bot.keyboards import subscription_locked_markup
-from bot.utils.op_helpers import safe_answer, terminal_kb
+from bot.utils.op_helpers import safe_answer, terminal_kb, cancel_kb
 from services.logger import log_exc_swallow
 from services import keyword_watcher as kw
 from bot.utils.owner_error import owner_error
+from bot.utils.op_helpers import ask_to_confirm
 
 log = logging.getLogger(__name__)
 router = Router()
@@ -121,21 +122,21 @@ async def cb_kw_pick_acc(
 async def msg_kw_chat(message: Message, state: FSMContext) -> None:
     chat_ref = (message.text or "").strip()
     if not chat_ref or len(chat_ref) > 200:
-        await message.answer("Некорректный чат. Пришлите @username, ссылку или ID.")
+        await message.answer("Некорректный чат. Пришлите @username, ссылку или ID.", reply_markup=cancel_kb())
         return
     await state.update_data(chat_ref=chat_ref)
     await state.set_state(KwFSM.wait_keywords)
     await message.answer(
         "🔑 <b>Ключевые слова</b>\n\nПришлите ключи через запятую "
         "<i>(например: куплю, ищу, нужен мастер)</i>. Совпадение — по вхождению, "
-        "регистр не важен.", parse_mode="HTML")
+        "регистр не важен.", parse_mode="HTML", reply_markup=cancel_kb())
 
 
 @router.message(KwFSM.wait_keywords, F.text)
 async def msg_kw_keywords(message: Message, state: FSMContext, pool: asyncpg.Pool) -> None:
     keywords = kw.normalize_keywords(message.text or "")
     if not keywords:
-        await message.answer("Не распознал ключи. Пришлите слова через запятую.")
+        await message.answer("Не распознал ключи. Пришлите слова через запятую.", reply_markup=cancel_kb())
         return
     data = await state.get_data()
     try:
@@ -143,11 +144,11 @@ async def msg_kw_keywords(message: Message, state: FSMContext, pool: asyncpg.Poo
             pool, message.from_user.id, int(data["account_id"]),
             data["chat_ref"], keywords)
     except ValueError as e:
-        await message.answer(f"⚠️ {owner_error(e)}")
+        await message.answer(f"⚠️ {owner_error(e)}", reply_markup=cancel_kb())
         return
     except Exception:
         log_exc_swallow(log, "kw create_watcher failed")
-        await message.answer("Ошибка создания перехватчика.", reply_markup=terminal_kb())
+        await message.answer("⚠️ Не удалось создать перехватчик. Попробуйте ещё раз через минуту.", reply_markup=terminal_kb())
         return
     await state.clear()
     kb = InlineKeyboardBuilder()
@@ -183,7 +184,7 @@ async def cb_kw_view(
     toggle = "paused" if w["status"] == "active" else "active"
     kb.button(text="⏸ Пауза" if w["status"] == "active" else "▶️ Возобновить",
               callback_data=KwCb(action="toggle", watcher_id=w["id"]))
-    kb.button(text="🗑 Удалить", callback_data=KwCb(action="del", watcher_id=w["id"]))
+    kb.button(text="🗑 Удалить", callback_data=KwCb(action="del_ask", watcher_id=w["id"]))
     kb.button(text="◀️ Назад", callback_data=KwCb(action="menu"))
     kb.adjust(2, 1)
     _ = toggle
@@ -205,7 +206,7 @@ async def cb_kw_toggle(
         "SELECT status FROM keyword_watchers WHERE id=$1 AND owner_id=$2",
         callback_data.watcher_id, callback.from_user.id)
     if not w:
-        await callback.answer("Не найден", show_alert=True)
+        await callback.answer("Отслеживание не найдено. Уже удалено или недоступно. Откройте список заново.", show_alert=True)
         return
     new_status = "paused" if w["status"] == "active" else "active"
     await kw.set_status(pool, callback.from_user.id, callback_data.watcher_id, new_status)
@@ -240,3 +241,14 @@ async def cb_kw_leads(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
         lines.append(f"🔑 <b>{html.escape(h['matched_keyword'] or '')}</b> · {who}\n{txt}\n")
     await callback.message.edit_text(
         "\n".join(lines), parse_mode="HTML", reply_markup=_back_kb().as_markup())
+
+
+@router.callback_query(KwCb.filter(F.action == "del_ask"))
+async def cb_kwcb_del_ask(callback: CallbackQuery, callback_data: KwCb) -> None:
+    await ask_to_confirm(
+        callback,
+        question="🗑 <b>Удалить перехватчик ключевых слов?</b>",
+        yes=callback_data.model_copy(update={"action": "del"}),
+        no=KwCb(action="menu"),
+        yes_text="🗑 Да, удалить",
+    )

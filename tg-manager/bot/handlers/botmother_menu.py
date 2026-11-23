@@ -142,10 +142,14 @@ from bot.utils.op_helpers import safe_answer, terminal_kb
 
 log = logging.getLogger(__name__)
 
+from bot.utils.fmt import num_ru  # noqa: E402
+
 router = Router()
 
 
 from bot.utils.op_names import op_name as _op_name  # noqa: E402
+from bot.utils.op_helpers import no_bots_kb
+from bot.utils.op_helpers import cancel_kb
 
 def _lock(user_plan: str, required: str) -> str:
     from bot.utils.subscription import PLAN_LEVELS, coerce_plan
@@ -802,7 +806,7 @@ async def cb_visibility(
         "🏆 <b>Конкуренты</b> — анализ конкурирующих ботов\n"
         "📈 <b>SEO</b> — оптимизация каналов под поиск\n"
         "🔔 <b>Алерты</b> — уведомления о резких изменениях\n"
-        "🧠 <b>Поведение</b> — внимание, привычки, связи в экосистеме [enterprise]\n"
+        "🧠 <b>Поведение</b> — внимание, привычки, связи в экосистеме [💎 подписка]\n"
         "🗺️ <b>Топология</b> — граф связей активов",
         _analytics_kb(user_plan),
     )
@@ -854,8 +858,8 @@ async def cb_operations(
     await _edit(
         callback,
         "⚡ <b>Операции — жалобы, публикация, массовые действия</b>\n\n"
-        "⚔️ <b>Массовые жалобы</b> — целевые зачистки по каналам и группам [enterprise]\n"
-        "🌍 <b>Гео-сеть: создать</b> — массово СОЗДАЁТ новые каналы/группы/боты по городам [enterprise]\n"
+        "⚔️ <b>Массовые жалобы</b> — целевые зачистки по каналам и группам [💎 подписка]\n"
+        "🌍 <b>Гео-сеть: создать</b> — массово СОЗДАЁТ новые каналы/группы/боты по городам [💎 подписка]\n"
         "📤 <b>Публикация</b> — массовая публикация во все каналы\n"
         "✍️ <b>Быстрый пост</b> — пошаговый мастер публикации\n"
         "⚡ <b>Массовые действия</b> — вступление и выход, массовая правка, инвайт\n"
@@ -1228,11 +1232,11 @@ async def cb_settings(
         "⚙️ <b>Настройки</b>\n\n"
         "💳 <b>Подписка и тариф</b> — тарифный план, оплата, активация\n"
         "👥 <b>Рефералы</b> — приглашайте друзей и получайте бонусы\n"
-        "🤖 <b>ИИ-ассистент</b> — нейросеть для создания контента [enterprise]\n"
+        "🤖 <b>ИИ-ассистент</b> — нейросеть для создания контента [💎 подписка]\n"
         "🔔 <b>Уведомления</b> — алерты, позиции, ошибки\n"
         "🤖 <b>Команды бота</b> — настройка /start, /help и других команд\n"
         "📄 <b>Шаблоны</b> — сохранённые конфигурации операций\n"
-        "🏢 <b>Пространства</b> — совместная работа в команде [enterprise]\n"
+        "🏢 <b>Пространства</b> — совместная работа в команде [💎 подписка]\n"
         "🔑 <b>API доступ</b> — ключи и подключения к внешним системам\n"
         "🎭 <b>Персоны</b> — цифровые персоны и их настройка\n"
         "🧠 <b>ИИ Память</b> — память системы по каждому боту",
@@ -1290,7 +1294,7 @@ async def cb_pick_bot_for(
         await _edit(
             callback,
             f"<b>{title}</b>\n\nУ вас нет ботов. Сначала добавьте бота через <b>🤖 Мои боты → ➕ Добавить</b>.",
-            kb.as_markup(),
+            no_bots_kb(back=BmCb(action=back_action)),
         )
         return
 
@@ -1502,7 +1506,7 @@ async def cb_alerts_clear_do(callback: CallbackQuery, pool: asyncpg.Pool) -> Non
             "DELETE FROM restriction_events WHERE owner_id=$1", callback.from_user.id
         )
     except Exception:
-        await callback.answer("❌ Ошибка при очистке алертов", show_alert=True)
+        await callback.answer("⚠️ Не удалось очистить предупреждения. Попробуйте ещё раз через минуту.", show_alert=True)
         return
     await callback.answer("Алерты очищены", show_alert=True)
     kb = InlineKeyboardBuilder()
@@ -1850,7 +1854,7 @@ async def cb_plan_type(
 ) -> None:
     op_type = callback_data.sub
     if op_type not in _OP_TYPE_LABELS:
-        await callback.answer("Неизвестный тип операции", show_alert=True)
+        await callback.answer("⚠️ Кнопка устарела. Откройте раздел заново.", show_alert=True)
         return
     await safe_answer(callback)
     await state.update_data(op_type=op_type)
@@ -1898,7 +1902,7 @@ async def cb_plan_type(
 async def fsm_plan_waiting_text(message: Message, state: FSMContext) -> None:
     text = message.text or message.caption or ""
     if not text.strip():
-        await message.answer("⚠️ Текст не может быть пустым. Введите сообщение:")
+        await message.answer("⚠️ Текст не может быть пустым. Введите сообщение:", reply_markup=cancel_kb())
         return
     await state.update_data(publish_text=text.strip())
     await state.set_state(OpPlannerFSM.waiting_datetime)
@@ -1919,7 +1923,7 @@ async def fsm_plan_waiting_links(message: Message, state: FSMContext) -> None:
     text = message.text or ""
     links = [ln.strip() for ln in text.splitlines() if ln.strip()]
     if not links:
-        await message.answer("⚠️ Введите хотя бы одну ссылку или @username:")
+        await message.answer("⚠️ Введите хотя бы одну ссылку или @username:", reply_markup=cancel_kb())
         return
     await state.update_data(links=links)
     await state.set_state(OpPlannerFSM.waiting_datetime)
@@ -1982,7 +1986,7 @@ async def fsm_plan_waiting_datetime(
 
     now_utc = datetime.now(timezone.utc)
     if dt <= now_utc:
-        await message.answer("⚠️ Время должно быть в будущем. Попробуйте ещё раз:")
+        await message.answer("⚠️ Время должно быть в будущем. Попробуйте ещё раз:", reply_markup=cancel_kb())
         return
 
     sd = await state.get_data()
@@ -2119,7 +2123,7 @@ async def cb_plan_cancel(
     try:
         op_id = int(callback_data.sub or "0")
     except (ValueError, TypeError):
-        await callback.answer("Неверный ID операции", show_alert=True)
+        await callback.answer("⚠️ Кнопка устарела. Откройте раздел заново.", show_alert=True)
         return
 
     uid = callback.from_user.id
@@ -2258,14 +2262,14 @@ def _analyze_error(error_msg: str) -> dict:
     if any(w in msg for w in ("not found", "not exist", "invalid", "no such")):
         result["cause"] = "Целевой канал/чат/бот не найден"
         result["recommendation"] = (
-            "Проверьте правильность username или ID. "
+            "Проверьте правильность юзернейма или ID. "
             "Возможно, канал был удалён или переименован."
         )
         return result
 
     # Peer flood (spam-like behavior)
     if "peer" in msg and ("flood" in msg or "spam" in msg):
-        result["cause"] = "Telegram ограничил операции с этим контактом (peer flood)"
+        result["cause"] = "Telegram ограничил операции с этим контактом (флуд-ограничение по контактам)"
         result["recommendation"] = (
             "Сделайте паузу 12–24 часа. Аккаунт временно ограничен для этого получателя. "
             "Не пытайтесь повторить операцию немедленно."
@@ -2275,7 +2279,7 @@ def _analyze_error(error_msg: str) -> dict:
     # Default — unknown
     result["cause"] = "Не удалось определить точную причину"
     result["recommendation"] = (
-        "Проверьте логи операции (CSV-экспорт), состояние аккаунтов в Health Dashboard. "
+        "Проверьте логи операции (CSV-экспорт), состояние аккаунтов в разделе «❤️ Здоровье акк.». "
         "При повторении ошибки — попробуйте с другими аккаунтами или в другое время."
     )
     return result
@@ -2817,7 +2821,7 @@ async def cb_op_cancel(
             pool, op_id, user_id,
             allow=("pending", "running", "paused", "waiting_approval"))
     except Exception:
-        await callback.answer("❌ Ошибка при отмене операции", show_alert=True)
+        await callback.answer("⚠️ Не удалось отменить операцию. Попробуйте ещё раз через минуту.", show_alert=True)
         return
     await callback.answer("🛑 Операция отменена", show_alert=False)
     kb = InlineKeyboardBuilder()
@@ -2903,7 +2907,7 @@ async def cb_schedules(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
             callback,
             "<b>📅 Расписание рассылок</b>\n\nУ вас нет ботов.\n"
             "Добавьте бота через <b>🏗 Активы & Сети → 🤖 Мои боты</b>.",
-            kb.as_markup(),
+            no_bots_kb(back=BmCb(action="comms")),
         )
         return
 
@@ -3710,7 +3714,7 @@ async def cb_topology(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
             swarm = "🧬" if b.get("swarm_enabled") else "  "
             role_icon = role_icons.get(b.get("bot_role", "general"), "⚙️")
             lines.append(
-                f"  {swarm}{role_icon} {html.escape(bname)} ({users:,} польз.)"
+                f"  {swarm}{role_icon} {html.escape(bname)} ({num_ru(users)} польз.)"
             )
 
     if channels:

@@ -34,6 +34,7 @@ from services.contacts_hub import segments as _segments
 from services import mini_app_bots
 from services import mini_app_invite
 from services import mini_app_channels
+from services import mini_app_notify_routes
 from services import mini_app_monitor
 from services import mini_app_operations
 from services import mini_app_dashboard
@@ -74,6 +75,7 @@ from services import mini_app_selfpromo
 from services import mini_app_growth_plan
 from services import mini_app_niche
 from services import mini_app_bot_people
+from bot.utils.fmt import plural
 from services.security import (
     check_rate_limit,
     rate_limit_response,
@@ -9858,7 +9860,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                     "msg_count": msg_count,
                 },
                 total_items=len(target_refs),
-                label=f"Клонировать контент: {source} → {len(target_refs)} канал(ов)")
+                label=f"Клонировать контент: {source} → {len(target_refs)} {plural(len(target_refs), 'канал', 'канала', 'каналов')}")
             return _json_resp({"ok": True, "op_id": op_id})
         except PermissionError as exc:
             # Отказ по тарифу (operation_bus.PlanRequiredError) — это НЕ сбой:
@@ -10276,6 +10278,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     mini_app_bots.setup_routes(app, pool)
     mini_app_invite.setup_routes(app, pool)
     mini_app_channels.setup_routes(app, pool)
+    mini_app_notify_routes.setup_routes(app, pool)
     mini_app_operations.setup_routes(app, pool)
     mini_app_dashboard.setup_routes(app, pool)
     mini_app_dm.setup_routes(app, pool)

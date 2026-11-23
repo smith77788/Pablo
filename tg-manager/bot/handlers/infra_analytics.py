@@ -40,6 +40,9 @@ _ADVISOR_ACTION_BUTTONS: dict[str, tuple[str, object]] = {
 }
 
 log = logging.getLogger(__name__)
+from bot.utils.fmt import num_ru  # noqa: E402
+from bot.utils.op_helpers import no_accounts_kb
+
 router = Router()
 
 _PAGE = 10
@@ -241,7 +244,7 @@ async def cb_infra_health(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
         for pr in pool_rows:
             pool_name = pr["pool"] or "<i>без пула</i>"
             avg_t = float(pr["avg_trust"] or 0)
-            lines.append(f"  🏊 {pool_name}: {pr['cnt']} акк, avg trust={avg_t:.2f}")
+            lines.append(f"  🏊 {pool_name}: {pr['cnt']} акк., среднее доверие {avg_t:.2f}")
 
     await callback.message.edit_text(
         "\n".join(lines),
@@ -306,7 +309,7 @@ async def cb_infra_flood(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
         log.warning('handler error in cb_infra_flood: %s', e)
         action_stats = []
     if action_stats:
-        lines.append("\n<b>Топ действий с flood (7 дней):</b>")
+        lines.append("\n<b>Действия с флудом чаще всего (7 дней):</b>")
         for s in action_stats:
             lines.append(f"  • {s['action_type'] or 'default'}: {s['cnt']} flood")
 
@@ -394,7 +397,7 @@ async def cb_infra_audit(
         )
         return
 
-    lines = [f"📋 <b>Лог операций</b> (всего: {total:,})\n"]
+    lines = [f"📋 <b>Лог операций</b> (всего: {num_ru(total)})\n"]
     if bad_proxy_count > 0:
         lines.append(f"⚠️ Плохих прокси (< 50% успех): <b>{bad_proxy_count}</b>\n")
     for r in rows:
@@ -773,7 +776,7 @@ async def cb_asset_registry(callback: CallbackQuery, pool: asyncpg.Pool) -> None
         "<b>🤖 Боты</b>",
         f"   Всего: <b>{bot.get('total', 0)}</b>  |  "
         f"Активных: <b>{bot.get('active', 0)}</b>",
-        f"   Аудитория: <b>{int(bot.get('total_users', 0)):,}</b> пользователей",
+        f"   Аудитория: <b>{num_ru(int(bot.get('total_users', 0)))}</b> пользователей",
         "",
         "<b>📡 Каналы</b>",
         f"   Подключено: <b>{chan_total}</b>",
@@ -846,7 +849,7 @@ async def cb_rebalance_preview(callback: CallbackQuery, pool: asyncpg.Pool) -> N
     if not accounts:
         await callback.message.edit_text(
             "⚠️ Нет активных аккаунтов для балансировки.",
-            reply_markup=_back_kb().as_markup(),
+            reply_markup=no_accounts_kb(back=InfraCb(action="menu")),
         )
         return
 
@@ -885,8 +888,8 @@ async def cb_rebalance_preview(callback: CallbackQuery, pool: asyncpg.Pool) -> N
         lines.append(f"<i>... и ещё {len(changes) - 15}</i>")
 
     lines.append("\n<b>Правила распределения:</b>")
-    lines.append("• trust ≥ 0.75, нет предупреждений → <code>primary</code>")
-    lines.append("• trust < 0.3 или есть предупреждения → <code>monitoring</code>")
+    lines.append("• доверие ≥ 0.75, нет предупреждений → <code>primary</code>")
+    lines.append("• доверие < 0.3 или есть предупреждения → <code>monitoring</code>")
     lines.append("• на cooldown → <code>cooldown</code>")
 
     kb = InlineKeyboardBuilder()
@@ -1208,7 +1211,7 @@ async def cb_infra_deploy(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
             "⚠️ <b>Нет активных аккаунтов для развёртки</b>\n\n"
             "Добавьте аккаунты через 📱 Аккаунты.",
             parse_mode="HTML",
-            reply_markup=_back_kb().as_markup(),
+            reply_markup=no_accounts_kb(back=InfraCb(action="menu")),
         )
         return
 
@@ -1351,7 +1354,7 @@ async def cb_infra_health_check(callback: CallbackQuery, pool: asyncpg.Pool) -> 
         await callback.message.edit_text(
             "⚠️ Нет активных аккаунтов для проверки.",
             parse_mode="HTML",
-            reply_markup=_back_kb().as_markup(),
+            reply_markup=no_accounts_kb(back=InfraCb(action="menu")),
         )
         return
 

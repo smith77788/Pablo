@@ -42,6 +42,8 @@ from bot.utils.template_validator import (
 
 log = logging.getLogger(__name__)
 from bot.utils.owner_error import owner_error  # noqa: E402
+from bot.utils.op_helpers import no_accounts_kb
+from bot.utils.op_helpers import cancel_kb
 
 router = Router()
 
@@ -160,7 +162,7 @@ async def cb_mpub_start(
             await callback.message.edit_text(
                 "⚠️ Нет активных аккаунтов. Подключите через /accounts",
                 parse_mode="HTML",
-                reply_markup=_back_menu_kb().as_markup(),
+                reply_markup=no_accounts_kb(back=MassPubCb(action="menu")),
             )
             return
         await state.update_data(
@@ -196,7 +198,7 @@ async def cb_mpub_start(
             await callback.message.edit_text(
                 "⚠️ Нет активных аккаунтов.",
                 parse_mode="HTML",
-                reply_markup=_back_menu_kb().as_markup(),
+                reply_markup=no_accounts_kb(back=MassPubCb(action="menu")),
             )
             return
         kb = InlineKeyboardBuilder()
@@ -302,7 +304,7 @@ async def fsm_mpub_text(message: Message, state: FSMContext) -> None:
         media_type = "document"
 
     if not text and not media_file_id:
-        await message.answer("⚠️ Введите текст поста или отправьте медиа с подписью:")
+        await message.answer("⚠️ Введите текст поста или отправьте медиа с подписью:", reply_markup=cancel_kb())
         return
 
     from services import postbot
@@ -787,7 +789,7 @@ async def cb_mpub_dry_run(
         await callback.message.edit_text(
             "⚠️ Нет активных аккаунтов.",
             parse_mode="HTML",
-            reply_markup=_back_menu_kb().as_markup(),
+            reply_markup=no_accounts_kb(back=MassPubCb(action="menu")),
         )
         return
     await state.update_data(

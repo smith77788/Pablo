@@ -19,6 +19,7 @@ from aiogram.filters import Command
 from aiogram.types import BusinessConnection, BusinessMessagesDeleted, Message
 
 from services import vault_service as vault
+from bot.utils.op_helpers import cancel_kb
 
 log = logging.getLogger(__name__)
 router = Router(name="business_vault")
@@ -551,7 +552,7 @@ async def on_vault_reply_text(message: Message, bot: Bot, pool: asyncpg.Pool,
     res = await vault.send_reply(pool, bot, uid, int(chat_id), message.text or "")
     if not res.get("ok"):
         await message.answer(f"⚠️ {_esc(res.get('error') or 'Не отправлено')}",
-                             parse_mode="HTML")
+                             parse_mode="HTML", reply_markup=cancel_kb())
         return
     text, markup = await render_dialog_card(
         pool, uid, int(chat_id), data.get("vault_folder") or "all",

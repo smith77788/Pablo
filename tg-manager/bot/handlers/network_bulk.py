@@ -18,6 +18,8 @@ from services import bot_api
 from services.logger import log_exc_swallow
 from bot.utils.op_helpers import safe_answer, terminal_kb
 from services.secret_masking import mask_bot_token
+import html as _html
+from bot.utils.op_helpers import show_no_bots
 
 router = Router()
 log = logging.getLogger(__name__)
@@ -108,10 +110,10 @@ async def cb_bulk_check(
         bots = await db.get_bots(pool, callback.from_user.id)
     except Exception:
         log_exc_swallow(log, "cb_bulk_check: get_bots failed")
-        await callback.answer("Ошибка загрузки ботов.", show_alert=True)
+        await callback.answer("⚠️ Не удалось загрузить ботов. Попробуйте ещё раз через минуту.", show_alert=True)
         return
     if not bots:
-        await callback.answer("Нет ботов для проверки.", show_alert=True)
+        await show_no_bots(callback)
         return
     await safe_answer(callback)
     await callback.message.edit_text(f"⏳ Проверяю {len(bots)} токенов...")
@@ -182,7 +184,7 @@ async def msg_bulk_name(
     )
     log.info("network_bulk: set_name done ok=%d fail=%d total=%d", ok, fail, total)
     await msg.edit_text(
-        _result_text(ok, fail, total, f"Имя → «{name[:30]}»"),
+        _result_text(ok, fail, total, f"Имя → «{_html.escape(name[:30])}»"),
         parse_mode="HTML",
         reply_markup=network_ops_menu(),
     )
@@ -218,7 +220,7 @@ async def msg_bulk_localized_name(
         pool, message.from_user.id, http, bot_api.set_name, name, lang
     )
     await msg.edit_text(
-        _result_text(ok, fail, total, f"Имя [{lang or 'default'}] → «{name[:30]}»"),
+        _result_text(ok, fail, total, f"Имя [{lang or 'по умолчанию'}] → «{_html.escape(name[:30])}»"),
         parse_mode="HTML",
         reply_markup=network_ops_menu(),
     )
@@ -439,7 +441,7 @@ async def cb_netgeo_lang_select(
     """Handle GEO language selection from inline keyboard (netgeo:field:lang_code)."""
     parts = callback.data.split(":", 2)
     if len(parts) != 3:
-        await callback.answer("Неверный формат.", show_alert=True)
+        await callback.answer("⚠️ Кнопка устарела. Откройте раздел заново.", show_alert=True)
         return
     _, field, code = parts
     await safe_answer(callback)
@@ -452,7 +454,7 @@ async def cb_netgeo_lang_select(
         "cmd": (BulkEdit.waiting_localized_commands, f"🤖 Введите <b>команды</b> для языка <code>{code.upper()}</code>:\n\n<code>start - Главное меню\nhelp - Помощь</code>"),
     }
     if field not in _state_map:
-        await callback.answer("Неизвестный тип поля.", show_alert=True)
+        await callback.answer("⚠️ Кнопка устарела. Откройте раздел заново.", show_alert=True)
         return
     next_state, prompt = _state_map[field]
     kb = InlineKeyboardBuilder()

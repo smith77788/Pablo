@@ -22,6 +22,9 @@ from services import bot_api
 from bot.utils.op_helpers import safe_answer, terminal_kb
 
 log = logging.getLogger(__name__)
+from bot.utils.fmt import num_ru, plural  # noqa: E402
+from bot.utils.op_helpers import no_accounts_kb
+
 router = Router()
 
 # ── Helpers ───────────────────────────────────────────────────────────────
@@ -115,7 +118,7 @@ async def cb_factory_create(
             "Telegram-аккаунт.\n\n"
             "Добавьте аккаунт в разделе 📱 Аккаунты.",
             parse_mode="HTML",
-            reply_markup=kb.as_markup(),
+            reply_markup=no_accounts_kb(back=BotFactCb(action="menu")),
         )
         return
 
@@ -213,16 +216,16 @@ async def fsm_botcreate_name_tpl(message: Message, state: FSMContext) -> None:
     await state.set_state(BotCreateFSM.waiting_uname_tpl)
     kb = InlineKeyboardBuilder()
     kb.button(
-        text="⏭ Авто-username", callback_data=BotFactCb(action="create_skip_uname")
+        text="⏭ Авто-юзернейм", callback_data=BotFactCb(action="create_skip_uname")
     )
     kb.button(text="❌ Отмена", callback_data=BotFactCb(action="menu"))
     kb.adjust(1)
     await message.answer(
-        "🔤 <b>Шаблон username</b>\n\n"
-        "Введите базовый username (без @, без суффикса <code>bot</code>).\n"
+        "🔤 <b>Шаблон юзернейма</b>\n\n"
+        "Введите базовый юзернейм (без @, без суффикса <code>bot</code>).\n"
         "Суффикс <code>bot</code> добавляется автоматически.\n\n"
         "Пример: <code>myassistant</code> → <i>myassistant1bot, myassistant2bot...</i>\n\n"
-        "Или нажмите «Авто-username» — система сгенерирует уникальные имена сама.",
+        "Или нажмите «Авто-юзернейм» — система сгенерирует уникальные имена сама.",
         parse_mode="HTML",
         reply_markup=kb.as_markup(),
     )
@@ -242,7 +245,7 @@ async def fsm_botcreate_uname_tpl(message: Message, state: FSMContext) -> None:
         kb = InlineKeyboardBuilder()
         kb.button(text="❌ Отмена", callback_data=BotFactCb(action="menu"))
         await message.answer(
-            "⚠️ Шаблон username от 3 до 20 символов. Попробуйте ещё раз:",
+            "⚠️ Шаблон юзернейма от 3 до 20 символов. Попробуйте ещё раз:",
             reply_markup=kb.as_markup(),
         )
         return
@@ -394,7 +397,7 @@ async def msg_import_tokens(
         )
         return
 
-    info_msg = await message.answer(f"⏳ Проверяю {len(tokens)} токен(ов)...")
+    info_msg = await message.answer(f"⏳ Проверяю {len(tokens)} {plural(len(tokens), 'токен', 'токена', 'токенов')}...")
 
     valid: list[dict] = []
     invalid: list[str] = []
@@ -580,7 +583,7 @@ async def msg_validate_tokens(
         )
         return
 
-    info_msg = await message.answer(f"⏳ Проверяю {len(tokens)} токен(ов)...")
+    info_msg = await message.answer(f"⏳ Проверяю {len(tokens)} {plural(len(tokens), 'токен', 'токена', 'токенов')}...")
 
     working: list[dict] = []
     broken: list[str] = []
@@ -997,7 +1000,7 @@ async def cb_clone_confirm(
     skip_line = f"\nПропущено (нечего применять): <b>{skipped_count}</b>" if skipped_count else ""
     await callback.message.edit_text(
         f"✅ <b>Клонирование завершено</b>\n\n"
-        f"Скопировано в: <b>{ok_count}</b> бот(ов)\n"
+        f"Скопировано в: <b>{ok_count}</b> {plural(ok_count, 'бот', 'бота', 'ботов')}\n"
         f"Ошибок: <b>{fail_count}</b>{skip_line}",
         parse_mode="HTML",
         reply_markup=kb.as_markup(),
@@ -1049,7 +1052,7 @@ async def cb_factory_stats(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
         f"📊 <b>Статистика ботов</b>\n\n"
         f"Всего ботов: <b>{total_bots}</b>\n"
         f"Активных: <b>{active_bots}</b>\n"
-        f"Всего пользователей: <b>{total_users:,}</b>",
+        f"Всего пользователей: <b>{num_ru(total_users)}</b>",
         parse_mode="HTML",
         reply_markup=kb.as_markup(),
     )

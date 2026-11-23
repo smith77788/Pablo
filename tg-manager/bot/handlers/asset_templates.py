@@ -47,6 +47,8 @@ from bot.utils.subscription import require_plan, locked_text
 from bot.utils.template_validator import validate_asset_template
 from database import db
 from bot.utils.op_helpers import safe_answer
+from bot.utils.op_helpers import no_accounts_kb
+from bot.utils.op_helpers import cancel_kb
 
 log = logging.getLogger(__name__)
 router = Router()
@@ -70,7 +72,7 @@ _TYPE_PROMPTS = {
     ),
     "channel": (
         "📡 <b>Шаблон канала — параметры</b>\n\n"
-        "Введите через <code>;;;</code>: название канала, описание, username "
+        "Введите через <code>;;;</code>: название канала, описание, юзернейм "
         "(или оставьте пустым).\n\n"
         "Пример:\n"
         "<code>Мой канал;;;Новости о моде;;;fashion_shop</code>\n\n"
@@ -80,7 +82,7 @@ _TYPE_PROMPTS = {
     ),
     "group": (
         "👥 <b>Шаблон группы — параметры</b>\n\n"
-        "Введите через <code>;;;</code>: название группы, описание, username "
+        "Введите через <code>;;;</code>: название группы, описание, юзернейм "
         "(или оставьте пустым).\n\n"
         "Пример:\n"
         "<code>Моя группа;;;Обсуждения о моде;;;fashion_chat</code>\n\n"
@@ -451,7 +453,7 @@ async def cb_choose_type(
 async def msg_waiting_name(message: Message, state: FSMContext) -> None:
     name = (message.text or "").strip()
     if not name:
-        await message.answer("❌ Название не может быть пустым. Попробуйте ещё раз:")
+        await message.answer("❌ Название не может быть пустым. Попробуйте ещё раз:", reply_markup=cancel_kb())
         return
     if len(name) > 64:
         await message.answer(
@@ -550,6 +552,7 @@ async def msg_waiting_json(message: Message, state: FSMContext) -> None:
         await message.answer(
             f"❌ <b>Ошибки в шаблоне:</b>\n{errors}\n\nВведите параметры заново:",
             parse_mode="HTML",
+            reply_markup=cancel_kb(),
         )
         return
 
@@ -664,7 +667,7 @@ async def cb_apply(
         if not accounts:
             await callback.message.edit_text(
                 "⚠️ Нет активных аккаунтов для создания. Добавьте аккаунт.",
-                reply_markup=_menu_kb(),
+                reply_markup=no_accounts_kb(),
             )
             return
 
@@ -895,7 +898,7 @@ async def cb_delete_confirm(
         )
         return
     await callback.message.edit_text(
-        f"🗑️ Вы уверены, что хотите удалить шаблон <b>«{tpl['name']}»</b>?",
+        f"🗑️ Вы уверены, что хотите удалить шаблон <b>«{html.escape(str(tpl['name']))}»</b>?",
         parse_mode="HTML",
         reply_markup=_delete_confirm_kb(
             callback_data.tpl_id, callback_data.asset_type or ""
@@ -1355,7 +1358,7 @@ async def cb_lib_apply(
             await callback.message.edit_text(
                 "⚠️ Нет активных аккаунтов. Добавьте аккаунт.",
                 parse_mode="HTML",
-                reply_markup=kb.as_markup(),
+                reply_markup=no_accounts_kb(back=LibCb(action="menu")),
             )
             return
         await state.update_data(tpl_prefill=data)
@@ -1584,7 +1587,7 @@ async def cb_btcz_skip_company(callback: CallbackQuery, state: FSMContext) -> No
 async def fsm_btcz_company(message: Message, state: FSMContext) -> None:
     text = (message.text or "").strip()
     if not text:
-        await message.answer("⚠️ Введите название компании или нажмите «Отмена».")
+        await message.answer("⚠️ Введите название компании или нажмите «Отмена».", reply_markup=cancel_kb())
         return
     data = await state.get_data()
     subs = data.get("tpl_subs", {})
@@ -1632,7 +1635,7 @@ async def cb_btcz_skip_hours(callback: CallbackQuery, state: FSMContext) -> None
 async def fsm_btcz_hours(message: Message, state: FSMContext) -> None:
     text = (message.text or "").strip()
     if not text:
-        await message.answer("⚠️ Введите часы работы или нажмите «Оставить».")
+        await message.answer("⚠️ Введите часы работы или нажмите «Оставить».", reply_markup=cancel_kb())
         return
     data = await state.get_data()
     subs = data.get("tpl_subs", {})
@@ -1650,7 +1653,7 @@ async def _ask_operator(target: Message, state: FSMContext, data: dict) -> None:
     send = target.answer if isinstance(target, Message) else target.edit_text
     await send(
         "✏️ <b>Настройка шаблона — шаг 3/3</b>\n\n"
-        "👤 Username живого оператора (например @support_manager)\n"
+        "👤 Юзернейм живого оператора (например @support_manager)\n"
         "Пользователи смогут написать напрямую.\n\n"
         "Если оператора нет — нажмите «Пропустить»:",
         parse_mode="HTML",
@@ -1693,7 +1696,7 @@ async def _show_bot_pick_customize(target: Message, state: FSMContext, pool: asy
     preset = get_preset_by_key(key)
     if not preset:
         await state.clear()
-        await target.answer("❌ Шаблон не найден.", parse_mode="HTML")
+        await target.answer("❌ Шаблон не найден.", parse_mode="HTML", reply_markup=terminal_kb())
         return
 
     tpl_name = preset["name"]

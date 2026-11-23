@@ -17,6 +17,8 @@ from services.logger import log_exc_swallow
 from bot.utils.owner_error import owner_error
 
 log = logging.getLogger(__name__)
+from bot.utils.fmt import num_ru  # noqa: E402
+
 router = Router()
 
 
@@ -24,13 +26,13 @@ def _members_trend(current: int | None, previous: int | None) -> str:
     """Возвращает стрелку тренда подписчиков и дельту."""
     if current is None:
         return "?"
-    base = f"{current:,}"
+    base = f"{num_ru(current)}"
     if previous is None or previous == current:
         return base
     delta = current - previous
     if delta > 0:
-        return f"{base} ↗️ (+{delta:,})"
-    return f"{base} ↘️ ({delta:,})"
+        return f"{base} ↗️ (+{num_ru(delta)})"
+    return f"{base} ↘️ ({num_ru(delta)})"
 
 
 @router.callback_query(CompCb.filter(F.action == "menu"))
@@ -102,7 +104,7 @@ async def comp_add(cb: CallbackQuery, state: FSMContext) -> None:
         "➕ <b>Добавить конкурента</b>\n\n"
         "Введите @username канала или бота конкурента:\n\n"
         "💡 Например: <code>@durov</code> или просто <code>durov</code>\n"
-        "<i>Только username без пробелов, не ссылка.</i>",
+        "<i>Только юзернейм без пробелов, не ссылка.</i>",
         reply_markup=kb.as_markup(),
     )
 
@@ -128,7 +130,7 @@ async def comp_got_username(message: Message, state: FSMContext) -> None:
         kb = InlineKeyboardBuilder()
         kb.button(text="❌ Отмена", callback_data=CompCb(action="cancel_fsm"))
         await message.answer(
-            "⚠️ Username слишком короткий (минимум 3 символа). Попробуйте ещё раз:",
+            "⚠️ Юзернейм слишком короткий (минимум 3 символа). Попробуйте ещё раз:",
             reply_markup=kb.as_markup(),
         )
         return
@@ -137,7 +139,7 @@ async def comp_got_username(message: Message, state: FSMContext) -> None:
         kb = InlineKeyboardBuilder()
         kb.button(text="❌ Отмена", callback_data=CompCb(action="cancel_fsm"))
         await message.answer(
-            "⚠️ Недопустимый username. Используйте только буквы, цифры и _\n"
+            "⚠️ Недопустимый юзернейм. Используйте только буквы, цифры и _\n"
             "Длина: 3–32 символа. Попробуйте ещё раз:",
             reply_markup=kb.as_markup(),
         )
@@ -150,7 +152,7 @@ async def comp_got_username(message: Message, state: FSMContext) -> None:
     kb.button(text="❌ Отмена", callback_data=CompCb(action="cancel_fsm"))
     kb.adjust(1)
     await message.answer(
-        f"Введите метку для <b>@{raw}</b> (например: «Главный конкурент»).\n"
+        f"Введите метку для <b>@{_html.escape(raw)}</b> (например: «Главный конкурент»).\n"
         "Или нажмите «Пропустить»:",
         parse_mode="HTML",
         reply_markup=kb.as_markup(),
@@ -205,7 +207,7 @@ async def comp_got_label(
             label,
         )
         await message.answer(
-            f"✅ @{username} <i>({label})</i> добавлен.",
+            f"✅ @{_html.escape(username)} <i>({_html.escape(str(label))})</i> добавлен.",
             parse_mode="HTML",
             reply_markup=kb.as_markup(),
         )

@@ -29,6 +29,7 @@ _ОБЯЗАНЫ = {
         "delete_bot",                 # удаление бота
         "use_workspace_invite",       # вход в чужое пространство — выдача прав
         "delete_workspace_member",    # выход/исключение — снятие прав
+        "delete_workspace",           # удаление пространства — снятие прав со всех
     ],
     "services/mini_app_accounts.py": [
         "account_delete",

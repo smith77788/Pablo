@@ -30,6 +30,7 @@ import logging
 from datetime import datetime, timedelta, timezone
 
 import asyncpg
+from bot.utils.fmt import plural
 
 log = logging.getLogger(__name__)
 
@@ -354,7 +355,7 @@ def build_suggestions(state: dict) -> list[dict]:
                 "id": "relog_expired",
                 "priority": 94,
                 "icon": "🔑",
-                "title": f"Переавторизуйте {n} аккаунт(ов)",
+                "title": f"Переавторизуйте {n} {plural(n, 'аккаунт', 'аккаунта', 'аккаунтов')}",
                 "reason": "Сессии устарели — Telegram не признаёт ключ авторизации. "
                 "Пока не сделаете релог, операции с этими аккаунтами будут падать.",
                 "cta": "Открыть аккаунты",
@@ -409,7 +410,7 @@ def build_suggestions(state: dict) -> list[dict]:
                 "priority": 78,
                 "icon": "🔥",
                 "title": f"Прогрейте {n} рисковых аккаунтов",
-                "reason": "У аккаунтов просел trust — прогрев имитирует живое "
+                "reason": "У аккаунтов просело доверие — прогрев имитирует живое "
                 "поведение и снижает риск блокировки.",
                 "cta": "Открыть прогрев",
                 "nav": None,

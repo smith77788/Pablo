@@ -29,6 +29,10 @@ from bot.utils.op_helpers import safe_answer, terminal_kb
 log = logging.getLogger(__name__)
 from bot.utils.owner_error import owner_error  # noqa: E402
 
+from bot.utils.fmt import num_ru  # noqa: E402
+from bot.utils.op_helpers import ask_to_confirm
+from bot.utils.op_helpers import cancel_kb
+
 router = Router()
 
 _STATUS_EMOJI = {
@@ -124,7 +128,7 @@ async def cb_dm_menu(
             )
         else:
             kb.button(
-                text="🗑", callback_data=DmCb(action="delete", campaign_id=c["id"])
+                text="🗑", callback_data=DmCb(action="delete_ask", campaign_id=c["id"])
             )
 
     kb.button(text="◀️ Назад", callback_data=BmCb(action="comms"))
@@ -482,12 +486,12 @@ async def cb_dm_target_parsed(
 
     kb = InlineKeyboardBuilder()
     kb.button(
-        text=f"🗂 Вся аудитория ({total_all:,} чел.)",
+        text=f"🗂 Вся аудитория ({num_ru(total_all)} чел.)",
         callback_data=DmCb(action="target_parsed_pick", campaign_id=0),
     )
     for r in runs:
         started = r["started_at"].strftime("%d.%m %H:%M") if r["started_at"] else "—"
-        label = f"{r['source_ref'][:18]} [{r['parse_type']}] {r['total_found']:,} чел. {started}"
+        label = f"{r['source_ref'][:18]} [{r['parse_type']}] {num_ru(r['total_found'])} чел. {started}"
         kb.button(
             text=label,
             callback_data=DmCb(action="target_parsed_pick", campaign_id=r["id"]),
@@ -550,9 +554,9 @@ async def _dm_offer_gender(callback: CallbackQuery, state: FSMContext, pool: asy
         kb = InlineKeyboardBuilder()
         kb.button(text="👥 Все", callback_data=DmCb(action="target_gender_all"))
         if m_cnt:
-            kb.button(text=f"👨 Только муж. ({m_cnt:,})", callback_data=DmCb(action="target_gender_m"))
+            kb.button(text=f"👨 Только муж. ({num_ru(m_cnt)})", callback_data=DmCb(action="target_gender_m"))
         if f_cnt:
-            kb.button(text=f"👩 Только жен. ({f_cnt:,})", callback_data=DmCb(action="target_gender_f"))
+            kb.button(text=f"👩 Только жен. ({num_ru(f_cnt)})", callback_data=DmCb(action="target_gender_f"))
         kb.adjust(1)
         await _edit(
             callback,
@@ -591,7 +595,7 @@ async def cb_dm_parsed_classify(
         await gc.classify_audience(pool, callback.from_user.id, run_id)
     except Exception:
         log_exc_swallow(log, "dm parsed_classify failed")
-        await callback.answer("Ошибка разметки пола", show_alert=True)
+        await callback.answer("⚠️ Не удалось разметить пол аудитории. Попробуйте ещё раз через минуту.", show_alert=True)
         return
     await _dm_offer_gender(callback, state, pool)
 
@@ -685,7 +689,7 @@ async def fsm_dm_import_text(
 
     raw = (message.text or "").strip()
     if not raw:
-        await message.answer("⚠️ Список пустой. Введите хотя бы одного получателя:")
+        await message.answer("⚠️ Список пустой. Введите хотя бы одного получателя:", reply_markup=cancel_kb())
         return
 
     items: list[dict] = []
@@ -1265,7 +1269,7 @@ async def cb_dm_detail(
         )
     if status in ("done", "failed"):
         kb.button(
-            text="🗑️ Удалить", callback_data=DmCb(action="delete", campaign_id=c["id"])
+            text="🗑️ Удалить", callback_data=DmCb(action="delete_ask", campaign_id=c["id"])
         )
     kb.button(text="◀️ Назад", callback_data=DmCb(action="menu"))
     kb.adjust(1)
@@ -1374,3 +1378,14 @@ async def cb_dm_delete(
     except Exception as e:
         log.warning("cb_dm_delete campaign: %s", e)
     await cb_dm_menu(callback, pool, state)
+
+
+@router.callback_query(DmCb.filter(F.action == "delete_ask"))
+async def cb_dmcb_delete_ask(callback: CallbackQuery, callback_data: DmCb) -> None:
+    await ask_to_confirm(
+        callback,
+        question="🗑 <b>Удалить кампанию?</b>\n\nВместе с ней уйдёт журнал отправок.",
+        yes=callback_data.model_copy(update={"action": "delete"}),
+        no=DmCb(action="detail", campaign_id=callback_data.campaign_id),
+        yes_text="🗑 Да, удалить",
+    )

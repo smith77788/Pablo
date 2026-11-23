@@ -239,7 +239,7 @@ async def create_offering(
     иначе ValueError (нельзя молча выставить чужое устройство под нагрузку).
     """
     if not await has_access(pool, owner_id):
-        raise PermissionError("нет доступа к модулю Host-Server")
+        raise PermissionError("нет доступа к модулю «Аренда сервера»")
     kind = _norm_kind(kind)
     period = _norm_period(period)
     title = (title or "").strip()

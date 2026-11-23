@@ -25,7 +25,7 @@ from bot.callbacks import AiCb, BmCb
 from bot.states import AiChat
 from bot.utils.subscription import require_plan
 from bot.utils.ai_tools import TOOL_DEFINITIONS, run_tool, execute_action
-from bot.utils.op_helpers import safe_answer, safe_edit, terminal_kb
+from bot.utils.op_helpers import retry_kb, safe_answer, safe_edit, terminal_kb
 
 from services import ai_gateway, ai_memory, llm_gate
 from services.ai_providers import configured_providers
@@ -38,6 +38,7 @@ _MEMORY_TAG_RE = re.compile(
 )
 
 from bot.utils.owner_error import owner_error  # noqa: E402
+from bot.utils.op_helpers import cancel_kb
 
 router = Router()
 log = logging.getLogger(__name__)
@@ -763,7 +764,7 @@ async def _process_ai_turn(
 
     if turns >= _MAX_TURNS:
         await state.clear()
-        await message.answer("Диалог стал слишком длинным. Начните новую сессию: /ai")
+        await message.answer("Диалог стал слишком длинным. Начните новую сессию кнопкой ниже.", reply_markup=retry_kb(AiCb(action="start"), retry_text="🤖 Новая сессия"))
         return
 
     messages.append({"role": "user", "content": user_content})
@@ -1272,13 +1273,13 @@ async def cb_ai_memory_delete(
     await safe_answer(callback)
     memory_id = callback_data.memory_id
     if not memory_id:
-        await callback.answer("❌ Некорректный ID записи", show_alert=True)
+        await callback.answer("⚠️ Кнопка устарела. Откройте раздел заново.", show_alert=True)
         return
     try:
         deleted = await ai_memory.delete(pool, callback.from_user.id, memory_id)
     except Exception:
         log.exception("Failed to delete AI memory item %s", memory_id)
-        await callback.answer("❌ Ошибка при удалении", show_alert=True)
+        await callback.answer("⚠️ Не удалось удалить запись. Попробуйте ещё раз через минуту.", show_alert=True)
         return
 
     if deleted:
@@ -1402,6 +1403,7 @@ async def msg_ai_document(
             f"{owner_error(exc)}\n\n"
             f"Можно отправить: <code>{_SUPPORTED_FILE_HINT}</code>",
             parse_mode="HTML",
+            reply_markup=cancel_kb(),
         )
         return
     except Exception:
@@ -1410,6 +1412,7 @@ async def msg_ai_document(
             "📎 <b>Не получилось прочитать файл</b>\n\n"
             "Попробуйте отправить его еще раз или сохраните текст в формате TXT/MD.",
             parse_mode="HTML",
+            reply_markup=cancel_kb(),
         )
         return
 

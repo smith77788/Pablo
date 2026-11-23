@@ -30,6 +30,7 @@ from services.logger import log_exc_swallow
 
 log = logging.getLogger(__name__)
 from bot.utils.owner_error import owner_error  # noqa: E402
+from bot.utils.op_helpers import cancel_kb
 
 router = Router()
 
@@ -356,7 +357,7 @@ async def cb_autoreg_reset_device_profile(cb: CallbackQuery, pool: asyncpg.Pool)
 async def cb_autoreg_set_service(cb: CallbackQuery, callback_data: AutoRegCb, pool: asyncpg.Pool) -> None:
     svc = callback_data.sub
     if svc not in _SERVICES:
-        await cb.answer("Неизвестный сервис", show_alert=True)
+        await cb.answer("⚠️ Кнопка устарела. Откройте раздел заново.", show_alert=True)
         return
     await db.set_platform_setting(pool, _SETTING_SERVICE, svc)
     await cb.answer(f"✅ {_SERVICES[svc]}")
@@ -388,7 +389,7 @@ async def cb_autoreg_set_key(cb: CallbackQuery, state: FSMContext, pool: asyncpg
 async def msg_autoreg_set_key(msg: Message, state: FSMContext, pool: asyncpg.Pool) -> None:
     key = (msg.text or "").strip()
     if len(key) < 8:
-        await msg.answer("⚠️ Слишком короткий ключ. Введите полный API-ключ.")
+        await msg.answer("⚠️ Слишком короткий ключ. Введите полный API-ключ.", reply_markup=cancel_kb())
         return
     data = await state.get_data()
     service = data.get("service", "5sim")
@@ -487,7 +488,7 @@ async def cb_autoreg_batch_ask(cb: CallbackQuery, state: FSMContext) -> None:
 async def msg_autoreg_batch_cnt(msg: Message, state: FSMContext) -> None:
     raw = (msg.text or "").strip()
     if not raw.isdigit() or not (1 <= int(raw) <= 50):
-        await msg.answer("⚠️ Введите число от 1 до 50.")
+        await msg.answer("⚠️ Введите число от 1 до 50.", reply_markup=cancel_kb())
         return
     await state.clear()
     cnt = int(raw)
@@ -797,7 +798,7 @@ async def msg_autoreg_enter_2fa(msg: Message, state: FSMContext, pool: asyncpg.P
     if not password:
         # Возвращаем pending обратно — дадим ещё попытку
         _pending_2fa[owner_id] = pending
-        await msg.answer("⚠️ Введите пароль 2FA (он не может быть пустым).")
+        await msg.answer("⚠️ Введите пароль 2FA (он не может быть пустым).", reply_markup=cancel_kb())
         return
 
     await msg.answer("⏳ Проверяю пароль 2FA…")
@@ -808,6 +809,7 @@ async def msg_autoreg_enter_2fa(msg: Message, state: FSMContext, pool: asyncpg.P
         _pending_2fa[owner_id] = pending   # вернуть для повторной попытки
         await msg.answer(
             f"❌ {owner_error(exc)}\n\nВведите пароль ещё раз:",
+            reply_markup=cancel_kb(),
         )
         return
     except Exception as exc:

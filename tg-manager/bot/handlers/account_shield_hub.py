@@ -90,7 +90,7 @@ async def cb_shield_menu(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
     lines = [
         "🛡 <b>Защита аккаунтов</b>\n",
         f"📱 Активных аккаунтов: <b>{stats['total_active']}</b>",
-        f"🔴 Под угрозой (risk ≥ {cfg.risk_threshold:.0%}): <b>{stats['threatened']}</b>",
+        f"🔴 Под угрозой (риск ≥ {cfg.risk_threshold:.0%}): <b>{stats['threatened']}</b>",
         f"⚠️ Высокая вероятность бана: <b>{stats['high_ban_prob']}</b>",
         f"⏸ На паузе (защита): <b>{stats['paused_by_shield']}</b>",
         f"✅ В безопасности: <b>{stats['ok_count']}</b>",
@@ -151,7 +151,7 @@ async def cb_shield_top10(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
             ops = int(acc["ops_24h"] or 0)
             lines.append(
                 f"{i}. {label} <b>{html.escape(str(name))}</b>\n"
-                f"   risk <b>{risk:.0%}</b> · бан <b>{ban_p:.0%}</b> · {ops} оп/24ч"
+                f"   риск <b>{risk:.0%}</b> · бан <b>{ban_p:.0%}</b> · {ops} оп/24ч"
             )
 
     kb = _back_kb()
@@ -308,7 +308,7 @@ async def cb_shield_history(callback: CallbackQuery, pool: asyncpg.Pool) -> None
             ban_p = float(row["ban_probability"] or 0.0)
             lines.append(
                 f"{ts_str} {action_label} — <b>{html.escape(str(name))}</b>"
-                f" (risk {risk:.0%} / бан {ban_p:.0%})"
+                f" (риск {risk:.0%} / бан {ban_p:.0%})"
             )
 
     kb = _back_kb()

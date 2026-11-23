@@ -208,6 +208,22 @@ async def on_my_status(event: ChatMemberUpdated, bot: Bot, pool: asyncpg.Pool) -
         if not can_restrict:
             lines.append("⚠️ <b>Нет права «Блокировка пользователей»</b> — бан/мьют "
                          "работать не будут. Выдайте его в настройках админа.")
+        if chat.type == "channel":
+            # В канал служебный текст модератора не пишем — его увидят все
+            # подписчики. Канал с ботом-админом годится приёмником уведомлений
+            # о ботах и заявках: говорим об этом владельцу в личку.
+            if promoter:
+                try:
+                    await bot.send_message(
+                        promoter.id,
+                        f"🔔 Бот подключён к каналу «{html.escape(chat.title or '')}».\n"
+                        "Сюда можно направить уведомления о запусках ботов и заявках: "
+                        "мини-апп → «Настройки» → «Каналы уведомлений».\n"
+                        "Заявки на вступление в этот канал теперь тоже приходят вам.",
+                        parse_mode="HTML")
+                except Exception:
+                    log_exc_swallow(log, "guard: channel connected DM")
+            return
         try:
             await bot.send_message(chat.id, "\n".join(lines), parse_mode="HTML")
         except Exception:
@@ -909,7 +925,7 @@ async def cb_toggle(callback: CallbackQuery, callback_data: GuardCb, bot: Bot,
     try:
         s = await cg.toggle_setting(pool, chat_id, callback_data.key)
     except ValueError:
-        await callback.answer("Неизвестная настройка", show_alert=True)
+        await callback.answer("⚠️ Кнопка устарела. Откройте раздел заново.", show_alert=True)
         return
     await callback.answer("Готово")
     try:

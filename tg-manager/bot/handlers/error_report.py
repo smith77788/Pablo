@@ -18,6 +18,7 @@ from services.logger import log_exc_swallow
 from services.error_codes import ErrorCode
 from services.error_reporting import report_error
 from bot.utils.op_helpers import safe_answer, terminal_kb
+from bot.utils.op_helpers import cancel_kb
 
 log = logging.getLogger(__name__)
 
@@ -46,7 +47,7 @@ async def cb_start_error_report(callback: CallbackQuery, state: FSMContext) -> N
 async def msg_error_description(message: Message, state: FSMContext) -> None:
     """Получение описания ошибки."""
     if not message.text:
-        await message.answer("❌ Пожалуйста отправьте текстовое описание ошибки.")
+        await message.answer("❌ Пожалуйста отправьте текстовое описание ошибки.", reply_markup=cancel_kb())
         return
 
     description = message.text.strip()
@@ -105,7 +106,7 @@ async def msg_error_screenshot(
             f"ID отчёта: <code>#{report_id}</code>\n\n"
             f"Я проанализирую его и если нужна дополнительная информация — свяжусь с вами."
         )
-        await message.answer(text)
+        await message.answer(text, reply_markup=terminal_kb())
 
         # Notify all admins about the new error report
         user = message.from_user

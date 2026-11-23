@@ -26,6 +26,9 @@ from bot.utils.subscription import require_plan, locked_text
 from database import db
 from bot.utils.op_helpers import safe_answer, terminal_kb
 
+from bot.utils.fmt import num_ru  # noqa: E402
+from bot.utils.op_helpers import cancel_kb
+
 router = Router()
 log = logging.getLogger(__name__)
 
@@ -763,7 +766,7 @@ async def msg_rule_name(
     action_label = ACTION_LABELS.get(data["action_type"], data["action_type"])
     await message.answer(
         f"✅ <b>Правило создано!</b>\n\n"
-        f"Название: {rule_name}\n"
+        f"Название: {html.escape(rule_name)}\n"
         f"Триггер: {trigger_label}\n"
         f"Действие: {action_label}\n"
         f"Значение: <code>{data['action_value'][:60]}</code>",
@@ -893,7 +896,7 @@ async def cb_crm_dashboard(
     lines = [
         "💼 <b>CRM — Дашборд</b>\n",
         f"Всего сделок: <b>{total_deals}</b>",
-        f"Выигранных: <b>{stats['won']['count']}</b>  (💰 {won_val:,.0f})",
+        f"Выигранных: <b>{stats['won']['count']}</b>  (💰 {num_ru(round(won_val))})",
         f"Проигранных: <b>{stats['lost']['count']}</b>",
         "",
         "<b>По стадиям:</b>",
@@ -1005,7 +1008,7 @@ async def cb_deal_view(
     # Название, контакт и заметки сделки собираются из имени и полей,
     # которые прислал подписчик (сценарии, авто-сделки): только экранированными.
     contact = html.escape(deal["contact"] or "—")
-    val = f"{deal['value']:,.0f}" if deal["value"] else "—"
+    val = num_ru(round(deal['value'])) if deal["value"] else "—"
     notes = html.escape((deal["notes"] or "—")[:200])
 
     lines = [
@@ -1038,7 +1041,7 @@ async def cb_deal_move(
     # Кнопки, отправленные до обновления, несут старые имена — переводим.
     new_stage = db.normalize_crm_stage(callback_data.tag, None)
     if new_stage not in _PIPELINE_STAGES:
-        await callback.answer("Неверная стадия.", show_alert=True)
+        await callback.answer("⚠️ Кнопка устарела. Откройте раздел заново.", show_alert=True)
         return
 
     await db.move_crm_deal_stage(
@@ -1063,7 +1066,7 @@ async def cb_deal_move(
         f"📄 <b>{html.escape(deal['title'] or '')}</b>\n",
         f"Стадия: {stage_label}",
         f"Контакт: {html.escape(deal['contact'] or '—')}",
-        f"Сумма: {deal['value']:,.0f}" if deal["value"] else "Сумма: —",
+        f"Сумма: {num_ru(round(deal['value']))}" if deal["value"] else "Сумма: —",
     ]
     if activities:
         lines.append("\n<b>Активность:</b>")
@@ -1106,7 +1109,7 @@ async def msg_deal_title_or_csv(message: Message, state: FSMContext, pool: async
         return
     title = (message.text or "").strip()
     if not title or len(title) > 120:
-        await message.answer("⚠️ Название от 1 до 120 символов. Попробуйте ещё раз:")
+        await message.answer("⚠️ Название от 1 до 120 символов. Попробуйте ещё раз:", reply_markup=cancel_kb())
         return
     await state.update_data(deal_title=title)
     await state.set_state(AddDeal.waiting_contact)
@@ -1184,10 +1187,10 @@ async def _finish_deal_creation(
     )
     kb.button(text="💼 Воронка", callback_data=CrmCb(action="pipeline"))
     kb.adjust(1)
-    val_str = f"{value:,.0f}" if value else "не указана"
+    val_str = num_ru(round(value)) if value else "не указана"
     await message.answer(
         f"✅ <b>Сделка создана!</b>\n\n"
-        f"Название: <b>{title}</b>\n"
+        f"Название: <b>{html.escape(str(title))}</b>\n"
         f"Контакт: {contact or '—'}\n"
         f"Сумма: {val_str}\n"
         f"Стадия: {_STAGE_LABELS['lead']}",
@@ -1224,7 +1227,7 @@ async def msg_deal_note(message: Message, state: FSMContext, pool: asyncpg.Pool)
     deal_id = data.get("deal_id", 0)
     await state.clear()
     if not note:
-        await message.answer("⚠️ Заметка не может быть пустой.")
+        await message.answer("⚠️ Заметка не может быть пустой.", reply_markup=cancel_kb())
         return
     await db.add_crm_activity(pool, message.from_user.id, deal_id, note[:500])
     kb = InlineKeyboardBuilder()
@@ -1297,11 +1300,11 @@ async def cb_csv_import_prompt(callback: CallbackQuery, state: FSMContext) -> No
 async def msg_csv_file(message: Message, state: FSMContext, pool: asyncpg.Pool) -> None:
     data = await state.get_data()
     if not data.get("csv_mode"):
-        await message.answer("⚠️ Ожидается текст названия сделки, а не файл.")
+        await message.answer("⚠️ Ожидается текст названия сделки, а не файл.", reply_markup=cancel_kb())
         return
     doc = message.document
     if not doc or not (doc.file_name or "").lower().endswith(".csv"):
-        await message.answer("⚠️ Ожидается .csv файл.")
+        await message.answer("⚠️ Ожидается .csv файл.", reply_markup=cancel_kb())
         return
     await state.clear()
     bot = message.bot

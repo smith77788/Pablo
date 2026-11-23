@@ -18,6 +18,7 @@ from bot.utils.op_helpers import safe_answer, terminal_kb
 
 log = logging.getLogger(__name__)
 from bot.utils.owner_error import owner_error  # noqa: E402
+from bot.utils.op_helpers import cancel_kb
 
 router = Router()
 
@@ -127,7 +128,7 @@ async def cb_af_create(callback: CallbackQuery, state: FSMContext) -> None:
 async def msg_af_name(message: Message, state: FSMContext, pool: asyncpg.Pool) -> None:
     name = (message.text or "").strip()
     if not name or len(name) > 100:
-        await message.answer("⚠️ Название: 1–100 символов.", parse_mode="HTML")
+        await message.answer("⚠️ Название: 1–100 символов.", parse_mode="HTML", reply_markup=cancel_kb())
         return
     await state.update_data(name=name)
     await state.set_state(AutoFunnelFSM.picking_bot)
@@ -169,7 +170,7 @@ async def cb_af_pick_bot(
     try:
         bot_id = int(callback_data.extra)
     except (ValueError, TypeError):
-        await callback.answer("Ошибка.", show_alert=True)
+        await callback.answer("⚠️ Кнопка устарела. Откройте раздел заново.", show_alert=True)
         return
     data = await state.get_data()
     name = data.get("name", "Воронка")
@@ -199,7 +200,7 @@ async def cb_af_pick_segment(
         bot_id_str, segment = callback_data.extra.split(":", 1)
         bot_id = int(bot_id_str)
     except (ValueError, TypeError):
-        await callback.answer("Ошибка.", show_alert=True)
+        await callback.answer("⚠️ Кнопка устарела. Откройте раздел заново.", show_alert=True)
         return
     data = await state.get_data()
     name = data.get("name", "Воронка")
@@ -376,11 +377,11 @@ async def cb_af_add_step(
 async def msg_af_step_delay(message: Message, state: FSMContext) -> None:
     text = (message.text or "").strip()
     if not text.isdigit():
-        await message.answer("⚠️ Введите целое число (0–720).", parse_mode="HTML")
+        await message.answer("⚠️ Введите целое число (0–720).", parse_mode="HTML", reply_markup=cancel_kb())
         return
     delay = int(text)
     if not (0 <= delay <= 720):
-        await message.answer("⚠️ Задержка: от 0 до 720 часов.", parse_mode="HTML")
+        await message.answer("⚠️ Задержка: от 0 до 720 часов.", parse_mode="HTML", reply_markup=cancel_kb())
         return
     await state.update_data(step_delay=delay)
     await state.set_state(AutoFunnelFSM.waiting_step_text)
@@ -396,7 +397,7 @@ async def msg_af_step_delay(message: Message, state: FSMContext) -> None:
 async def msg_af_step_text(message: Message, state: FSMContext) -> None:
     text = (message.text or "").strip()
     if not text or len(text) > 4000:
-        await message.answer("⚠️ Текст: 1–4000 символов.", parse_mode="HTML")
+        await message.answer("⚠️ Текст: 1–4000 символов.", parse_mode="HTML", reply_markup=cancel_kb())
         return
     await state.update_data(step_text=text)
     await state.set_state(AutoFunnelFSM.waiting_step_button)
@@ -439,6 +440,7 @@ async def msg_af_step_button(
             await message.answer(
                 "⚠️ URL должен начинаться с http://, https:// или tg://",
                 parse_mode="HTML",
+                reply_markup=cancel_kb(),
             )
             return
     await _save_step(message, pool, data, btn_text=btn_text, btn_url=btn_url, edit=False,
@@ -484,7 +486,7 @@ async def cb_af_del_step(
     try:
         step_id = int(callback_data.extra)
     except (ValueError, TypeError):
-        await callback.answer("Ошибка.", show_alert=True)
+        await callback.answer("⚠️ Кнопка устарела. Откройте раздел заново.", show_alert=True)
         return
     # Проверка владения — ДО удаления. Раньше она стояла ниже, после DELETE:
     # funnel_id приходит из callback_data, и подставив чужой, можно было

@@ -42,7 +42,7 @@ from bot.keyboards import subscription_locked_markup
 from bot.utils.subscription import get_plan, locked_text
 from bot.utils import tariffs
 from bot.utils.event_status import mark_handled_error
-from bot.utils.op_helpers import safe_answer, safe_edit, terminal_kb
+from bot.utils.op_helpers import retry_kb, safe_answer, safe_edit, terminal_kb
 from bot.utils.picker_cap import cap_text, cap_text_append
 from config import TG_API_ID, TG_API_HASH
 from database import db
@@ -74,6 +74,10 @@ from services.account_manager import (
     wait_qr_login,
 )
 from bot.utils.owner_error import owner_error
+
+from bot.utils.fmt import num_ru, plural  # noqa: E402
+from bot.utils.op_helpers import cancel_kb
+from bot.utils.op_helpers import show_no_accounts
 
 router = Router()
 
@@ -732,6 +736,7 @@ async def handle_phone(message: Message, pool: asyncpg.Pool, state: FSMContext) 
             await message.answer(
                 f"⏳ Слишком много запросов. Попробуйте через <b>{wait} сек</b>.",
                 parse_mode="HTML",
+                reply_markup=retry_kb(AccCb(action="add")),
             )
         elif "TG_API_ID" in err or "TG_API_HASH" in err:
             await state.clear()
@@ -740,6 +745,7 @@ async def handle_phone(message: Message, pool: asyncpg.Pool, state: FSMContext) 
                 "Обратитесь к администратору платформы — "
                 "необходимо задать переменные <code>TG_API_ID</code> и <code>TG_API_HASH</code>.",
                 parse_mode="HTML",
+                reply_markup=terminal_kb(),
             )
         else:
             await state.clear()
@@ -1233,10 +1239,11 @@ async def handle_2fa(message: Message, pool: asyncpg.Pool, state: FSMContext) ->
             await message.answer(
                 f"⏳ Слишком много запросов. Попробуйте через <b>{wait} сек</b>.",
                 parse_mode="HTML",
+                reply_markup=cancel_kb(),
             )
             return
         if "PasswordHashInvalidError" in err or "invalid" in err.lower():
-            await message.answer("❌ Неверный пароль 2FA. Попробуйте снова:")
+            await message.answer("❌ Неверный пароль 2FA. Попробуйте снова:", reply_markup=cancel_kb())
             return
         await state.clear()
         await message.answer(
@@ -1800,7 +1807,7 @@ async def cb_acc_export_json(
         return
     except Exception:
         log_exc_swallow(log, "export_json failed")
-        await callback.answer("Ошибка генерации JSON", show_alert=True)
+        await callback.answer("⚠️ Не удалось собрать JSON сессии. Попробуйте ещё раз через минуту.", show_alert=True)
         return
     import io
     buf = io.BytesIO(payload.encode("utf-8"))
@@ -2209,7 +2216,7 @@ async def cb_channels(
         title = escape(dialog.get("title") or "Без названия")
         members = dialog.get("members") or dialog.get("participants_count") or 0
         chat_id = dialog.get("id") or 0
-        lines.append(f"  • {title}" + (f" — {members:,} участн." if members else ""))
+        lines.append(f"  • {title}" + (f" — {num_ru(members)} участн." if members else ""))
         kb.button(
             text=f"📤 {title[:28]}",
             callback_data=AccCb(
@@ -2612,7 +2619,7 @@ async def cb_check_all_accounts(
     kb.adjust(1)
     await callback.message.edit_text(
         f"🔍 <b>Проверка аккаунтов поставлена в очередь</b>\n\n"
-        f"📋 Операция <code>#{op_id}</code> · {len(accounts)} аккаунт(ов)\n"
+        f"📋 Операция <code>#{op_id}</code> · {len(accounts)} {plural(len(accounts), 'аккаунт', 'аккаунта', 'аккаунтов')}\n"
         f"⏱ Ожидаемое время: ~{len(accounts) * 5} сек.\n\n"
         "Уведомление придёт по окончании. Статус: /ops",
         parse_mode="HTML",
@@ -2707,7 +2714,7 @@ async def cb_pools_bulk_assign(
     uid = callback.from_user.id
     accounts = await db.get_tg_accounts(pool, uid)
     if not accounts:
-        await callback.answer("Нет аккаунтов.", show_alert=True)
+        await show_no_accounts(callback)
         return
     await safe_answer(callback)
 
@@ -2814,7 +2821,7 @@ async def cb_scan_all_resources(
 
     await callback.message.edit_text(
         f"🔎 <b>Сканирование ресурсов поставлено в очередь</b>\n\n"
-        f"📋 Операция <code>#{op_id}</code> · {len(accounts)} аккаунт(ов)\n"
+        f"📋 Операция <code>#{op_id}</code> · {len(accounts)} {plural(len(accounts), 'аккаунт', 'аккаунта', 'аккаунтов')}\n"
         f"⏱ Ожидаемое время: ~{len(accounts) * 8} сек.\n\n"
         "Уведомление придёт по окончании. Статус: /ops",
         parse_mode="HTML",
@@ -2847,7 +2854,7 @@ async def cb_reauth_list(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
         )
         return
 
-    lines = [f"🔄 <b>Переавторизатор</b> — {len(expired)} аккаунт(ов)\n"]
+    lines = [f"🔄 <b>Переавторизатор</b> — {len(expired)} {plural(len(expired), 'аккаунт', 'аккаунта', 'аккаунтов')}\n"]
     lines.append("Нажмите <b>Релог</b> рядом с нужным аккаунтом:\n")
 
     kb = InlineKeyboardBuilder()
@@ -3008,7 +3015,7 @@ async def cb_del_dead_accounts(
     uid = callback.from_user.id
     accounts = await db.get_tg_accounts(pool, uid)
     if not accounts:
-        await callback.answer("Нет аккаунтов.", show_alert=True)
+        await show_no_accounts(callback)
         return
     await safe_answer(callback)
 
@@ -3328,7 +3335,7 @@ async def cb_dialogs(
         title = escape(dialog.get("title") or "Без названия")
         d_type = _type_labels.get(dialog.get("type", ""), "💬")
         members = dialog.get("members") or 0
-        members_str = f" · {members:,} уч." if members else ""
+        members_str = f" · {num_ru(members)} уч." if members else ""
         lines.append(f"  • {d_type} {title}{members_str}")
 
     kb = InlineKeyboardBuilder()
@@ -3647,6 +3654,7 @@ async def handle_import_string(
             f"❌ <b>Ошибка импорта</b>\n\n<code>{owner_error(exc)}</code>\n\n"
             "Проверьте строку сессии и попробуйте снова.",
             parse_mode="HTML",
+            reply_markup=retry_kb(AccCb(action="import_string"), back=AccCb(action="import_menu")),
         )
         return
     await _finalize_import(message, pool, state, session_str, info)
@@ -3687,6 +3695,7 @@ async def handle_import_pyrogram(
             f"❌ <b>Ошибка импорта</b>\n\n<code>{owner_error(exc)}</code>\n\n"
             "Проверьте JSON и попробуйте снова.",
             parse_mode="HTML",
+            reply_markup=retry_kb(AccCb(action="import_pyrogram"), back=AccCb(action="import_menu")),
         )
         return
     await _finalize_import(message, pool, state, session_str, info)
@@ -3728,12 +3737,12 @@ async def handle_import_tdata(
     doc = message.document
     if not doc:
         await state.clear()
-        await message.answer("⚠️ Отправьте ZIP-файл как документ.")
+        await message.answer("⚠️ Отправьте ZIP-файл как документ.", reply_markup=retry_kb(AccCb(action="import_tdata"), back=AccCb(action="import_menu")))
         return
 
     if doc.file_size and doc.file_size > 50 * 1024 * 1024:
         await state.clear()
-        await message.answer("❌ Файл слишком большой. Максимум 50 МБ.")
+        await message.answer("❌ Файл слишком большой. Максимум 50 МБ.", reply_markup=retry_kb(AccCb(action="import_tdata"), back=AccCb(action="import_menu")))
         return
 
     name = (doc.file_name or "").lower()
@@ -3748,7 +3757,7 @@ async def handle_import_tdata(
     # Дебаунс: если уже обрабатываем — игнорируем повторную отправку
     sd = await state.get_data()
     if sd.get("tdata_processing"):
-        await message.answer("⏳ Уже обрабатываю предыдущий файл, подождите...")
+        await message.answer("⏳ Уже обрабатываю предыдущий файл, подождите...", reply_markup=cancel_kb())
         return
     await state.update_data(tdata_processing=True)
 
@@ -3775,6 +3784,7 @@ async def handle_import_tdata(
                 f"Telegram не смог передать файл: <code>{owner_error(exc)}</code>\n\n"
                 f"Убедитесь что ZIP-архив не превышает 50 МБ.",
                 parse_mode="HTML",
+                reply_markup=retry_kb(AccCb(action="import_tdata"), back=AccCb(action="import_menu")),
             )
             return
 
@@ -3789,6 +3799,7 @@ async def handle_import_tdata(
                     await msg.edit_text(
                         f"❌ Архив содержит {len(members)} файлов. Максимум {_MAX_FILES}.",
                         parse_mode="HTML",
+                        reply_markup=retry_kb(AccCb(action="import_tdata"), back=AccCb(action="import_menu")),
                     )
                     return
                 total_size = sum(i.file_size for i in members)
@@ -3798,13 +3809,14 @@ async def handle_import_tdata(
                         f"❌ Архив слишком большой ({total_size // 1024 // 1024} МБ). "
                         "Максимум 200 МБ в распакованном виде.",
                         parse_mode="HTML",
+                        reply_markup=retry_kb(AccCb(action="import_tdata"), back=AccCb(action="import_menu")),
                     )
                     return
                 for member in members:
                     fname = member.filename.replace("\\", "/")
                     if os.path.isabs(fname) or ".." in fname.split("/"):
                         await state.clear()
-                        await msg.edit_text("❌ Архив содержит подозрительные пути к файлам. Архив отклонён.")
+                        await msg.edit_text("❌ Архив содержит подозрительные пути к файлам. Архив отклонён.", reply_markup=retry_kb(AccCb(action="import_tdata"), back=AccCb(action="import_menu")))
                         return
                 # Распаковка до 200 МБ — в поток: на цикле событий это секунды
                 # простоя всего процесса.
@@ -3868,6 +3880,7 @@ async def handle_import_tdata(
             await msg.edit_text(
                 f"❌ <b>Ошибка конвертации tdata</b>\n\n<code>{owner_error(exc)}</code>",
                 parse_mode="HTML",
+                reply_markup=retry_kb(AccCb(action="import_tdata"), back=AccCb(action="import_menu")),
             )
             return
     finally:
@@ -3894,7 +3907,8 @@ async def handle_import_tdata(
 async def handle_import_tdata_wrong_type(message: Message) -> None:
     await message.answer(
         "⚠️ Отправьте ZIP-файл как документ (не фото, не текст).\n\n"
-        "Используйте вложение → Файл при отправке."
+        "Используйте вложение → Файл при отправке.",
+        reply_markup=cancel_kb(),
     )
 
 
@@ -3927,7 +3941,7 @@ async def handle_import_session_file(
 
     doc = message.document
     if not doc:
-        await message.answer("⚠️ Отправьте .session файл как документ.")
+        await message.answer("⚠️ Отправьте .session файл как документ.", reply_markup=cancel_kb())
         return
 
     filename = (doc.file_name or "").lower()
@@ -3943,7 +3957,7 @@ async def handle_import_session_file(
 
     if doc.file_size and doc.file_size > 1_048_576:
         await state.clear()
-        await message.answer("❌ Файл слишком большой. Максимум 1 МБ.")
+        await message.answer("❌ Файл слишком большой. Максимум 1 МБ.", reply_markup=retry_kb(AccCb(action="import_session_file"), back=AccCb(action="import_menu")))
         return
 
     msg = await message.answer("⏳ Читаю .session файл...")
@@ -3956,7 +3970,8 @@ async def handle_import_session_file(
     except Exception as e:
         await state.clear()
         await msg.edit_text(
-            f"❌ Не удалось скачать файл: {owner_error(e)}", parse_mode="HTML"
+            f"❌ Не удалось скачать файл: {owner_error(e)}", parse_mode="HTML",
+            reply_markup=retry_kb(AccCb(action="import_session_file"), back=AccCb(action="import_menu")),
         )
         return
 
@@ -3970,6 +3985,7 @@ async def handle_import_session_file(
             f"<code>{owner_error(exc)}</code>\n\n"
             "Убедитесь что файл является валидным Telethon .session файлом.",
             parse_mode="HTML",
+            reply_markup=retry_kb(AccCb(action="import_session_file"), back=AccCb(action="import_menu")),
         )
         return
 
@@ -3980,7 +3996,8 @@ async def handle_import_session_file(
 async def handle_import_session_file_wrong_type(message: Message) -> None:
     await message.answer(
         "⚠️ Отправьте .session файл как документ (не фото, не текст).\n\n"
-        "Используйте вложение → Файл при отправке."
+        "Используйте вложение → Файл при отправке.",
+        reply_markup=cancel_kb(),
     )
 
 
@@ -4171,7 +4188,7 @@ async def cb_import_batch(callback: CallbackQuery, state: FSMContext) -> None:
         "1BVtsOIKAGkB...</code>\n\n"
         "Или загрузите файл:\n"
         "• <b>.txt</b> — одна сессия на строку\n"
-        "• <b>.csv</b> — колонки: <code>session,cluster</code> (cluster — опционально)\n"
+        "• <b>.csv</b> — колонки: <code>session,cluster</code> (кластер — необязательно)\n"
         "• <b>.zip</b> — архив с файлами <code>.session</code> (Telethon SQLite)\n\n"
         "Пример CSV:\n"
         "<code>session,cluster\n"
@@ -4442,7 +4459,7 @@ async def fsm_batch_import_text(
     raw = (message.text or "").strip()
     sessions = [ln.strip() for ln in raw.splitlines() if ln.strip()]
     if not sessions:
-        await message.answer("⚠️ Введите хотя бы одну строку сессии:")
+        await message.answer("⚠️ Введите хотя бы одну строку сессии:", reply_markup=cancel_kb())
         return
     if len(sessions) > 50:
         sessions = sessions[:50]
@@ -4511,7 +4528,7 @@ async def fsm_batch_import_file(
 ) -> None:
     doc = message.document
     if not doc:
-        await message.answer("⚠️ Отправьте .txt или .csv файл со списком сессий.")
+        await message.answer("⚠️ Отправьте .txt или .csv файл со списком сессий.", reply_markup=cancel_kb())
         return
     filename = (doc.file_name or "").lower()
     if not (
@@ -4527,7 +4544,7 @@ async def fsm_batch_import_file(
     max_size = 20 * 1024 * 1024 if filename.endswith(".zip") else 500_000
     if doc.file_size and doc.file_size > max_size:
         size_label = "20 МБ" if filename.endswith(".zip") else "500 КБ"
-        await message.answer(f"⚠️ Файл слишком большой. Максимум {size_label}.")
+        await message.answer(f"⚠️ Файл слишком большой. Максимум {size_label}.", reply_markup=cancel_kb())
         return
     try:
         file_info = await message.bot.get_file(doc.file_id)
@@ -4557,7 +4574,7 @@ async def fsm_batch_import_file(
                     and i.file_size <= _ZIP_SESSION_MAX_BYTES
                 ]
         except zipfile.BadZipFile:
-            await message.answer("❌ Повреждённый ZIP-файл.")
+            await message.answer("❌ Повреждённый ZIP-файл.", reply_markup=cancel_kb())
             return
         if not session_names:
             await message.answer(
@@ -4600,7 +4617,7 @@ async def fsm_batch_import_file(
         if not pairs:
             await message.answer(
                 "⚠️ CSV не содержит распознанных сессий.\n\n"
-                "Ожидаемый формат: <code>session,cluster</code> (cluster — опционально)",
+                "Ожидаемый формат: <code>session,cluster</code> (кластер — необязательно)",
                 parse_mode="HTML",
                 reply_markup=terminal_kb(),
             )
@@ -4614,7 +4631,7 @@ async def fsm_batch_import_file(
         raw_text = raw_bytes.decode("utf-8", errors="ignore")
         sessions = [ln.strip() for ln in raw_text.splitlines() if ln.strip()]
         if not sessions:
-            await message.answer("⚠️ Файл пустой или не содержит сессий.")
+            await message.answer("⚠️ Файл пустой или не содержит сессий.", reply_markup=cancel_kb())
             return
         if len(sessions) > 50:
             sessions = sessions[:50]
@@ -4705,7 +4722,7 @@ async def cb_scan_assets(
         for ch in channels[:20]:
             title = escape(ch["title"][:35] or "Без названия")
             uname = f" @{ch['username']}" if ch.get("username") else ""
-            members = f" — {ch['members']:,} подп." if ch.get("members") else ""
+            members = f" — {num_ru(ch['members'])} подп." if ch.get("members") else ""
             crown = "👑" if ch.get("is_creator") else "🔧"
             lines.append(f"  {crown} {title}{uname}{members}")
         if len(channels) > 20:
@@ -4716,7 +4733,7 @@ async def cb_scan_assets(
         for gr in groups[:20]:
             title = escape(gr["title"][:35] or "Без названия")
             uname = f" @{gr['username']}" if gr.get("username") else ""
-            members = f" — {gr['members']:,} уч." if gr.get("members") else ""
+            members = f" — {num_ru(gr['members'])} уч." if gr.get("members") else ""
             crown = "👑" if gr.get("is_creator") else "🔧"
             lines.append(f"  {crown} {title}{uname}{members}")
         if len(groups) > 20:
@@ -5314,7 +5331,7 @@ async def cb_account_assets(
         )
     elif channels:
         lines.append(
-            f"\n⚠️ <b>Внимание:</b> при удалении аккаунта {len(channels)} канал(ов) потеряют привязку."
+            f"\n⚠️ <b>Внимание:</b> при удалении аккаунта {len(channels)} {plural(len(channels), 'канал', 'канала', 'каналов')} потеряют привязку."
         )
 
     kb = InlineKeyboardBuilder()

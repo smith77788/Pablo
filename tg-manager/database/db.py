@@ -3061,17 +3061,38 @@ async def get_referral_total(pool, bot_id: int) -> int:
 
 async def upsert_user_activity(pool, bot_id: int, user_id: int) -> bool:
     """Returns True if this is the user's first message (new user)."""
+    is_new, _prev = await record_user_activity(pool, bot_id, user_id)
+    return is_new
+
+
+async def record_user_activity(pool, bot_id: int, user_id: int):
+    """Отметить сообщение человека боту. (впервые ли, когда писал до этого).
+
+    Второе значение — `last_seen` ДО этого сообщения (None у нового). По нему
+    повторный /start человека, который давно молчал, отличается от /start
+    активного собеседника: о первом владельцу стоит сказать, о втором — нет.
+    CTE видит строку в состоянии до INSERT, поэтому старое значение честное.
+    """
     row = await pool.fetchrow(
-        """INSERT INTO user_activity(bot_id, user_id, message_count, last_seen, first_seen)
+        """WITH prev AS (
+               SELECT last_seen FROM user_activity WHERE bot_id=$1 AND user_id=$2
+           )
+           INSERT INTO user_activity(bot_id, user_id, message_count, last_seen, first_seen)
            VALUES($1, $2, 1, now(), now())
            ON CONFLICT (bot_id, user_id) DO UPDATE
            SET message_count = user_activity.message_count + 1,
                last_seen = now()
-           RETURNING (xmax = 0) AS is_new""",
+           RETURNING (xmax = 0) AS is_new, (SELECT last_seen FROM prev) AS prev_seen""",
         bot_id,
         user_id,
     )
-    return bool(row["is_new"]) if row else False
+    if not row:
+        return False, None
+    try:
+        prev = row["prev_seen"]
+    except (KeyError, IndexError):
+        prev = None
+    return bool(row["is_new"]), prev
 
 
 async def get_activity_segments(pool, bot_id: int) -> dict:
@@ -7504,6 +7525,26 @@ async def delete_workspace_member(pool: asyncpg.Pool, ws_id: int, user_id: int) 
         await record_manual_action(
             pool, user_id, "workspace_member_leave",
             target=f"ws:{ws_id} user:{user_id}")
+
+
+async def delete_workspace(pool: asyncpg.Pool, ws_id: int, owner_id: int) -> bool:
+    """Удалить пространство целиком. Может только владелец — условие стоит в
+    самом запросе, а не только в обработчике: номер пространства приходит от
+    клиента. Участники и приглашения уходят каскадом (schema_v52).
+
+    Удаление снимает доступ со ВСЕХ участников — событие того же веса, что и
+    вход (workspace_member_join), поэтому пишется в журнал. Повторное нажатие,
+    когда удалять уже нечего, записи не даёт.
+    """
+    deleted = await pool.fetchval(
+        "DELETE FROM workspaces WHERE id=$1 AND owner_id=$2 RETURNING id",
+        ws_id,
+        owner_id,
+    )
+    if deleted is None:
+        return False
+    await record_manual_action(pool, owner_id, "workspace_delete", target=f"ws:{ws_id}")
+    return True
 
 
 async def remove_workspace_member(

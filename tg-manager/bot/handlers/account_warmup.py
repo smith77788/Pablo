@@ -33,6 +33,8 @@ from bot.utils.op_names import acc_status_short as _acc_short, run_status as _ru
 
 log = logging.getLogger(__name__)
 from bot.utils.owner_error import owner_error  # noqa: E402
+from bot.utils.op_helpers import ask_to_confirm
+from bot.utils.op_helpers import cancel_kb
 
 router = Router()
 
@@ -129,7 +131,7 @@ async def cb_warmup_menu(callback: CallbackQuery, pool: asyncpg.Pool, state: FSM
         "в ваших каналах, группах и ботах.\n\n"
         "<b>Новый подход — Сессия прогрева:</b>\n"
         "1️⃣ Выбираете рабочие аккаунты\n"
-        "2️⃣ Выбираете цели (из инфраструктуры или по username)\n"
+        "2️⃣ Выбираете цели (из инфраструктуры или по юзернейму)\n"
         "3️⃣ Выбираете режим → Старт\n\n"
         "<b>Что делает система:</b>\n"
         "📖 Читает каналы (настоящее прочтение)\n"
@@ -621,7 +623,7 @@ async def cb_warmup_active_plans(callback: CallbackQuery, pool: asyncpg.Pool) ->
         )
         kb.button(
             text=f"🗑 Удалить {label[:10]}",
-            callback_data=WarmupCb(action="delete_plan", plan_id=plan["id"]),
+            callback_data=WarmupCb(action="delete_plan_ask", plan_id=plan["id"]),
         )
 
     kb.button(text="▶️ Запустить все сейчас", callback_data=WarmupCb(action="run_now"))
@@ -1001,7 +1003,7 @@ async def cb_wu_accs_done(callback: CallbackQuery, state: FSMContext) -> None:
     kb.button(
         text="🏗️ Из моей инфраструктуры", callback_data=WarmupCb(action="tgt_infra")
     )
-    kb.button(text="📝 По username/ссылке", callback_data=WarmupCb(action="tgt_manual"))
+    kb.button(text="📝 По юзернейму/ссылке", callback_data=WarmupCb(action="tgt_manual"))
     kb.button(text="📋 Списком (несколько)", callback_data=WarmupCb(action="tgt_list"))
     kb.button(text="◀️ Назад", callback_data=WarmupCb(action="new_session"))
     kb.adjust(1)
@@ -1012,7 +1014,7 @@ async def cb_wu_accs_done(callback: CallbackQuery, state: FSMContext) -> None:
         f"Выбрано аккаунтов: <b>{n}</b>\n\n"
         "Откуда брать цели для прогрева?\n\n"
         "🏗️ <b>Из инфраструктуры</b> — выберите ваши каналы/боты/группы\n"
-        "📝 <b>По username</b> — введите один @username или invite link\n"
+        "📝 <b>По юзернейму</b> — введите один @username или ссылку-приглашение\n"
         "📋 <b>Списком</b> — введите несколько целей (по одной на строку)",
         parse_mode="HTML",
         reply_markup=kb.as_markup(),
@@ -1156,7 +1158,7 @@ async def cb_wu_back_to_targets(
     kb.button(
         text="🏗️ Из моей инфраструктуры", callback_data=WarmupCb(action="tgt_infra")
     )
-    kb.button(text="📝 По username/ссылке", callback_data=WarmupCb(action="tgt_manual"))
+    kb.button(text="📝 По юзернейму/ссылке", callback_data=WarmupCb(action="tgt_manual"))
     kb.button(text="📋 Списком (несколько)", callback_data=WarmupCb(action="tgt_list"))
     kb.button(text="◀️ Назад", callback_data=WarmupCb(action="new_session"))
     kb.adjust(1)
@@ -1166,7 +1168,7 @@ async def cb_wu_back_to_targets(
         f"Выбрано аккаунтов: <b>{n}</b>\n\n"
         "Откуда брать цели для прогрева?\n\n"
         "🏗️ <b>Из инфраструктуры</b> — выберите ваши каналы/боты/группы\n"
-        "📝 <b>По username</b> — введите один @username или invite link\n"
+        "📝 <b>По юзернейму</b> — введите один @username или ссылку-приглашение\n"
         "📋 <b>Списком</b> — введите несколько целей (по одной на строку)",
         parse_mode="HTML",
         reply_markup=kb.as_markup(),
@@ -1189,7 +1191,7 @@ async def cb_wu_tgt_manual(
         "Введите несколько целей, каждую с новой строки:\n\n"
         "<code>@channel_name\n@bot_username\nhttps://t.me/+invite</code>"
         if is_list
-        else "Введите username или invite link:\n\n<code>@channel_name</code>"
+        else "Введите юзернейм или ссылку-приглашение:\n\n<code>@channel_name</code>"
     )
 
     kb = InlineKeyboardBuilder()
@@ -1209,7 +1211,7 @@ async def fsm_wu_targets_text(message: Message, state: FSMContext) -> None:
 
     raw = (message.text or "").strip()
     if not raw:
-        await message.answer("⚠️ Введите хотя бы один username или ссылку.")
+        await message.answer("⚠️ Введите хотя бы один юзернейм или ссылку.", reply_markup=cancel_kb())
         return
 
     parts = re.split(r"[\s,;]+", raw)
@@ -1555,7 +1557,7 @@ async def cb_wu_sess_detail(
         )
     kb.button(
         text="🗑 Удалить",
-        callback_data=WarmupCb(action="sess_delete", session_id=sess_id),
+        callback_data=WarmupCb(action="sess_delete_ask", session_id=sess_id),
     )
     kb.button(text="◀️ Назад", callback_data=WarmupCb(action="session_list"))
     kb.adjust(2)
@@ -2167,7 +2169,7 @@ async def cb_ract_detail(
         )
     kb.button(
         text="🗑 Удалить",
-        callback_data=ResourceActCb(action="delete", session_id=sess_id),
+        callback_data=ResourceActCb(action="delete_ask", session_id=sess_id),
     )
     kb.button(text="◀️ Назад", callback_data=ResourceActCb(action="list"))
     kb.adjust(2)
@@ -2284,4 +2286,37 @@ async def cb_ract_delete(
         "🗑 <b>Сессия удалена</b>",
         parse_mode="HTML",
         reply_markup=_ract_back_kb().as_markup(),
+    )
+
+
+@router.callback_query(ResourceActCb.filter(F.action == "delete_ask"))
+async def cb_resourceactcb_delete_ask(callback: CallbackQuery, callback_data: ResourceActCb) -> None:
+    await ask_to_confirm(
+        callback,
+        question="🗑 <b>Удалить сессию активности?</b>",
+        yes=callback_data.model_copy(update={"action": "delete"}),
+        no=ResourceActCb(action="list"),
+        yes_text="🗑 Да, удалить",
+    )
+
+
+@router.callback_query(WarmupCb.filter(F.action == "delete_plan_ask"))
+async def cb_warmupcb_delete_plan_ask(callback: CallbackQuery, callback_data: WarmupCb) -> None:
+    await ask_to_confirm(
+        callback,
+        question="🗑 <b>Удалить план прогрева?</b>",
+        yes=callback_data.model_copy(update={"action": "delete_plan"}),
+        no=WarmupCb(action="menu"),
+        yes_text="🗑 Да, удалить",
+    )
+
+
+@router.callback_query(WarmupCb.filter(F.action == "sess_delete_ask"))
+async def cb_warmupcb_sess_delete_ask(callback: CallbackQuery, callback_data: WarmupCb) -> None:
+    await ask_to_confirm(
+        callback,
+        question="🗑 <b>Удалить сессию прогрева?</b>",
+        yes=callback_data.model_copy(update={"action": "sess_delete"}),
+        no=WarmupCb(action="session_list"),
+        yes_text="🗑 Да, удалить",
     )

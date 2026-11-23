@@ -19,6 +19,7 @@ from services import account_status as _acc_status
 
 log = logging.getLogger(__name__)
 from bot.utils.owner_error import owner_error  # noqa: E402
+from bot.utils.op_helpers import cancel_kb
 
 router = Router()
 
@@ -225,7 +226,7 @@ async def cb_persona_create(callback: CallbackQuery, state: FSMContext, pool: as
 async def fsm_persona_name(message: Message, state: FSMContext) -> None:
     name = (message.text or "").strip()[:64]
     if not name:
-        await message.answer("❌ Имя не может быть пустым. Введите имя персоны:")
+        await message.answer("❌ Имя не может быть пустым. Введите имя персоны:", reply_markup=cancel_kb())
         return
     await state.update_data(persona_name=name)
     await state.set_state(PersonaCreateFSM.entering_bio)
@@ -395,7 +396,7 @@ async def cb_persona_set_style(
 ) -> None:
     style_key = callback_data.action.replace("set_style_", "")
     if style_key not in _SPEECH_STYLES:
-        await callback.answer("Неверный стиль", show_alert=True)
+        await callback.answer("⚠️ Кнопка устарела. Откройте раздел заново.", show_alert=True)
         return
     await state.update_data(speech_style=style_key)
     await _ask_backstory(callback, state)

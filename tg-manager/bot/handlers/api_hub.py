@@ -16,7 +16,7 @@ from bot.callbacks import ApiHubCb, BmCb
 from bot.utils.picker_cap import cap_text as _cap_text, cap_text_append as _cap_text_note
 from bot.utils.picker_cap import cap_slice as _cap, cap_note_button as _cap_note
 from bot.states import ApiKeyFSM
-from bot.utils.op_helpers import safe_answer, terminal_kb
+from bot.utils.op_helpers import safe_answer, terminal_kb, cancel_kb
 
 log = logging.getLogger(__name__)
 router = Router()
@@ -141,7 +141,7 @@ async def msg_api_key_name(
 ) -> None:
     name = message.text.strip()[:64]
     if not name:
-        await message.answer("Введите непустое название.")
+        await message.answer("Введите непустое название.", reply_markup=cancel_kb())
         return
 
     await state.clear()
@@ -152,7 +152,7 @@ async def msg_api_key_name(
     try:
         created = await _keys.create_key(pool, message.from_user.id, name)
     except ValueError as e:
-        await message.answer(owner_error(e))
+        await message.answer(owner_error(e), reply_markup=cancel_kb())
         return
     except Exception as e:
         log.warning("api_hub: key create error: %s", e)

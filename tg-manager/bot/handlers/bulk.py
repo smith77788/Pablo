@@ -17,6 +17,8 @@ from services import bot_api
 from bot.utils.op_helpers import safe_answer, terminal_kb
 from services.secret_masking import mask_bot_token
 from bot.utils.owner_error import owner_error
+from bot.utils.op_helpers import no_bots_kb
+import html as _html
 
 router = Router()
 
@@ -100,7 +102,7 @@ async def cb_bulk_menu(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
             "Добавьте хотя бы одного бота в разделе 🤖 Мои боты, "
             "чтобы выполнять массовые операции.",
             parse_mode="HTML",
-            reply_markup=bulk_menu(),
+            reply_markup=no_bots_kb(back=BmCb(action="operations")),
         )
         return
     await callback.message.edit_text(
@@ -129,7 +131,7 @@ async def cb_check(
             "⚠️ Нет ботов для проверки.\n\n"
             "Добавьте бота в разделе 🤖 Мои боты.",
             parse_mode="HTML",
-            reply_markup=bulk_menu(),
+            reply_markup=no_bots_kb(),
         )
         return
 
@@ -190,7 +192,7 @@ async def msg_bulk_name(
         await msg.edit_text(f"❌ Ошибка: {owner_error(e)}", reply_markup=bulk_menu())
         return
     await msg.edit_text(
-        _result_text(ok, fail, total, f"Имя → «{name[:30]}»"),
+        _result_text(ok, fail, total, f"Имя → «{_html.escape(name[:30])}»"),
         parse_mode="HTML",
         reply_markup=bulk_menu(),
     )
@@ -244,7 +246,7 @@ async def msg_bulk_localized_name(
         await msg.edit_text(f"❌ Ошибка: {owner_error(e)}", reply_markup=bulk_menu())
         return
     await msg.edit_text(
-        _result_text(ok, fail, total, f"Имя [{lang or 'default'}] → «{name[:30]}»"),
+        _result_text(ok, fail, total, f"Имя [{lang or 'по умолчанию'}] → «{_html.escape(name[:30])}»"),
         parse_mode="HTML",
         reply_markup=bulk_menu(),
     )

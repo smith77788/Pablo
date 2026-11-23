@@ -763,7 +763,7 @@ async def _assess_risk_impl(
     # 5. Специфичный риск для типа операции
     if op_type == "strike" and item_count > 50:
         risk_score += 10
-        reasons.append(f"Strike с {item_count} целями — повышенный риск детекции")
+        reasons.append(f"Жалобы по {item_count} целям — повышенный риск детекции")
         recommendations.append("Используйте staggered timing и минимум 3 аккаунта")
     elif op_type == "dm_campaign" and item_count > 200:
         risk_score += 8

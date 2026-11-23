@@ -169,7 +169,7 @@ async def msg_ar_keyword(message: Message, state: FSMContext) -> None:
     await state.set_state(AddAutoReply.waiting_text)
     data = await state.get_data()
     await message.answer(
-        f"🔑 Ключевое слово: <code>{keyword}</code>\n\n"
+        f"🔑 Ключевое слово: <code>{_html.escape(keyword)}</code>\n\n"
         "Введите текст ответа (HTML-форматирование поддерживается):",
         parse_mode="HTML",
         reply_markup=_ar_cancel_kb(data.get("bot_id", 0)),
@@ -600,7 +600,7 @@ async def msg_ext_rule_name(
 
     await message.answer(
         f"✅ <b>Правило создано!</b>\n\n"
-        f"Название: {rule_name}\n"
+        f"Название: {_html.escape(rule_name)}\n"
         f"Триггер: {trigger_label}\n"
         f"Действие: {action_label}\n"
         f"{value_summary}",

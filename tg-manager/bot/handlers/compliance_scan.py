@@ -22,6 +22,8 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 from bot.callbacks import ComplianceScanCb, BmCb
 from bot.utils.op_helpers import safe_answer, terminal_kb
 from services import operation_bus
+from bot.utils.op_helpers import no_accounts_kb
+from bot.utils.op_helpers import cancel_kb
 
 log = logging.getLogger(__name__)
 router = Router()
@@ -79,7 +81,7 @@ async def msg_scan_resources(message: Message, state: FSMContext, pool: asyncpg.
     raw = re.split(r"[\s,]+", message.text or "")
     resources = [c.strip().lstrip("@") for c in raw if c.strip()][:100]
     if not resources:
-        await message.answer("⚠️ Укажите хотя бы один ресурс. Попробуйте /scan_resources снова.")
+        await message.answer("⚠️ Укажите хотя бы один ресурс. Попробуйте /scan_resources снова.", reply_markup=cancel_kb())
         return
 
     # Проверка активных аккаунтов (как в mini-app).
@@ -94,7 +96,7 @@ async def msg_scan_resources(message: Message, state: FSMContext, pool: asyncpg.
     if not has_acc:
         await message.answer(
             "⚠️ Нет активных аккаунтов — добавьте аккаунт в «📱 Аккаунты».",
-            reply_markup=terminal_kb(),
+            reply_markup=no_accounts_kb(),
         )
         return
 

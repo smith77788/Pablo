@@ -19,6 +19,8 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from bot.callbacks import BoostCb, BmCb
 from bot.utils.op_helpers import safe_answer, terminal_kb
+from bot.utils.op_helpers import cancel_kb
+from bot.utils.op_helpers import show_no_accounts
 
 log = logging.getLogger(__name__)
 router = Router()
@@ -137,7 +139,7 @@ async def msg_views_channel(message: Message, state: FSMContext) -> None:
     from services.boost_engine import parse_channel_ref
     channel = parse_channel_ref(message.text or "")
     if not channel:
-        await message.answer("⚠️ Не удалось распознать канал. Введите @username или t.me/link")
+        await message.answer("⚠️ Не удалось распознать канал. Введите @username или t.me/link", reply_markup=cancel_kb())
         return
     await state.update_data(channel=channel)
     await state.set_state(BoostViews.msg_ids)
@@ -156,7 +158,7 @@ async def msg_views_ids(message: Message, state: FSMContext) -> None:
     from services.boost_engine import parse_msg_ids
     ids = parse_msg_ids(message.text or "")
     if not ids:
-        await message.answer("⚠️ Не удалось распознать ID. Введите числа через запятую: 123, 124")
+        await message.answer("⚠️ Не удалось распознать ID. Введите числа через запятую: 123, 124", reply_markup=cancel_kb())
         return
     await state.update_data(msg_ids=ids)
     await state.set_state(BoostViews.acc_count)
@@ -176,7 +178,7 @@ async def msg_views_acc_count(
     try:
         n = int(message.text or "0")
     except ValueError:
-        await message.answer("⚠️ Введите число")
+        await message.answer("⚠️ Введите число", reply_markup=cancel_kb())
         return
     data = await state.get_data()
     total = await _get_acc_count(pool, message.from_user.id)
@@ -238,7 +240,7 @@ async def msg_reactions_channel(message: Message, state: FSMContext) -> None:
 async def msg_reactions_msg_id(message: Message, state: FSMContext) -> None:
     text = (message.text or "").strip()
     if not text.isdigit():
-        await message.answer("⚠️ Введите одно число — ID сообщения")
+        await message.answer("⚠️ Введите одно число — ID сообщения", reply_markup=cancel_kb())
         return
     await state.update_data(msg_id=int(text))
     await state.set_state(BoostReactions.emoji)
@@ -277,7 +279,7 @@ async def msg_reactions_acc_count(
     try:
         n = int(message.text or "0")
     except ValueError:
-        await message.answer("⚠️ Введите число")
+        await message.answer("⚠️ Введите число", reply_markup=cancel_kb())
         return
     data = await state.get_data()
     total = await _get_acc_count(pool, message.from_user.id)
@@ -325,7 +327,7 @@ async def msg_stories_target(message: Message, state: FSMContext) -> None:
     from services.boost_engine import parse_channel_ref
     target = parse_channel_ref(message.text or "")
     if not target:
-        await message.answer("⚠️ Не удалось распознать цель. Введите @username")
+        await message.answer("⚠️ Не удалось распознать цель. Введите @username", reply_markup=cancel_kb())
         return
     await state.update_data(target=target)
     await state.set_state(BoostStories.acc_count)
@@ -344,7 +346,7 @@ async def msg_stories_acc_count(
     try:
         n = int(message.text or "0")
     except ValueError:
-        await message.answer("⚠️ Введите число")
+        await message.answer("⚠️ Введите число", reply_markup=cancel_kb())
         return
     data = await state.get_data()
     total = await _get_acc_count(pool, message.from_user.id)
@@ -389,7 +391,7 @@ async def msg_subscribers_target(message: Message, state: FSMContext) -> None:
     from services.boost_engine import parse_channel_ref
     target = parse_channel_ref(message.text or "")
     if not target:
-        await message.answer("⚠️ Не удалось распознать канал/группу. Введите @username или t.me/link")
+        await message.answer("⚠️ Не удалось распознать канал/группу. Введите @username или t.me/link", reply_markup=cancel_kb())
         return
     await state.update_data(target=target)
     await state.set_state(BoostSubscribers.acc_count)
@@ -409,7 +411,7 @@ async def msg_subscribers_acc_count(
     try:
         n = int(message.text or "0")
     except ValueError:
-        await message.answer("⚠️ Введите число")
+        await message.answer("⚠️ Введите число", reply_markup=cancel_kb())
         return
     total = await _get_acc_count(pool, message.from_user.id)
     use = min(n, total) if n > 0 else total
@@ -450,7 +452,7 @@ async def msg_bot_starts_username(message: Message, state: FSMContext) -> None:
     from services.boost_engine import parse_channel_ref
     bot_username = parse_channel_ref(message.text or "").lstrip("@")
     if not bot_username:
-        await message.answer("⚠️ Не удалось распознать бота. Введите @username")
+        await message.answer("⚠️ Не удалось распознать бота. Введите @username", reply_markup=cancel_kb())
         return
     await state.update_data(bot_username=bot_username)
     await state.set_state(BoostBotStarts.payload)
@@ -488,7 +490,7 @@ async def msg_bot_starts_acc_count(
     try:
         n = int(message.text or "0")
     except ValueError:
-        await message.answer("⚠️ Введите число")
+        await message.answer("⚠️ Введите число", reply_markup=cancel_kb())
         return
     total = await _get_acc_count(pool, message.from_user.id)
     use = min(n, total) if n > 0 else total
@@ -587,7 +589,7 @@ async def cb_boost_confirm(
     account_ids = [r["id"] for r in rows]
 
     if not account_ids:
-        await callback.answer("⚠️ Нет доступных аккаунтов", show_alert=True)
+        await show_no_accounts(callback)
         return
 
     if sub == "views":
@@ -653,7 +655,7 @@ async def cb_boost_confirm(
         prem_suffix = " (только Premium)" if premium_only else ""
         label = f"Старты в боте: @{bot_username} × {len(account_ids)} акк.{prem_suffix}"
     else:
-        await callback.answer("⚠️ Неизвестный тип накрутки", show_alert=True)
+        await callback.answer("⚠️ Кнопка устарела. Откройте раздел заново.", show_alert=True)
         return
 
     # Все типы накрутки ставятся через operation_bus — единая нервная система

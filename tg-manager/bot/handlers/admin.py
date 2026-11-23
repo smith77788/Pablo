@@ -38,10 +38,12 @@ from config import ADMIN_SECRET
 from database import db
 from services import railway_api
 from services.logger import log_exc_swallow
-from bot.utils.op_helpers import safe_answer, terminal_kb
+from bot.utils.op_helpers import safe_answer, terminal_kb, cancel_kb
 from bot.utils.owner_error import owner_error
 
 log = logging.getLogger(__name__)
+from bot.utils.fmt import num_ru  # noqa: E402
+
 router = Router()
 
 _NOTIFY_NEW_USERS = True  # toggle via /admin toggle_notify; loaded from DB at startup
@@ -185,24 +187,24 @@ def _legacy_admin_main_kb(new_error_reports: int = 0):
     kb.button(text="📈 Операции платформы", callback_data="adm:platform_ops")
     kb.button(text="💰 Цены на подписки", callback_data="adm:prices")
     kb.button(text="⚙️ Методы оплаты", callback_data="adm:pay_cfg")
-    kb.button(text="📨 Рассылка всем юзерам", callback_data="adm:broadcast")
+    kb.button(text="📨 Рассылка всем пользователям", callback_data="adm:broadcast")
     _notify_icon = "✅" if _NOTIFY_NEW_USERS else "❌"
     kb.button(
         text=f"🔔 Уведомления о новых {_notify_icon}", callback_data="adm:notify_toggle"
     )
     _free_icon = "✅ ВКЛ" if get_free_mode() else "❌ ВЫКЛ"
     kb.button(text=f"🆓 Бесплатный режим: {_free_icon}", callback_data="adm:free_mode_toggle")
-    kb.button(text="🚫 Заблокировать юзера", callback_data="adm:block_ask")
-    kb.button(text="✅ Разблокировать юзера", callback_data="adm:unblock_ask")
-    kb.button(text="🗑 Удалить данные юзера", callback_data="adm:delete_ask")
+    kb.button(text="🚫 Заблокировать пользователя", callback_data="adm:block_ask")
+    kb.button(text="✅ Разблокировать пользователя", callback_data="adm:unblock_ask")
+    kb.button(text="🗑 Удалить данные пользователя", callback_data="adm:delete_ask")
     kb.button(text="💰 Выдать подписку", callback_data="adm:grant_ask")
     kb.button(text="❌ Забрать подписку", callback_data="adm:revoke_ask")
     kb.button(text="💰 Массовая выдача подписок", callback_data="adm:bulk_grant_ask")
     kb.button(text="⚔️ Выдать доступ к жалобам", callback_data="adm:strike_grant_ask")
     kb.button(text="⚔️ Забрать доступ к жалобам", callback_data="adm:strike_revoke_ask")
     kb.button(text="📁 Экспорт токенов (файл)", callback_data="adm:tokens_file")
-    kb.button(text="📋 Экспорт юзеров (CSV)", callback_data="adm:users_csv")
-    kb.button(text="🔍 Поиск юзера", callback_data="adm:find_user")
+    kb.button(text="📋 Экспорт пользователей (CSV)", callback_data="adm:users_csv")
+    kb.button(text="🔍 Поиск пользователя", callback_data="adm:find_user")
     kb.button(text="⚙️ Системный режим «Рой»", callback_data="adm:swarm_mode")
     kb.button(text="🧹 Очистка данных", callback_data="adm:cleanup_ask")
     kb.button(text="🤖 AI-ключи (провайдеры)", callback_data="adm:ai_keys")
@@ -249,7 +251,7 @@ def _admin_section_kb(section: str, new_error_reports: int = 0):
     kb = InlineKeyboardBuilder()
     if section == "users":
         kb.button(text="👥 Последние пользователи", callback_data="adm:users")
-        kb.button(text="🔍 Найти юзера", callback_data="adm:find_user")
+        kb.button(text="🔍 Найти пользователя", callback_data="adm:find_user")
         kb.button(text="🚫 Заблокировать", callback_data="adm:block_ask")
         kb.button(text="✅ Разблокировать", callback_data="adm:unblock_ask")
         kb.button(text="🗑 Удалить данные", callback_data="adm:delete_ask")
@@ -377,7 +379,7 @@ async def cmd_admin(message: Message, pool: asyncpg.Pool) -> None:
         await message.answer(
             "🔑 <b>Введите секретную фразу для доступа к AdminPanel</b>\n\n"
             f"Ваш ID: <code>{uid}</code>",
-            parse_mode="HTML",
+            parse_mode="HTML", reply_markup=cancel_kb(),
         )
     # Иначе — молчим (не раскрываем существование команды)
 
@@ -771,7 +773,7 @@ async def cb_admin(
     state: FSMContext,
 ) -> None:
     if not _is_admin(callback.from_user.id):
-        await callback.answer("⛔️ Нет доступа.", show_alert=True)
+        await callback.answer("⛔ Только для администраторов платформы.", show_alert=True)
         return
     await safe_answer(callback)
     action = callback.data.removeprefix("adm:")
@@ -851,7 +853,7 @@ async def cb_admin(
     elif action == "broadcast":
         kb = InlineKeyboardBuilder()
         kb.button(text="👥 Все пользователи платформы", callback_data="adm:bc_seg:all")
-        kb.button(text="🆓 Только Free", callback_data="adm:bc_seg:free")
+        kb.button(text="🆓 Только бесплатный", callback_data="adm:bc_seg:free")
         kb.button(text="💎 Только платные", callback_data="adm:bc_seg:paid")
         kb.button(text="🤖 Аудиториям всех ботов", callback_data="adm:bc_botusers")
         kb.button(text="📢 Во все каналы/группы", callback_data="adm:bc_channels")
@@ -861,7 +863,7 @@ async def cb_admin(
             "📨 <b>Рассылка владельца сервиса</b>\n\n"
             "Выберите <b>сегмент</b> получателей:\n\n"
             "👥 <b>Все</b> — все зарегистрированные пользователи\n"
-            "🆓 <b>Free</b> — пользователи без подписки\n"
+            "🆓 <b>Бесплатный</b> — пользователи без подписки\n"
             "💎 <b>Платные</b> — пользователи с активной подпиской\n\n"
             "🤖 <b>Аудиториям ботов</b> — подписчики всех управляемых ботов\n"
             "📢 <b>Каналы/группы</b> — пост во все подключённые каналы",
@@ -873,7 +875,7 @@ async def cb_admin(
         seg = action.removeprefix("bc_seg:")
         seg_labels = {
             "all":  "всем пользователям платформы",
-            "free": "пользователям без подписки (Free)",
+            "free": "пользователям без подписки",
             "paid": "платным пользователям",
         }
         seg_label = seg_labels.get(seg, seg)
@@ -898,7 +900,7 @@ async def cb_admin(
         _bc_states = {
             "bc_platform": (
                 "broadcast",
-                "📨 <b>Рассылка юзерам платформы</b>\n\n"
+                "📨 <b>Рассылка пользователям платформы</b>\n\n"
                 "Отправьте текст сообщения следующим сообщением.\n"
                 "Его получат все зарегистрированные пользователи платформы.",
             ),
@@ -1011,7 +1013,7 @@ async def cb_admin(
             "Отправьте в формате:\n"
             "<code>USER_ID план месяцев</code>\n\n"
             "Пример: <code>123456789 paid 3</code>\n"
-            "Планы: <code>paid</code> (или старые: starter, pro, enterprise)",
+            "Планы: <code>paid</code> (старые названия тоже принимаются: starter, pro, enterprise)",
             parse_mode="HTML",
             reply_markup=_back_kb(),
         )
@@ -1030,7 +1032,7 @@ async def cb_admin(
             "Отправьте Telegram ID пользователя:\n"
             "<code>USER_ID</code>\n\n"
             "Пример: <code>123456789</code>\n\n"
-            "Подписка будет деактивирована, пользователь вернётся на FREE.",
+            "Подписка будет деактивирована, пользователь вернётся на бесплатный план.",
             parse_mode="HTML",
             reply_markup=_back_kb(),
         )
@@ -1167,7 +1169,7 @@ async def cb_admin(
             "<code>USER_ID план месяцев</code> — по одному на строку\n\n"
             "Пример:\n"
             "<code>123456 paid 3\n789012 paid 1\n345678 paid 6</code>\n\n"
-            "Планы: <code>paid</code> (или старые: starter, pro, enterprise)",
+            "Планы: <code>paid</code> (старые названия тоже принимаются: starter, pro, enterprise)",
             parse_mode="HTML",
             reply_markup=_back_kb(),
         )
@@ -1213,7 +1215,7 @@ async def cb_admin(
         try:
             target_uid = int(uid_str)
         except ValueError:
-            await callback.answer("Неверный ID", show_alert=True)
+            await callback.answer("⚠️ Кнопка устарела. Откройте раздел заново.", show_alert=True)
             return
         await _adm_logs(
             callback,
@@ -1279,7 +1281,7 @@ async def cb_admin(
             await _adm_error_reports(callback, pool, page=page, status=status)
         else:
             await callback.message.edit_text(
-                "❌ Некорректный формат.", reply_markup=_back_kb()
+                "⚠️ Кнопка устарела. Откройте раздел заново.", reply_markup=_back_kb()
             )
 
     elif action.startswith("error_report:"):
@@ -1296,7 +1298,7 @@ async def cb_admin(
             await _adm_set_error_report_status(callback, pool, report_id, new_status)
         else:
             await callback.message.edit_text(
-                "❌ Некорректный формат.", reply_markup=_back_kb()
+                "⚠️ Кнопка устарела. Откройте раздел заново.", reply_markup=_back_kb()
             )
 
     elif action == "audit_log":
@@ -1353,7 +1355,7 @@ async def cb_admin(
             "Введите ID или @username канала:\n"
             "<i>Примеры: @InfragramChannel или -1001234567890</i>\n\n"
             "Бот должен быть администратором канала с правом публикации.",
-            parse_mode="HTML",
+            parse_mode="HTML", reply_markup=cancel_kb(),
         )
 
     elif action == "bm_post_update":
@@ -1862,12 +1864,12 @@ async def _adm_system_stats(callback: CallbackQuery, pool: asyncpg.Pool) -> None
 
     await callback.message.edit_text(
         "📊 <b>Системная статистика</b>\n\n"
-        f"💬 Сообщений отправлено: <b>{int(total_msgs):,}</b>\n"
-        f"📢 Рассылок всего: <b>{int(total_bc):,}</b>\n"
-        f"📨 Relay-диалогов: <b>{int(total_relay):,}</b>\n"
-        f"🔗 Цепочек: <b>{int(total_funnels):,}</b>\n"
-        f"⏰ Запланировано: <b>{int(total_schedules):,}</b>\n"
-        f"👥 Записей в bot_users: <b>{int(db_users):,}</b>\n\n"
+        f"💬 Сообщений отправлено: <b>{num_ru(int(total_msgs))}</b>\n"
+        f"📢 Рассылок всего: <b>{num_ru(int(total_bc))}</b>\n"
+        f"📨 Relay-диалогов: <b>{num_ru(int(total_relay))}</b>\n"
+        f"🔗 Цепочек: <b>{num_ru(int(total_funnels))}</b>\n"
+        f"⏰ Запланировано: <b>{num_ru(int(total_schedules))}</b>\n"
+        f"👥 Записей в bot_users: <b>{num_ru(int(db_users))}</b>\n\n"
         f"🌐 Режим «Роя»: <b>{mode.upper()}</b>",
         parse_mode="HTML",
         reply_markup=_back_kb(),
@@ -2432,7 +2434,7 @@ async def handle_admin_message(
     if _is_env_action(state) and not _is_permanent_admin(message.from_user.id):
         await message.answer(
             "⛔️ Переменные окружения доступны только постоянным "
-            "администраторам (ADMIN_IDS).")
+            "администраторам (ADMIN_IDS).", reply_markup=cancel_kb())
         return
 
     try:
@@ -2483,7 +2485,7 @@ async def handle_admin_message(
         try:
             uid = int(text)
         except ValueError:
-            await message.answer("❌ Неверный ID.", reply_markup=_admin_main_kb())
+            await message.answer("❌ Нужен числовой ID пользователя, например 123456789. Отправьте ещё раз.", reply_markup=_admin_main_kb())
         else:
             try:
                 await db.ban_user(pool, uid, message.from_user.id, "Забанен администратором")
@@ -2513,7 +2515,7 @@ async def handle_admin_message(
         try:
             uid = int(text)
         except ValueError:
-            await message.answer("❌ Неверный ID.", reply_markup=_admin_main_kb())
+            await message.answer("❌ Нужен числовой ID пользователя, например 123456789. Отправьте ещё раз.", reply_markup=_admin_main_kb())
         else:
             try:
                 await db.unban_user(pool, uid, message.from_user.id)
@@ -2543,7 +2545,7 @@ async def handle_admin_message(
         try:
             uid = int(text)
         except ValueError:
-            await message.answer("❌ Неверный ID.", reply_markup=_admin_main_kb())
+            await message.answer("❌ Нужен числовой ID пользователя, например 123456789. Отправьте ещё раз.", reply_markup=_admin_main_kb())
         else:
             try:
                 bot_ids = await pool.fetch(
@@ -2650,7 +2652,7 @@ async def handle_admin_message(
         try:
             uid = int(text)
         except ValueError:
-            await message.answer("❌ Неверный ID.", reply_markup=_admin_main_kb())
+            await message.answer("❌ Нужен числовой ID пользователя, например 123456789. Отправьте ещё раз.", reply_markup=_admin_main_kb())
         else:
             try:
                 bots = await pool.fetch(
@@ -2758,7 +2760,7 @@ async def handle_admin_message(
             await db.revoke_plan_from_user(pool, uid, message.from_user.id)
             await message.answer(
                 f"❌ Подписка отозвана у пользователя <code>{uid}</code>.\n"
-                f"Пользователь переведён на план <b>FREE</b>.",
+                f"Пользователь переведён на <b>бесплатный</b> план.",
                 parse_mode="HTML",
                 reply_markup=_admin_main_kb(),
             )
@@ -2766,7 +2768,7 @@ async def handle_admin_message(
                 await message.bot.send_message(
                     uid,
                     "ℹ️ <b>Ваша подписка была отозвана администратором.</b>\n\n"
-                    "Вы переведены на план FREE.\n"
+                    "Вы переведены на бесплатный план.\n"
                     "Для восстановления доступа оформите подписку: /menu → ⚙️ Настройки → 💳 Подписка",
                     parse_mode="HTML",
                 )
@@ -2777,13 +2779,13 @@ async def handle_admin_message(
                     user_id=uid,
                 )
         except ValueError:
-            await message.answer("❌ Неверный ID.", reply_markup=_admin_main_kb())
+            await message.answer("❌ Нужен числовой ID пользователя, например 123456789. Отправьте ещё раз.", reply_markup=_admin_main_kb())
 
     elif state == "strike_grant":
         try:
             target_uid = int(text.strip())
         except ValueError:
-            await message.answer("❌ Неверный ID.", reply_markup=_admin_main_kb())
+            await message.answer("❌ Нужен числовой ID пользователя, например 123456789. Отправьте ещё раз.", reply_markup=_admin_main_kb())
         else:
             try:
                 from bot.handlers.strike import _ensure_table
@@ -2847,14 +2849,14 @@ async def handle_admin_message(
                     user_id=target_uid,
                 )
         except ValueError:
-            await message.answer("❌ Неверный ID.", reply_markup=_admin_main_kb())
+            await message.answer("❌ Нужен числовой ID пользователя, например 123456789. Отправьте ещё раз.", reply_markup=_admin_main_kb())
 
     elif state == "logs_find_user":
         try:
             target_uid = int(text.strip())
         except ValueError:
             await message.answer(
-                "❌ Неверный Telegram ID.", reply_markup=_admin_main_kb()
+                "❌ Нужен числовой Telegram ID, например 123456789. Отправьте ещё раз.", reply_markup=_admin_main_kb()
             )
             return
         kb = InlineKeyboardBuilder()
@@ -3997,7 +3999,7 @@ async def _ai_keys_menu(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
 @router.callback_query(F.data == "adm:ai_keys")
 async def cb_adm_ai_keys(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
     if not _is_admin(callback.from_user.id):
-        await callback.answer("Нет доступа.", show_alert=True)
+        await callback.answer("⛔ Только для администраторов платформы.", show_alert=True)
         return
     await safe_answer(callback)
     await _ai_keys_menu(callback, pool)
@@ -4007,7 +4009,7 @@ async def cb_adm_ai_keys(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
 async def cb_adm_ai_ambient(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
     """Тумблер «Claude без ключа» (ambient): keyless-резолв кредов SDK."""
     if not _is_admin(callback.from_user.id):
-        await callback.answer("Нет доступа.", show_alert=True)
+        await callback.answer("⛔ Только для администраторов платформы.", show_alert=True)
         return
     await safe_answer(callback)
     cur = bool(await db.get_platform_setting(pool, "ai_anthropic_ambient", ""))
@@ -4022,7 +4024,7 @@ async def cb_adm_ai_ambient(callback: CallbackQuery, pool: asyncpg.Pool) -> None
 @router.callback_query(F.data == "adm:budget")
 async def cb_adm_budget(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
     if not _is_admin(callback.from_user.id):
-        await callback.answer("Нет доступа.", show_alert=True)
+        await callback.answer("⛔ Только для администраторов платформы.", show_alert=True)
         return
     await safe_answer(callback)
     from services.account_budget import get_daily_budget, DEFAULT_DAILY_BUDGET
@@ -4049,12 +4051,12 @@ async def cb_adm_budget(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
 @router.callback_query(F.data.startswith("adm:budget_set:"))
 async def cb_adm_budget_set(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
     if not _is_admin(callback.from_user.id):
-        await callback.answer("Нет доступа.", show_alert=True)
+        await callback.answer("⛔ Только для администраторов платформы.", show_alert=True)
         return
     try:
         n = int(callback.data.removeprefix("adm:budget_set:"))
     except (TypeError, ValueError):
-        await callback.answer("Некорректное значение", show_alert=True)
+        await callback.answer("⚠️ Кнопка устарела. Откройте раздел заново.", show_alert=True)
         return
     try:
         await db.set_platform_setting(pool, "account_daily_action_budget", str(n))
@@ -4069,12 +4071,12 @@ async def cb_adm_budget_set(callback: CallbackQuery, pool: asyncpg.Pool) -> None
 @router.callback_query(F.data.startswith("adm:ai_set:"))
 async def cb_adm_ai_set(callback: CallbackQuery, state: FSMContext) -> None:
     if not _is_admin(callback.from_user.id):
-        await callback.answer("Нет доступа.", show_alert=True)
+        await callback.answer("⛔ Только для администраторов платформы.", show_alert=True)
         return
     pid = callback.data.removeprefix("adm:ai_set:")
     meta = next((p for p in _AI_PROVIDERS if p[0] == pid), None)
     if not meta:
-        await callback.answer("Неизвестный провайдер", show_alert=True)
+        await callback.answer("⚠️ Кнопка устарела. Откройте раздел заново.", show_alert=True)
         return
     await safe_answer(callback)
     await state.set_state(AiKeyFSM.waiting_key)
@@ -4093,12 +4095,12 @@ async def cb_adm_ai_set(callback: CallbackQuery, state: FSMContext) -> None:
 @router.callback_query(F.data.startswith("adm:ai_del:"))
 async def cb_adm_ai_del(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
     if not _is_admin(callback.from_user.id):
-        await callback.answer("Нет доступа.", show_alert=True)
+        await callback.answer("⛔ Только для администраторов платформы.", show_alert=True)
         return
     pid = callback.data.removeprefix("adm:ai_del:")
     meta = next((p for p in _AI_PROVIDERS if p[0] == pid), None)
     if not meta:
-        await callback.answer("Неизвестный провайдер", show_alert=True)
+        await callback.answer("⚠️ Кнопка устарела. Откройте раздел заново.", show_alert=True)
         return
     try:
         await db.set_platform_setting(pool, meta[2], "")
@@ -4155,7 +4157,7 @@ async def msg_ai_key(message: Message, state: FSMContext, pool: asyncpg.Pool) ->
 @router.callback_query(F.data == "adm:gate")
 async def cb_adm_gate(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
     if not _is_admin(callback.from_user.id):
-        await callback.answer("Нет доступа.", show_alert=True)
+        await callback.answer("⛔ Только для администраторов платформы.", show_alert=True)
         return
     await safe_answer(callback)
     channels = await db.get_subscription_gate_channels(pool)
@@ -4170,7 +4172,7 @@ async def cb_adm_gate(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
 @router.callback_query(F.data == "adm:gate_toggle")
 async def cb_adm_gate_toggle(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
     if not _is_admin(callback.from_user.id):
-        await callback.answer("Нет доступа.", show_alert=True)
+        await callback.answer("⛔ Только для администраторов платформы.", show_alert=True)
         return
     new_val = not get_gate_enabled()
     set_gate_enabled(new_val)
@@ -4190,7 +4192,7 @@ async def cb_adm_gate_toggle(callback: CallbackQuery, pool: asyncpg.Pool) -> Non
 @router.callback_query(F.data == "adm:gate_add_ask")
 async def cb_adm_gate_add_ask(callback: CallbackQuery, state: FSMContext) -> None:
     if not _is_admin(callback.from_user.id):
-        await callback.answer("Нет доступа.", show_alert=True)
+        await callback.answer("⛔ Только для администраторов платформы.", show_alert=True)
         return
     await safe_answer(callback)
     await state.set_state(GateAddFSM.waiting_username)
@@ -4290,12 +4292,12 @@ async def msg_gate_add(message: Message, state: FSMContext, pool: asyncpg.Pool) 
 @router.callback_query(F.data.startswith("adm:gate_del:"))
 async def cb_adm_gate_del(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
     if not _is_admin(callback.from_user.id):
-        await callback.answer("Нет доступа.", show_alert=True)
+        await callback.answer("⛔ Только для администраторов платформы.", show_alert=True)
         return
     try:
         channel_id = int(callback.data.split(":")[-1])
     except ValueError:
-        await callback.answer("Некорректный ID.", show_alert=True)
+        await callback.answer("⚠️ Кнопка устарела. Откройте раздел заново.", show_alert=True)
         return
     await safe_answer(callback)
     await db.remove_subscription_gate_channel(pool, channel_id)
@@ -4355,7 +4357,7 @@ async def cb_adm_gate_notify_all(
     callback: CallbackQuery, pool: asyncpg.Pool
 ) -> None:
     if not _is_admin(callback.from_user.id):
-        await callback.answer("Нет доступа.", show_alert=True)
+        await callback.answer("⛔ Только для администраторов платформы.", show_alert=True)
         return
 
     channels = get_gate_channels()
@@ -4433,7 +4435,7 @@ async def fsm_bm_set_channel_id(message: Message, state: FSMContext, pool: async
         return
     value = (message.text or "").strip()
     if not value:
-        await message.answer("⚠️ Введите ID или @username канала.")
+        await message.answer("⚠️ Введите ID или @username канала.", reply_markup=cancel_kb())
         return
     from services import botmother_channel as _bmc
     await _bmc.set_channel_id(pool, value)
@@ -4442,7 +4444,7 @@ async def fsm_bm_set_channel_id(message: Message, state: FSMContext, pool: async
     kb.button(text="📢 К настройкам канала", callback_data="adm:bm_channel")
     kb.adjust(1)
     await message.answer(
-        f"✅ <b>Канал сохранён:</b> <code>{value}</code>\n\n"
+        f"✅ <b>Канал сохранён:</b> <code>{_html.escape(value)}</code>\n\n"
         f"Теперь бот будет публиковать посты в этот канал.",
         parse_mode="HTML",
         reply_markup=kb.as_markup(),
@@ -4456,7 +4458,7 @@ async def fsm_bm_write_post(message: Message, state: FSMContext, pool: asyncpg.P
         return
     text = (message.text or "").strip()
     if not text:
-        await message.answer("⚠️ Текст не может быть пустым.")
+        await message.answer("⚠️ Текст не может быть пустым.", reply_markup=cancel_kb())
         return
     await state.update_data(post_text=text)
     await state.set_state(InfragramChannelFSM.confirm_post)
@@ -4467,7 +4469,7 @@ async def fsm_bm_write_post(message: Message, state: FSMContext, pool: asyncpg.P
     kb.button(text="❌ Отмена", callback_data="adm:bm_channel")
     kb.adjust(1)
     await message.answer(
-        f"<b>Предпросмотр поста:</b>\n\n{text}\n\n"
+        f"<b>Предпросмотр поста:</b>\n\n{text}\n\n"  # HTML намеренно: пост пишется разметкой
         f"<i>Опубликовать в канал Infragram?</i>",
         parse_mode="HTML",
         reply_markup=kb.as_markup(),
@@ -4477,7 +4479,7 @@ async def fsm_bm_write_post(message: Message, state: FSMContext, pool: asyncpg.P
 @router.callback_query(F.data == "adm:bm_post_confirm")
 async def cb_bm_post_confirm(callback: CallbackQuery, state: FSMContext, pool: asyncpg.Pool) -> None:
     if not _is_admin(callback.from_user.id):
-        await callback.answer("⛔️ Нет доступа.", show_alert=True)
+        await callback.answer("⛔ Только для администраторов платформы.", show_alert=True)
         return
     await safe_answer(callback)
     data = await state.get_data()

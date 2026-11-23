@@ -150,7 +150,7 @@ async def cb_users_list(
 async def cb_filter_plan(callback: CallbackQuery) -> None:
     """Меню фильтра по плану."""
     if not _is_admin(callback.from_user.id):
-        await callback.answer("⛔️", show_alert=True)
+        await callback.answer("⛔ Только для администраторов платформы.", show_alert=True)
         return
 
     await safe_answer(callback)
@@ -183,7 +183,7 @@ async def cb_plan_list(
 ) -> None:
     """Показать пользователей с конкретным планом."""
     if not _is_admin(callback.from_user.id):
-        await callback.answer("⛔️", show_alert=True)
+        await callback.answer("⛔ Только для администраторов платформы.", show_alert=True)
         return
 
     await safe_answer(callback)
@@ -234,7 +234,7 @@ async def cb_plan_list(
 async def cb_banned_list(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
     """Показать забаненных пользователей."""
     if not _is_admin(callback.from_user.id):
-        await callback.answer("⛔️", show_alert=True)
+        await callback.answer("⛔ Только для администраторов платформы.", show_alert=True)
         return
 
     await safe_answer(callback)
@@ -265,7 +265,7 @@ async def cb_user_actions(
 ) -> None:
     """Показать действия над пользователем."""
     if not _is_admin(callback.from_user.id):
-        await callback.answer("⛔️", show_alert=True)
+        await callback.answer("⛔ Только для администраторов платформы.", show_alert=True)
         return
 
     user_id = callback_data.user_id
@@ -273,7 +273,7 @@ async def cb_user_actions(
         user = await db.get_user_info(pool, user_id)
     except Exception as e:
         log.warning('handler error in cb_user_actions: %s', e)
-        await callback.answer("Ошибка базы данных.", show_alert=True)
+        await callback.answer("⚠️ Не удалось загрузить пользователя. Попробуйте ещё раз через минуту.", show_alert=True)
         return
     if not user:
         await callback.answer("Пользователь не найден.", show_alert=True)
@@ -336,7 +336,7 @@ async def cb_grant_plan(
 ) -> None:
     """Меню выбора плана для выдачи."""
     if not _is_admin(callback.from_user.id):
-        await callback.answer("⛔️", show_alert=True)
+        await callback.answer("⛔ Только для администраторов платформы.", show_alert=True)
         return
 
     await safe_answer(callback)
@@ -379,7 +379,7 @@ async def cb_plan_months(
 ) -> None:
     """Меню выбора срока подписки."""
     if not _is_admin(callback.from_user.id):
-        await callback.answer("⛔️", show_alert=True)
+        await callback.answer("⛔ Только для администраторов платформы.", show_alert=True)
         return
 
     await safe_answer(callback)
@@ -427,7 +427,7 @@ async def cb_confirm_grant(
 ) -> None:
     """Подтвердить выдачу плана."""
     if not _is_admin(callback.from_user.id):
-        await callback.answer("⛔️", show_alert=True)
+        await callback.answer("⛔ Только для администраторов платформы.", show_alert=True)
         return
 
     user_id = callback_data.user_id
@@ -438,7 +438,7 @@ async def cb_confirm_grant(
         await db.grant_plan_to_user(pool, user_id, callback.from_user.id, plan, months)
     except Exception:
         log_exc_swallow(log, "cb_confirm_grant: DB write failed", user_id=user_id)
-        await callback.answer("⚠️ Ошибка записи в БД.", show_alert=True)
+        await callback.answer("⚠️ Не удалось сохранить. Попробуйте ещё раз через минуту.", show_alert=True)
         return
     from bot.utils.subscription import invalidate_plan_cache
     invalidate_plan_cache(user_id)
@@ -471,7 +471,7 @@ async def cb_revoke_plan(
 ) -> None:
     """Забрать подписку у пользователя."""
     if not _is_admin(callback.from_user.id):
-        await callback.answer("⛔️", show_alert=True)
+        await callback.answer("⛔ Только для администраторов платформы.", show_alert=True)
         return
 
     user_id = callback_data.user_id
@@ -479,7 +479,7 @@ async def cb_revoke_plan(
         await db.revoke_plan_from_user(pool, user_id, callback.from_user.id)
     except Exception:
         log_exc_swallow(log, "cb_revoke_plan: DB write failed", user_id=user_id)
-        await callback.answer("⚠️ Ошибка записи в БД.", show_alert=True)
+        await callback.answer("⚠️ Не удалось сохранить. Попробуйте ещё раз через минуту.", show_alert=True)
         return
     from bot.utils.subscription import invalidate_plan_cache
     invalidate_plan_cache(user_id)
@@ -513,7 +513,7 @@ async def cb_grant_strike(
 ) -> None:
     """Выдать Strike доступ пользователю."""
     if not _is_admin(callback.from_user.id):
-        await callback.answer("⛔️", show_alert=True)
+        await callback.answer("⛔ Только для администраторов платформы.", show_alert=True)
         return
 
     user_id = callback_data.user_id
@@ -529,7 +529,7 @@ async def cb_grant_strike(
         )
     except Exception:
         log_exc_swallow(log, "cb_grant_strike: DB write failed")
-        await callback.answer("⚠️ Ошибка записи в БД.", show_alert=True)
+        await callback.answer("⚠️ Не удалось сохранить. Попробуйте ещё раз через минуту.", show_alert=True)
         return
     await callback.answer("✅ Доступ к жалобам выдан.", show_alert=True)
 
@@ -555,7 +555,7 @@ async def cb_revoke_strike(
 ) -> None:
     """Забрать Strike доступ у пользователя."""
     if not _is_admin(callback.from_user.id):
-        await callback.answer("⛔️", show_alert=True)
+        await callback.answer("⛔ Только для администраторов платформы.", show_alert=True)
         return
 
     user_id = callback_data.user_id
@@ -583,7 +583,7 @@ async def cb_ban(
 ) -> None:
     """Забанить пользователя."""
     if not _is_admin(callback.from_user.id):
-        await callback.answer("⛔️", show_alert=True)
+        await callback.answer("⛔ Только для администраторов платформы.", show_alert=True)
         return
 
     user_id = callback_data.user_id
@@ -591,7 +591,7 @@ async def cb_ban(
         await db.ban_user(pool, user_id, callback.from_user.id, "Забанен администратором")
     except Exception:
         log_exc_swallow(log, "cb_ban: DB write failed", user_id=user_id)
-        await callback.answer("⚠️ Ошибка записи в БД.", show_alert=True)
+        await callback.answer("⚠️ Не удалось сохранить. Попробуйте ещё раз через минуту.", show_alert=True)
         return
     await callback.answer(f"✅ Пользователь #{user_id} забанен.", show_alert=True)
 
@@ -647,7 +647,7 @@ async def cb_unban(
 ) -> None:
     """Разбанить пользователя."""
     if not _is_admin(callback.from_user.id):
-        await callback.answer("⛔️", show_alert=True)
+        await callback.answer("⛔ Только для администраторов платформы.", show_alert=True)
         return
 
     user_id = callback_data.user_id
@@ -655,7 +655,7 @@ async def cb_unban(
         await db.unban_user(pool, user_id, callback.from_user.id)
     except Exception:
         log_exc_swallow(log, "cb_unban: DB write failed", user_id=user_id)
-        await callback.answer("⚠️ Ошибка записи в БД.", show_alert=True)
+        await callback.answer("⚠️ Не удалось сохранить. Попробуйте ещё раз через минуту.", show_alert=True)
         return
     await callback.answer(f"✅ Пользователь #{user_id} разбанен.", show_alert=True)
 
@@ -711,7 +711,7 @@ async def cb_quick_ban(
 ) -> None:
     """Быстрый бан из списка пользователей — с возвратом к списку."""
     if not _is_admin(callback.from_user.id):
-        await callback.answer("⛔️", show_alert=True)
+        await callback.answer("⛔ Только для администраторов платформы.", show_alert=True)
         return
 
     user_id = callback_data.user_id
@@ -720,7 +720,7 @@ async def cb_quick_ban(
         await db.ban_user(pool, user_id, callback.from_user.id, "Забанен администратором")
     except Exception:
         log_exc_swallow(log, "cb_quick_ban: DB write failed", user_id=user_id)
-        await callback.answer("⚠️ Ошибка записи в БД.", show_alert=True)
+        await callback.answer("⚠️ Не удалось сохранить. Попробуйте ещё раз через минуту.", show_alert=True)
         return
     await callback.answer(f"🚫 #{user_id} забанен", show_alert=True)
     try:
@@ -771,7 +771,7 @@ async def cb_quick_grant30(
 ) -> None:
     """Выдать 30 дней Starter из списка пользователей."""
     if not _is_admin(callback.from_user.id):
-        await callback.answer("⛔️", show_alert=True)
+        await callback.answer("⛔ Только для администраторов платформы.", show_alert=True)
         return
 
     user_id = callback_data.user_id
@@ -785,7 +785,7 @@ async def cb_quick_grant30(
         invalidate_plan_cache(user_id)
     except Exception:
         log_exc_swallow(log, "cb_quick_grant30: DB write failed", user_id=user_id)
-        await callback.answer("⚠️ Ошибка записи в БД.", show_alert=True)
+        await callback.answer("⚠️ Не удалось сохранить. Попробуйте ещё раз через минуту.", show_alert=True)
         return
     await callback.answer(f"✅ #{user_id} +30д подписки", show_alert=True)
     try:
@@ -891,7 +891,7 @@ async def cb_export_csv_users(callback: CallbackQuery, pool: asyncpg.Pool) -> No
 async def cb_main_menu(callback: CallbackQuery, state: FSMContext) -> None:
     """Вернуться в админ-меню."""
     if not _is_admin(callback.from_user.id):
-        await callback.answer("⛔️", show_alert=True)
+        await callback.answer("⛔ Только для администраторов платформы.", show_alert=True)
         return
 
     await state.clear()

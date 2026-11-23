@@ -115,7 +115,7 @@ def test_watchdog_moves_accounts_on_real_schema(monkeypatch):
                 "SELECT id, proxy_id FROM tg_accounts WHERE owner_id=$1 ORDER BY id", owner)
             got = [r["proxy_id"] for r in rows]
             assert got == [free_de, free_us, dead, busy]
-            assert len(sent) == 1 and "2 аккаунт(ов) переселены" in sent[0]
+            assert len(sent) == 1 and "2 аккаунта переселены" in sent[0]
             assert "1 остались" in sent[0]
 
             # Простой открыт на одного аккаунта, оставшегося на мёртвом прокси.

@@ -26,6 +26,9 @@ from services.logger import log_exc_swallow
 from bot.utils.op_helpers import safe_answer
 
 log = logging.getLogger(__name__)
+from bot.utils.fmt import plural  # noqa: E402
+from bot.utils.op_helpers import cancel_kb
+
 router = Router(name="narrative_hub")
 
 # ── Constants ─────────────────────────────────────────────────────────────────
@@ -203,7 +206,7 @@ async def cb_narr_create(callback: CallbackQuery, state: FSMContext) -> None:
 async def msg_narr_topic(message: Message, state: FSMContext) -> None:
     topic = (message.text or "").strip()
     if not topic or len(topic) > 256:
-        await message.answer("⚠️ Тема должна быть от 1 до 256 символов.", parse_mode="HTML")
+        await message.answer("⚠️ Тема должна быть от 1 до 256 символов.", parse_mode="HTML", reply_markup=cancel_kb())
         return
 
     await state.update_data(topic=topic)
@@ -230,7 +233,7 @@ async def msg_narr_topic(message: Message, state: FSMContext) -> None:
 async def msg_narr_core(message: Message, state: FSMContext, pool: asyncpg.Pool) -> None:
     core_message = (message.text or "").strip()
     if not core_message or len(core_message) > 1000:
-        await message.answer("⚠️ Сообщение должно быть от 1 до 1000 символов.", parse_mode="HTML")
+        await message.answer("⚠️ Сообщение должно быть от 1 до 1000 символов.", parse_mode="HTML", reply_markup=cancel_kb())
         return
 
     await state.update_data(core_message=core_message, selected_channels=[])
@@ -312,7 +315,7 @@ async def cb_narr_channel_toggle(
     await _edit(
         callback,
         f"<b>Шаг 3/5 — Выбор каналов</b>\n\n"
-        f"Выбрано: <b>{cnt}</b> канал(ов)\n\n"
+        f"Выбрано: <b>{cnt}</b> {plural(cnt, 'канал', 'канала', 'каналов')}\n\n"
         "Каждый канал получит уникальный пост с разным углом подачи.\n"
         "<i>Рекомендуется: 3–6 каналов</i>",
         kb.as_markup(),
@@ -352,7 +355,7 @@ async def cb_narr_channels_back(
     await _edit(
         callback,
         f"<b>Шаг 3/5 — Выбор каналов</b>\n\n"
-        f"Выбрано: <b>{cnt}</b> канал(ов)\n\n"
+        f"Выбрано: <b>{cnt}</b> {plural(cnt, 'канал', 'канала', 'каналов')}\n\n"
         "Каждый канал получит уникальный пост с разным углом подачи.\n"
         "<i>Рекомендуется: 3–6 каналов</i>",
         kb.as_markup(),
@@ -403,7 +406,7 @@ async def cb_narr_set_type(
     await safe_answer(callback)
     ctype = callback_data.action.replace("set_type_", "")
     if ctype not in _TYPE_LABELS:
-        await callback.answer("Неверный тип", show_alert=True)
+        await callback.answer("⚠️ Кнопка устарела. Откройте раздел заново.", show_alert=True)
         return
 
     await state.update_data(campaign_type=ctype)
@@ -440,7 +443,7 @@ async def cb_narr_set_spread(
     try:
         spread_hours = int(callback_data.action.replace("set_spread_", ""))
     except ValueError:
-        await callback.answer("Неверный интервал", show_alert=True)
+        await callback.answer("⚠️ Кнопка устарела. Откройте раздел заново.", show_alert=True)
         return
 
     await state.update_data(spread_hours=spread_hours)
