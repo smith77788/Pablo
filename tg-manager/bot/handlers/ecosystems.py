@@ -32,6 +32,8 @@ from services.logger import log_exc_swallow
 from bot.utils.op_helpers import safe_answer, terminal_kb
 
 log = logging.getLogger(__name__)
+from bot.utils.owner_error import owner_error  # noqa: E402
+
 router = Router()
 
 _ECO_TYPES = {
@@ -1677,7 +1679,7 @@ async def cb_eco_clone_skip_region(
     except Exception as e:
         log.warning('handler error in cb_eco_clone_skip_region: %s', e)
         await callback.message.edit_text(
-            f"❌ Ошибка: {html.escape(str(e)[:100])}", parse_mode="HTML", reply_markup=terminal_kb()
+            f"❌ Ошибка: {owner_error(e)}", parse_mode="HTML", reply_markup=terminal_kb()
         )
 
 
@@ -1723,7 +1725,7 @@ async def fsm_eco_clone_region(
     except Exception as e:
         log.warning('handler error in fsm_eco_clone_region: %s', e)
         await message.answer(
-            f"❌ Ошибка клонирования: {html.escape(str(e)[:100])}", parse_mode="HTML"
+            f"❌ Ошибка клонирования: {owner_error(e)}", parse_mode="HTML"
         )
 
 
@@ -1866,7 +1868,7 @@ async def fsm_eco_dna_name(
     except Exception as e:
         log.warning('handler error in fsm_eco_dna_name: %s', e)
         await message.answer(
-            f"❌ Ошибка: {html.escape(str(e)[:100])}", parse_mode="HTML"
+            f"❌ Ошибка: {owner_error(e)}", parse_mode="HTML"
         )
 
 

@@ -38,3 +38,62 @@ def test_english_exception_becomes_russian_and_escaped():
 
 def test_alert_text_fits_telegram_popup_limit():
     assert len(owner_error(ValueError("Ошибка " * 100), html_escape=False)) <= 150
+
+
+# ── То же по дереву разбора, а не по строке ─────────────────────────────────
+# Построчная проверка видела только вызов, уместившийся в одну строку. Ответ,
+# разнесённый на несколько строк (`await message.answer(\n f"…{escape(str(exc))}"`),
+# проходил мимо: так набралось сто мест в 27 обработчиках. Здесь берётся
+# имя из `except … as N` и ищется `str(N)` / `{N}` в аргументах отправки.
+import ast  # noqa: E402
+
+_SEND_ATTRS = {"answer", "edit_text", "reply", "send_message", "_reply", "edit_caption"}
+
+
+def _uses_exc(node: ast.AST, name: str) -> bool:
+    for x in ast.walk(node):
+        if (isinstance(x, ast.Call) and isinstance(x.func, ast.Name) and x.func.id == "str"
+                and x.args and isinstance(x.args[0], ast.Name) and x.args[0].id == name):
+            return True
+        if isinstance(x, ast.FormattedValue) and isinstance(x.value, ast.Name) and x.value.id == name:
+            return True
+    return False
+
+
+def _ast_hits(root: pathlib.Path) -> list[str]:
+    out = []
+    for f in sorted(root.glob("*.py")):
+        tree = ast.parse(f.read_text(encoding="utf-8"))
+        for h in ast.walk(tree):
+            if not isinstance(h, ast.ExceptHandler) or not h.name:
+                continue
+            for st in h.body:
+                for c in ast.walk(st):
+                    if not (isinstance(c, ast.Call) and isinstance(c.func, ast.Attribute)
+                            and c.func.attr in _SEND_ATTRS):
+                        continue
+                    args = list(c.args) + [k.value for k in c.keywords]
+                    if any(_uses_exc(a, h.name) for a in args):
+                        out.append(f"{f.name}:{c.lineno}")
+    return out
+
+
+def test_multiline_replies_do_not_send_raw_exception_text():
+    hits = _ast_hits(HANDLERS)
+    assert not hits, "текст исключения мимо owner_error:\n" + "\n".join(hits)
+
+
+def test_ast_detector_sees_planted_multiline_reply(tmp_path):
+    (tmp_path / "planted.py").write_text(
+        "async def h(message):\n"
+        "    try:\n"
+        "        pass\n"
+        "    except Exception as _e:\n"
+        "        await message.answer(\n"
+        "            f'❌ Ошибка: {escape(str(_e)[:200])}',\n"
+        "        )\n"
+        "    except ValueError as ve:\n"
+        "        await message.answer(owner_error(ve))\n",
+        encoding="utf-8",
+    )
+    assert _ast_hits(tmp_path) == ["planted.py:5"]

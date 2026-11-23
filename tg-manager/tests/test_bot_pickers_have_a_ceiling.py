@@ -300,6 +300,12 @@ def test_message_text_does_not_grow_without_bound():
             fsrc = ast.get_source_segment(src, fn) or ""
             if _TEXT_BOUND.search(fsrc):
                 continue
+            # Строки клеятся в ФАЙЛ (выгрузка токенов, CSV), а не в текст
+            # сообщения: у документа нет предела в 4096 символов. Раньше такие
+            # функции проходили случайно — их «спасал» срез `str(e)[:200]` в
+            # тексте ошибки, а не потолок списка.
+            if "BufferedInputFile(" in fsrc:
+                continue
             if re.search(r"if\s+len\([^)]+\)\s*>\s*\w+\s*:\s*\n\s*return", fsrc):
                 continue
             for node in ast.walk(fn):

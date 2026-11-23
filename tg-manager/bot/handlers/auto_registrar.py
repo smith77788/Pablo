@@ -29,6 +29,8 @@ from database import db
 from services.logger import log_exc_swallow
 
 log = logging.getLogger(__name__)
+from bot.utils.owner_error import owner_error  # noqa: E402
+
 router = Router()
 
 # ── Константы ─────────────────────────────────────────────────────────────────
@@ -419,7 +421,7 @@ async def cb_autoreg_pick_country(cb: CallbackQuery, callback_data: AutoRegCb, p
         countries = await asyncio.wait_for(client.get_countries(), timeout=15)
     except Exception as exc:
         await cb.message.edit_text(
-            f"❌ Ошибка загрузки стран: <code>{html.escape(str(exc)[:150])}</code>",
+            f"❌ Ошибка загрузки стран: <code>{owner_error(exc)}</code>",
             parse_mode="HTML", reply_markup=_menu_kb(),
         )
         return
@@ -513,7 +515,7 @@ async def cb_autoreg_batch_country(cb: CallbackQuery, callback_data: AutoRegCb, 
         countries = await asyncio.wait_for(client.get_countries(), timeout=15)
     except Exception as exc:
         await cb.message.edit_text(
-            f"❌ Ошибка: <code>{html.escape(str(exc)[:150])}</code>",
+            f"❌ Ошибка: <code>{owner_error(exc)}</code>",
             parse_mode="HTML", reply_markup=_menu_kb(),
         )
         return
@@ -597,7 +599,7 @@ async def _start_single_register(
         order = await asyncio.wait_for(sms_client.buy_number(country), timeout=15)
     except Exception as exc:
         await cb.message.edit_text(
-            f"❌ Ошибка заказа номера: <code>{html.escape(str(exc)[:200])}</code>",
+            f"❌ Ошибка заказа номера: <code>{owner_error(exc)}</code>",
             parse_mode="HTML", reply_markup=_menu_kb(),
         )
         return
@@ -746,7 +748,7 @@ async def _wait_and_confirm(
         await cleanup_pending(phone)
         try:
             await status_msg.edit_text(
-                f"❌ Ошибка сессии: <code>{html.escape(str(exc)[:200])}</code>",
+                f"❌ Ошибка сессии: <code>{owner_error(exc)}</code>",
                 parse_mode="HTML", reply_markup=_menu_kb(),
             )
         except Exception:
@@ -805,7 +807,7 @@ async def msg_autoreg_enter_2fa(msg: Message, state: FSMContext, pool: asyncpg.P
     except ValueError as exc:
         _pending_2fa[owner_id] = pending   # вернуть для повторной попытки
         await msg.answer(
-            f"❌ {html.escape(str(exc))}\n\nВведите пароль ещё раз:",
+            f"❌ {owner_error(exc)}\n\nВведите пароль ещё раз:",
         )
         return
     except Exception as exc:
@@ -813,7 +815,7 @@ async def msg_autoreg_enter_2fa(msg: Message, state: FSMContext, pool: asyncpg.P
         await sms_client.cancel_order(order_id)
         await state.clear()
         await msg.answer(
-            f"❌ Ошибка 2FA: <code>{html.escape(str(exc)[:200])}</code>",
+            f"❌ Ошибка 2FA: <code>{owner_error(exc)}</code>",
             parse_mode="HTML", reply_markup=_menu_kb(),
         )
         return
@@ -824,7 +826,7 @@ async def msg_autoreg_enter_2fa(msg: Message, state: FSMContext, pool: asyncpg.P
         await cleanup_pending(phone)
         await state.clear()
         await msg.answer(
-            f"❌ Ошибка сессии: <code>{html.escape(str(exc)[:200])}</code>",
+            f"❌ Ошибка сессии: <code>{owner_error(exc)}</code>",
             parse_mode="HTML", reply_markup=_menu_kb(),
         )
         return

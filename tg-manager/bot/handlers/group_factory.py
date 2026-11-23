@@ -30,6 +30,8 @@ from services.logger import log_exc_swallow
 from bot.utils.op_helpers import safe_answer
 
 log = logging.getLogger(__name__)
+from bot.utils.owner_error import owner_error  # noqa: E402
+
 router = Router()
 
 
@@ -421,7 +423,7 @@ async def cb_group_list_acc(
     except Exception as _e:
         log.warning("my_groups get_dialogs failed acc=%s: %s", acc.get("id"), _e)
         await callback.message.edit_text(
-            f"❌ Не удалось получить список групп: <code>{html.escape(str(_e)[:150])}</code>",
+            f"❌ Не удалось получить список групп: <code>{owner_error(_e)}</code>",
             parse_mode="HTML",
             reply_markup=_back_menu_kb().as_markup(),
         )
@@ -513,7 +515,7 @@ async def cb_group_members_acc(
     except Exception as _e:
         log.warning("members_acc get_dialogs failed acc=%s: %s", acc.get("id"), _e)
         await callback.message.edit_text(
-            f"❌ Не удалось получить список групп: <code>{html.escape(str(_e)[:150])}</code>",
+            f"❌ Не удалось получить список групп: <code>{owner_error(_e)}</code>",
             parse_mode="HTML",
             reply_markup=_back_menu_kb().as_markup(),
         )
@@ -583,7 +585,7 @@ async def cb_group_members_list(
     except Exception as _e:
         log.warning("members_list get_channel_members failed group=%s: %s", callback_data.group_id, _e)
         await callback.message.edit_text(
-            f"❌ Не удалось загрузить участников: <code>{html.escape(str(_e)[:150])}</code>",
+            f"❌ Не удалось загрузить участников: <code>{owner_error(_e)}</code>",
             parse_mode="HTML",
             reply_markup=_back_menu_kb().as_markup(),
         )
@@ -694,7 +696,7 @@ async def cb_group_import_acc(
     except Exception as e:
         log.warning("group import_acc get_dialogs error: %s", e)
         await callback.message.edit_text(
-            f"❌ Ошибка при получении диалогов: <code>{html.escape(str(e)[:100])}</code>",
+            f"❌ Ошибка при получении диалогов: <code>{owner_error(e)}</code>",
             parse_mode="HTML",
             reply_markup=_back_menu_kb().as_markup(),
         )
@@ -912,7 +914,7 @@ async def cb_group_do_announce(
     except Exception as exc:
         log.warning("group_do_announce: get_dialogs failed: %s", exc)
         await callback.message.edit_text(
-            f"❌ Не удалось получить список групп: <code>{html.escape(str(exc)[:150])}</code>",
+            f"❌ Не удалось получить список групп: <code>{owner_error(exc)}</code>",
             parse_mode="HTML",
             reply_markup=_back_menu_kb().as_markup(),
         )

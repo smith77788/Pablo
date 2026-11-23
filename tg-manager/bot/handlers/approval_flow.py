@@ -10,6 +10,8 @@ from bot.callbacks import ApprovalCb
 from bot.utils.event_status import mark_handled_error
 from bot.utils.op_helpers import safe_answer, terminal_kb
 
+from bot.utils.owner_error import owner_error  # noqa: E402
+
 router = Router()
 
 
@@ -57,7 +59,7 @@ async def cb_approval_confirm(
         from html import escape
         mark_handled_error(f"approval_confirm update: {exc}")
         await callback.message.edit_text(
-            f"❌ <b>Ошибка подтверждения операции:</b>\n<code>{escape(str(exc)[:200])}</code>",
+            f"❌ <b>Ошибка подтверждения операции:</b>\n<code>{owner_error(exc)}</code>",
             parse_mode="HTML",
             reply_markup=terminal_kb(),
         )

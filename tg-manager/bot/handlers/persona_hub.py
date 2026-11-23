@@ -18,6 +18,8 @@ from bot.utils.op_helpers import safe_answer
 from services import account_status as _acc_status
 
 log = logging.getLogger(__name__)
+from bot.utils.owner_error import owner_error  # noqa: E402
+
 router = Router()
 
 _SPEECH_STYLES = {
@@ -519,7 +521,7 @@ async def cb_persona_do_create(
                 callback_data=PersonaCb(action="view", persona_id=edit_persona_id),
             )
             await callback.message.edit_text(
-                f"❌ Ошибка обновления персоны: {html.escape(str(e)[:200])}",
+                f"❌ Ошибка обновления персоны: {owner_error(e)}",
                 parse_mode="HTML",
                 reply_markup=kb.as_markup(),
             )
@@ -588,7 +590,7 @@ async def cb_persona_do_create(
         kb = InlineKeyboardBuilder()
         kb.button(text="◀️ Назад", callback_data=PersonaCb(action="menu"))
         await callback.message.edit_text(
-            f"❌ Ошибка создания персоны: {html.escape(str(e)[:200])}",
+            f"❌ Ошибка создания персоны: {owner_error(e)}",
             parse_mode="HTML",
             reply_markup=kb.as_markup(),
         )
@@ -792,7 +794,7 @@ async def cb_persona_delete_confirm(
         kb = InlineKeyboardBuilder()
         kb.button(text="◀️ Назад", callback_data=PersonaCb(action="menu"))
         await callback.message.edit_text(
-            f"❌ Ошибка удаления: {html.escape(str(e)[:200])}",
+            f"❌ Ошибка удаления: {owner_error(e)}",
             parse_mode="HTML",
             reply_markup=kb.as_markup(),
         )

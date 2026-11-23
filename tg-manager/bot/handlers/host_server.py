@@ -298,7 +298,7 @@ async def cb_rent(callback: CallbackQuery, callback_data: HostCb, pool: asyncpg.
     try:
         r = await hs.rent_offering(pool, uid, callback_data.oid, units=1)
     except ValueError as ve:
-        await callback.answer(str(ve), show_alert=True)
+        await callback.answer(owner_error(ve, html_escape=False), show_alert=True)
         return
     except Exception:
         log_exc_swallow(log, "host cb_rent")
@@ -559,7 +559,7 @@ async def fsm_setprice(message: Message, state: FSMContext, pool: asyncpg.Pool) 
     try:
         applied = await hs.set_price(pool, raw)
     except ValueError as ve:
-        await message.answer(f"⚠️ {ve}")
+        await message.answer(f"⚠️ {owner_error(ve)}")
         return
     await state.clear()
     await message.answer(

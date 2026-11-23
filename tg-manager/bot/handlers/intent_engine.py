@@ -41,6 +41,8 @@ from bot.utils.op_helpers import safe_answer
 from bot.utils.op_names import run_status as _run_status  # noqa: E402
 
 log = logging.getLogger(__name__)
+from bot.utils.owner_error import owner_error  # noqa: E402
+
 router = Router(name="intent_engine")
 
 
@@ -703,7 +705,7 @@ async def _execute_op_intent(
         if callback.message:
             await callback.message.edit_text(
                 f"❌ Не удалось поставить операцию в очередь: {type(exc).__name__}\n"
-                f"{str(exc)[:120]}",
+                f"{owner_error(exc)}",
                 reply_markup=_plan_kb(intent_id, plan, "balanced"),
             )
         return
