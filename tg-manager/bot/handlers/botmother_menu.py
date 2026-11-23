@@ -143,6 +143,14 @@ log = logging.getLogger(__name__)
 
 router = Router()
 
+
+def _op_name(op_type) -> str:
+    """Название операции по-русски (реестр operation_bus) вместо кода
+    «mass_invite»: владелец английского не читает."""
+    from services import operation_bus as _ob
+    meta = _ob.OP_REGISTRY.get(str(op_type or ""), {})
+    return meta.get("description") or "Операция"
+
 def _lock(user_plan: str, required: str) -> str:
     from bot.utils.subscription import PLAN_LEVELS, coerce_plan
 
@@ -932,7 +940,7 @@ async def cb_ops_dashboard(
         failed_count = 0
         for op in recent_ops:
             icon = _ost.icon(op["status"])
-            otype = html.escape(op["op_type"])
+            otype = html.escape(_op_name(op["op_type"]))
             done = op["done_items"] or 0
             total = op["total_items"] or 0
             created = op["created_at"].strftime("%d.%m %H:%M") if op["created_at"] else "—"
@@ -1317,6 +1325,45 @@ async def cb_pick_bot_for(
 # ── Alerts (Visibility → Alerts) ─────────────────────────────────────────
 
 
+# Тип события в «Алертах» печатался кодом из базы: «account_flood_risk»,
+# «channel_search_hidden», «drift_detected». Владелец английского не читает.
+# Типы собираются как «<что>_<что случилось>» (entity_restriction_check.
+# event_type_for), поэтому перевод — из двух половин; незнакомое — общей
+# фразой, а не кодом.
+_ALERT_EXACT = {
+    "ban_detected": "Аккаунт забанен",
+    "session_dead": "Сессия аккаунта умерла",
+    "account_restricted": "Аккаунт ограничен Telegram",
+    "account_flood_risk": "Аккаунт часто ловит флуд-лимиты",
+    "dm_restricted": "Аккаунту закрыли личные сообщения",
+    "invite_degraded": "Инвайты стали проходить хуже",
+    "search_drop": "Бот выпал из поиска",
+    "search_position_drop": "Бот опустился в поиске",
+    "drift_detected": "Канал изменили вне Infragram",
+}
+_ALERT_WHO = {"channel": ("Канал", 0), "group": ("Группа", 1), "bot": ("Бот", 0),
+              "account": ("Аккаунт", 0), "entity": ("Ресурс", 0)}
+# (мужской род, женский род): «Группа скрыта», а не «Группа скрыт».
+_ALERT_WHAT = {
+    "restricted": ("ограничен Telegram", "ограничена Telegram"),
+    "search_hidden": ("скрыт из поиска", "скрыта из поиска"),
+    "unreachable": ("недоступен снаружи", "недоступна снаружи"),
+    "geoban": ("заблокирован в части стран", "заблокирована в части стран"),
+    "banned": ("забанен", "забанена"),
+}
+
+
+def _alert_ru(event_type: str | None) -> str:
+    code = str(event_type or "")
+    if code in _ALERT_EXACT:
+        return _ALERT_EXACT[code]
+    who, _, what = code.partition("_")
+    if who in _ALERT_WHO and what in _ALERT_WHAT:
+        name, fem = _ALERT_WHO[who]
+        return f"{name} {_ALERT_WHAT[what][fem]}"
+    return "Событие безопасности"
+
+
 @router.callback_query(BmCb.filter(F.action == "alerts"))
 async def cb_alerts(
     callback: CallbackQuery,
@@ -1392,12 +1439,12 @@ async def cb_alerts(
         emoji = sev_emoji.get(r["severity"], "🔔")
         dt = r["created_at"].strftime("%d.%m %H:%M")
         if r.get("account_id"):
-            entity = acc_names.get(r["account_id"], f"acc#{r['account_id']}")
+            entity = acc_names.get(r["account_id"], f"аккаунт #{r['account_id']}")
         elif r.get("bot_id"):
             entity = f"@{bot_names_a.get(r['bot_id'], str(r['bot_id']))}"
         else:
             entity = "—"
-        etype = html.escape(r["event_type"])
+        etype = html.escape(_alert_ru(r["event_type"]))
         lines.append(f"{emoji} <code>{dt}</code> {etype} ({html.escape(entity)})")
 
     total_pages = max(1, -(-total // limit))
@@ -2368,7 +2415,7 @@ async def cb_op_reports(
         status = op["status"]
         emoji = _ost.icon(status)
         dt = op["created_at"].strftime("%d.%m %H:%M")
-        otype = html.escape(op["op_type"])
+        otype = html.escape(_op_name(op["op_type"]))
         total_i = op["total_items"] or 0
         done_i = op["done_items"] or 0
         duration = ""

@@ -11,6 +11,14 @@ from bot.utils.event_status import mark_handled_error
 from bot.utils.op_helpers import safe_answer, terminal_kb
 
 router = Router()
+
+
+def _op_name(op_type) -> str:
+    """Название операции по-русски (реестр operation_bus) вместо кода
+    «mass_invite»: владелец английского не читает."""
+    from services import operation_bus as _ob
+    meta = _ob.OP_REGISTRY.get(str(op_type or ""), {})
+    return meta.get("description") or "Операция"
 log = logging.getLogger(__name__)
 
 
@@ -67,7 +75,7 @@ async def cb_approval_confirm(
     if op:
         await callback.message.edit_text(
             f"✅ <b>Операция #{op_id} подтверждена</b>\n\n"
-            f"Тип: <code>{op['op_type']}</code>\n"
+            f"Тип: <b>{_op_name(op['op_type'])}</b>\n"
             f"Целей: {op['total_items'] or '?'}\n\n"
             "Поставлена в очередь на выполнение.",
             parse_mode="HTML",
