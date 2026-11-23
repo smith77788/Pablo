@@ -1098,14 +1098,14 @@ async def get_bots(pool: asyncpg.Pool, added_by: int) -> list[dict]:
                   COALESCE(aud.cnt, 0) AS audience_count,
                   COALESCE(ar.ar_cnt, 0) AS active_replies_count
            FROM managed_bots m
-           LEFT JOIN (
-               SELECT bot_id, COUNT(*) AS cnt
-               FROM bot_users WHERE is_active=TRUE GROUP BY bot_id
-           ) aud ON aud.bot_id = m.bot_id
-           LEFT JOIN (
-               SELECT bot_id, COUNT(*) AS ar_cnt
-               FROM auto_replies WHERE is_active=TRUE GROUP BY bot_id
-           ) ar ON ar.bot_id = m.bot_id
+           LEFT JOIN LATERAL (
+               SELECT NULLIF(COUNT(*), 0) AS cnt FROM bot_users x
+                WHERE x.bot_id = m.bot_id AND x.is_active
+           ) aud ON TRUE
+           LEFT JOIN LATERAL (
+               SELECT NULLIF(COUNT(*), 0) AS ar_cnt FROM auto_replies x
+                WHERE x.bot_id = m.bot_id AND x.is_active
+           ) ar ON TRUE
            -- Скобки обязательны. AND связывает крепче OR, поэтому без них
            -- условие читалось как «свои ИЛИ экосистемные ИЛИ (по workspace И
            -- активные)»: на СВОИ боты фильтр is_active не действовал вовсе.
@@ -3334,10 +3334,10 @@ async def get_cluster_list(pool: asyncpg.Pool, added_by: int) -> list[dict]:
                   SUM(CASE WHEN m.swarm_enabled THEN 1 ELSE 0 END) as swarm_count,
                   COALESCE(SUM(aud.cnt),0) as total_audience
            FROM managed_bots m
-           LEFT JOIN (
-               SELECT bot_id, COUNT(*) AS cnt FROM bot_users
-               WHERE is_active=TRUE GROUP BY bot_id
-           ) aud ON aud.bot_id=m.bot_id
+           LEFT JOIN LATERAL (
+               SELECT NULLIF(COUNT(*), 0) AS cnt FROM bot_users x
+                WHERE x.bot_id = m.bot_id AND x.is_active
+           ) aud ON TRUE
            WHERE m.added_by=$1 AND m.is_active=TRUE
            GROUP BY COALESCE(m.cluster,'default')
            ORDER BY total_audience DESC""",
@@ -3352,9 +3352,10 @@ async def get_bots_in_cluster(
     return await pool.fetch(
         """SELECT m.*, COALESCE(aud.cnt,0) as audience_count, COALESCE(bm.score,0) as score
            FROM managed_bots m
-           LEFT JOIN (
-               SELECT bot_id, COUNT(*) AS cnt FROM bot_users WHERE is_active=TRUE GROUP BY bot_id
-           ) aud ON aud.bot_id=m.bot_id
+           LEFT JOIN LATERAL (
+               SELECT NULLIF(COUNT(*), 0) AS cnt FROM bot_users x
+                WHERE x.bot_id = m.bot_id AND x.is_active
+           ) aud ON TRUE
            LEFT JOIN bot_metrics bm ON bm.bot_id=m.bot_id
            WHERE m.added_by=$1 AND m.is_active=TRUE AND COALESCE(m.cluster,'default')=$2
            ORDER BY COALESCE(bm.score,0) DESC""",
@@ -3443,9 +3444,10 @@ async def get_bot_ranking(pool: asyncpg.Pool, added_by: int) -> list[asyncpg.Rec
                   COALESCE(bm.conversion_rate,0) as conversion_rate,
                   COALESCE(rw.weight,1.0) as weight
            FROM managed_bots m
-           LEFT JOIN (
-               SELECT bot_id, COUNT(*) AS cnt FROM bot_users WHERE is_active=TRUE GROUP BY bot_id
-           ) aud ON aud.bot_id=m.bot_id
+           LEFT JOIN LATERAL (
+               SELECT NULLIF(COUNT(*), 0) AS cnt FROM bot_users x
+                WHERE x.bot_id = m.bot_id AND x.is_active
+           ) aud ON TRUE
            LEFT JOIN bot_metrics bm ON bm.bot_id=m.bot_id
            LEFT JOIN bot_routing_weights rw ON rw.bot_id=m.bot_id
            WHERE m.added_by=$1 AND m.is_active=TRUE
@@ -3461,9 +3463,10 @@ async def get_network_health(pool: asyncpg.Pool, added_by: int) -> list[dict]:
                   COALESCE(aud.cnt,0) as audience
            FROM managed_bots m
            LEFT JOIN bot_update_offsets o ON o.bot_id=m.bot_id
-           LEFT JOIN (
-               SELECT bot_id, COUNT(*) AS cnt FROM bot_users WHERE is_active=TRUE GROUP BY bot_id
-           ) aud ON aud.bot_id=m.bot_id
+           LEFT JOIN LATERAL (
+               SELECT NULLIF(COUNT(*), 0) AS cnt FROM bot_users x
+                WHERE x.bot_id = m.bot_id AND x.is_active
+           ) aud ON TRUE
            WHERE m.added_by=$1 AND m.is_active=TRUE
            ORDER BY aud.cnt DESC""",
         added_by,
