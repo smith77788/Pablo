@@ -1,4 +1,6 @@
 from __future__ import annotations
+
+import asyncio
 import logging
 import re
 import time
@@ -584,22 +586,12 @@ async def search_contacts_advanced(
     return result
 
 
-async def _fuzzy_search(
-    pool,
-    owner_id: int,
-    tokens: list[str],
-    threshold: float,
-    exclude_ids: set[int],
-) -> list[dict]:
-    all_rows = await pool.fetch(
-        'SELECT * FROM unified_contacts WHERE owner_id=$1 ORDER BY first_name',
-        owner_id)
-
-    results: list[dict] = []
-    for r in all_rows:
-        if r['id'] in exclude_ids:
+def _fuzzy_rank(rows, tokens: list[str], threshold: float, exclude_ids: set) -> list[tuple]:
+    """Чистая часть: (балл, имя, id) лучших десяти. Тот же счёт, что раньше."""
+    scored = []
+    for d in rows:
+        if d['id'] in exclude_ids:
             continue
-        d = dict(r)
         text_fields = [
             d.get('first_name', '') or '',
             d.get('last_name', '') or '',
@@ -620,11 +612,40 @@ async def _fuzzy_search(
                 best_score = max(best_score, 1.0)
 
         if best_score >= threshold:
-            d['match_score'] = round(best_score * 10, 2)
-            results.append(d)
+            scored.append((round(best_score * 10, 2), d.get('first_name', '') or '', d['id']))
+    scored.sort(key=lambda x: (-x[0], x[1]))
+    return scored[:10]
 
-    results.sort(key=lambda x: (-x.get('match_score', 0), x.get('first_name', '')))
-    return results[:10]
+
+async def _fuzzy_search(
+    pool,
+    owner_id: int,
+    tokens: list[str],
+    threshold: float,
+    exclude_ids: set[int],
+) -> list[dict]:
+    # Только поля, по которым считается сходство, и счёт в потоке: на 30 000
+    # контактов `SELECT *` + SequenceMatcher/Левенштейн в цикле событий
+    # держали бота ~0,9 с на каждый поиск «похожих». Полные строки — только
+    # у десяти победителей.
+    rows = await pool.fetch(
+        'SELECT id, first_name, last_name, username, display_name, company, position '
+        'FROM unified_contacts WHERE owner_id=$1 ORDER BY first_name',
+        owner_id)
+    top = await asyncio.to_thread(
+        _fuzzy_rank, [dict(r) for r in rows], tokens, threshold, exclude_ids)
+    if not top:
+        return []
+    full = {r['id']: dict(r) for r in await pool.fetch(
+        'SELECT * FROM unified_contacts WHERE owner_id=$1 AND id = ANY($2::uuid[])',
+        owner_id, [cid for _, _, cid in top])}
+    results: list[dict] = []
+    for score, _, cid in top:
+        d = full.get(cid)
+        if d is not None:
+            d['match_score'] = score
+            results.append(d)
+    return results
 
 
 # ---------------------------------------------------------------------------

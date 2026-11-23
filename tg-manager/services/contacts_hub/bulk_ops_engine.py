@@ -1,4 +1,5 @@
 from __future__ import annotations
+import asyncio
 import json
 import logging
 from typing import Optional
@@ -96,11 +97,20 @@ async def resolve_filter_ids(pool, owner_id: int, *, country: str | None = None,
         f'SELECT id, phones FROM unified_contacts WHERE {" AND ".join(conds)}', *params)
     if not country:
         return [str(r['id']) for r in rows]
+    # Страна по номеру — разбор каждого телефона в Python; на десятках тысяч
+    # контактов это сотни миллисекунд, поэтому в потоке, а не в цикле событий.
+    # Импорт — здесь, а не в потоке: первый импорт модуля из потока держал
+    # бы общий замок импорта.
     from services.account_manager import country_code_from_phone
+    return await asyncio.to_thread(
+        _ids_in_country, [(r['id'], r['phones']) for r in rows], country,
+        country_code_from_phone)
+
+
+def _ids_in_country(rows: list, country: str, country_code_from_phone) -> list:
     want = country.strip().upper()
     out = []
-    for r in rows:
-        phones = r['phones']
+    for cid, phones in rows:
         if isinstance(phones, str):
             try:
                 phones = json.loads(phones or '[]')
@@ -108,7 +118,7 @@ async def resolve_filter_ids(pool, owner_id: int, *, country: str | None = None,
                 phones = []
         isos = {country_code_from_phone(p) for p in (phones or [])}
         if want in {c for c in isos if c}:
-            out.append(str(r['id']))
+            out.append(str(cid))
     return out
 
 

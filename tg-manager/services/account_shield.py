@@ -404,6 +404,10 @@ async def evaluate_account(
     risk = await physics_engine.get_account_risk(pool, account_id)
     if cfg is None:
         cfg = await get_shield_config(pool, owner_id)
+    return _decision_for(risk, account_id, cfg)
+
+
+def _decision_for(risk: dict, account_id: int, cfg: ShieldConfig) -> ShieldDecision:
     if account_id in set(cfg.exempt_account_ids or ()):
         return ShieldDecision(account_id=account_id,
                               risk_score=float(risk.get("risk_score") or 0.0),
@@ -638,17 +642,24 @@ async def run_owner(pool: asyncpg.Pool, owner_id: int, bot=None) -> dict:
         owner_id,
     )
     cfg = await get_shield_config(pool, owner_id)
+    # Риск всего флота — одним запросом, а не запросом на аккаунт (стенд,
+    # 1667 живых аккаунтов: 1667 запросов и 0,43 с -> 1 запрос и 0,15 с).
+    # Пауза 50 мс — как и раньше, только после аккаунта, по которому что-то
+    # записано.
+    risks = await physics_engine.get_account_risks(pool, [r["id"] for r in accounts])
     for acc_row in accounts:
         account_id: int = acc_row["id"]
         out["checked"] += 1
+        acted = False
         try:
-            decision = await evaluate_account(pool, account_id, owner_id, cfg)
+            decision = _decision_for(risks[int(account_id)], account_id, cfg)
             if decision.level == "exempt":
                 out["exempt"] += 1
                 continue
             if decision.action not in ("cool", "pause", "warn"):
                 # don't record "ok" to avoid bloating shield_actions table
                 continue
+            acted = True
             # Повтор того же решения по аккаунту в истории не пишем (и в
             # Telegram не шлём); охлаждение при этом продлевается как раньше.
             repeat = decision.action != "pause" and await _recently_recorded(
@@ -679,7 +690,10 @@ async def run_owner(pool: asyncpg.Pool, owner_id: int, bot=None) -> dict:
             log.debug(
                 "account_shield: eval error acc=%d: %s", account_id, exc
             )
-        await asyncio.sleep(0.05)
+        if acted:
+            await asyncio.sleep(0.05)
+        elif out["checked"] % 200 == 0:
+            await asyncio.sleep(0)  # отдать цикл событий на длинном флоте
     return out
 
 
