@@ -25,6 +25,8 @@ from bot.utils.subscription import locked_text
 from services.logger import log_exc_swallow
 
 log = logging.getLogger(__name__)
+from bot.utils.op_helpers import terminal_kb  # noqa: E402
+
 router = Router()
 
 
@@ -120,7 +122,7 @@ async def cb_inviter_joinall(
         r = await join_all(pool, callback.from_user.id, group)
     except Exception:
         log_exc_swallow(log, "joinall run failed")
-        await callback.message.answer("⚠️ Не удалось выполнить вступление. Попробуйте позже.")
+        await callback.message.answer("⚠️ Не удалось выполнить вступление. Попробуйте позже.", reply_markup=terminal_kb())
         return
     kb = InlineKeyboardBuilder()
     kb.button(text="🔁 Проверить готовность", callback_data=InviterCb(action="preflight"))

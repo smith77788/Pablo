@@ -1423,7 +1423,7 @@ async def cb_admin(
         bc_text = str(payload.get("text") or "")
         bc_seg = str(payload.get("seg") or "")
         if not bc_text:
-            await callback.message.edit_text("❌ Пустой текст — рассылка отменена.")
+            await callback.message.edit_text("❌ Пустой текст — рассылка отменена.", reply_markup=terminal_kb())
             return
         try:
             await callback.message.edit_reply_markup(reply_markup=None)

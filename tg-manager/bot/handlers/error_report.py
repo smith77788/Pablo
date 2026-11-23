@@ -166,4 +166,4 @@ async def cb_cancel_error_report(callback: CallbackQuery, state: FSMContext) -> 
     """Отмена отправки отчёта об ошибке."""
     await safe_answer(callback)
     await state.clear()
-    await callback.message.edit_text("❌ Отправка отчёта отменена.")
+    await callback.message.edit_text("❌ Отправка отчёта отменена.", reply_markup=terminal_kb())

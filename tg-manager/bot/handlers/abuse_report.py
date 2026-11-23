@@ -20,6 +20,8 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 from services import abuse_report, report_channels
 
 log = logging.getLogger(__name__)
+from bot.utils.op_helpers import terminal_kb  # noqa: E402
+
 router = Router()
 
 
@@ -107,9 +109,9 @@ async def cb_mailbox(callback: CallbackQuery, state: FSMContext, pool: asyncpg.P
 async def cb_cancel(callback: CallbackQuery, state: FSMContext) -> None:
     await state.clear()
     try:
-        await callback.message.edit_text("Отменено. Наберите /report_abuse, чтобы начать заново.")
+        await callback.message.edit_text("Отменено. Наберите /report_abuse, чтобы начать заново.", reply_markup=terminal_kb())
     except Exception:
-        await callback.message.answer("Отменено. Наберите /report_abuse, чтобы начать заново.")
+        await callback.message.answer("Отменено. Наберите /report_abuse, чтобы начать заново.", reply_markup=terminal_kb())
     await callback.answer()
 
 

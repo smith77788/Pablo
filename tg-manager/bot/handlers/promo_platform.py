@@ -380,19 +380,19 @@ async def cb_order_boost(callback: CallbackQuery, callback_data: PromoCb, pool: 
 
     panel = await db.smm_get_panel(pool, order["smm_panel_id"], owner_id=callback.from_user.id)
     if not panel:
-        await callback.message.answer("⚠️ SMM-панель не найдена. Проверьте настройки заказа.")
+        await callback.message.answer("⚠️ SMM-панель не найдена. Проверьте настройки заказа.", reply_markup=terminal_kb())
         return
 
     bot_rec = await db.warehouse_get_bot(pool, order["bot_id"], owner_id=callback.from_user.id)
     if not bot_rec:
-        await callback.message.answer("⚠️ Бот не найден в складе.")
+        await callback.message.answer("⚠️ Бот не найден в складе.", reply_markup=terminal_kb())
         return
 
     # Запуск платный: заказ занимается атомарно ДО запроса к панели, иначе
     # двойной тап (или бот и мини-апп разом) оплачивал накрутку дважды.
     prev_status = await db.promo_claim_boost(pool, order["id"], callback.from_user.id)
     if prev_status is None:
-        await callback.message.answer("⚠️ Заказ уже запущен или закрыт.")
+        await callback.message.answer("⚠️ Заказ уже запущен или закрыт.", reply_markup=terminal_kb())
         return
 
     link = f"https://t.me/{bot_rec['bot_username']}"

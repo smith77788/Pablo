@@ -29,7 +29,7 @@ from bot.states import EcosystemCreateFSM, EcosystemDnaFSM, EcosystemCloneFSM
 from bot.utils.subscription import require_plan, locked_text
 from bot.keyboards import subscription_locked_markup
 from services.logger import log_exc_swallow
-from bot.utils.op_helpers import safe_answer
+from bot.utils.op_helpers import safe_answer, terminal_kb
 
 log = logging.getLogger(__name__)
 router = Router()
@@ -1677,7 +1677,7 @@ async def cb_eco_clone_skip_region(
     except Exception as e:
         log.warning('handler error in cb_eco_clone_skip_region: %s', e)
         await callback.message.edit_text(
-            f"❌ Ошибка: {html.escape(str(e)[:100])}", parse_mode="HTML"
+            f"❌ Ошибка: {html.escape(str(e)[:100])}", parse_mode="HTML", reply_markup=terminal_kb()
         )
 
 

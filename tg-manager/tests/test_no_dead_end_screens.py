@@ -157,3 +157,62 @@ def test_every_user_imports_helper():
         if not re.search(r"^from bot\.utils\.op_helpers import [^\n]*\bterminal_kb\b", src, re.M):
             missing.append(p.name)
     assert not missing, f"terminal_kb используется без импорта: {missing}"
+
+
+# ── Короткие финальные экраны после нажатия кнопки ──────────────────────────
+# Порог «короче 60 символов — это тост» пропускал настоящие экраны:
+# `callback.message.edit_text("Поиск отменён.")` ЗАМЕНЯЕТ меню, на котором
+# человек нажал кнопку, и снимает с него все кнопки. Короткий текст — не
+# повод: тупик тот же, что у длинного. Ввод с клавиатуры (message.answer в
+# мастере) сюда не входит: там экран с кнопками остаётся выше.
+_SHORT_TERMINAL = _TERMINAL_MARKERS + (
+    "отменен", "отменён", "Отменено", "не найден", "ничего не найдено", "не создан",
+)
+
+
+def _short_callback_dead_ends() -> list[str]:
+    found: list[str] = []
+    for path in sorted(HANDLERS.glob("*.py")):
+        src = path.read_text(encoding="utf-8")
+        try:
+            tree = ast.parse(src)
+        except SyntaxError:
+            continue
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call) or not isinstance(node.func, ast.Attribute):
+                continue
+            if node.func.attr not in ("edit_text", "answer"):
+                continue
+            if ast.unparse(node.func.value) != "callback.message":
+                continue
+            if "reply_markup" in {kw.arg for kw in node.keywords}:
+                continue
+            text = ast.unparse(node.args[0]) if node.args else ""
+            if not any(m in text for m in _SHORT_TERMINAL) or _PROMPT.search(text):
+                continue
+            found.append(f"{path.name}:{node.lineno}: {text[:60]}")
+    return found
+
+
+def test_no_short_dead_end_after_button():
+    found = _short_callback_dead_ends()
+    assert not found, (
+        "экран после нажатия кнопки без кнопок:\n" + "\n".join(f"  {x}" for x in found[:20])
+    )
+
+
+def test_short_detector_sees_a_planted_dead_end(tmp_path):
+    """Пробник: детектор обязан видеть заведомый тупик, иначе зелёный — ложь."""
+    planted = tmp_path / "planted.py"
+    planted.write_text(
+        "async def h(callback):\n"
+        "    await callback.message.edit_text('Поиск отменён.')\n"
+        "    await callback.message.edit_text('✅ Ок', reply_markup=kb)\n",
+        encoding="utf-8",
+    )
+    globals()["HANDLERS"], old = tmp_path, HANDLERS
+    try:
+        found = _short_callback_dead_ends()
+    finally:
+        globals()["HANDLERS"] = old
+    assert len(found) == 1 and "planted.py:2" in found[0], found

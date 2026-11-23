@@ -18,7 +18,7 @@ from bot.keyboards import (
 )
 from bot.utils.subscription import require_plan, locked_text
 from database import db
-from bot.utils.op_helpers import safe_answer
+from bot.utils.op_helpers import safe_answer, terminal_kb
 
 log = logging.getLogger(__name__)
 router = Router()
@@ -484,7 +484,7 @@ async def cb_pick_winner(
     await safe_answer(callback)
     variants = await db.get_experiment_variants(pool, callback_data.exp_id)
     if not variants:
-        await callback.message.edit_text("❌ Нет вариантов.", parse_mode="HTML")
+        await callback.message.edit_text("❌ Нет вариантов.", parse_mode="HTML", reply_markup=terminal_kb())
         return
     exp = await db.get_experiment(pool, callback_data.exp_id)
     safe_name = _html_escape(exp["name"])

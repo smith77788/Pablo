@@ -67,7 +67,7 @@ async def cb_search_open(callback: CallbackQuery, state: FSMContext) -> None:
 async def cb_search_cancel(callback: CallbackQuery, state: FSMContext) -> None:
     await safe_answer(callback)
     await state.clear()
-    await callback.message.edit_text("Поиск отменён.")
+    await callback.message.edit_text("Поиск отменён.", reply_markup=terminal_kb())
 
 
 @router.message(GlobalSearchFSM.waiting_query, F.text)
@@ -101,20 +101,20 @@ async def msg_search_query(message: Message, state: FSMContext, pool: asyncpg.Po
             timeout=40,
         )
     except asyncio.TimeoutError:
-        await status.edit_text("⚠️ Аккаунт не ответил за 40с — проверьте прокси/сессию.")
+        await status.edit_text("⚠️ Аккаунт не ответил за 40с — проверьте прокси/сессию.", reply_markup=terminal_kb())
         return
     except Exception as exc:
         log.exception("global_search uid=%s q=%r", message.from_user.id, query)
-        await status.edit_text(f"⚠️ Ошибка: {owner_error(exc)}")
+        await status.edit_text(f"⚠️ Ошибка: {owner_error(exc)}", reply_markup=terminal_kb())
         return
 
     if not res.get("ok"):
-        await status.edit_text(f"⚠️ {html.escape(str(res.get('error') or 'Поиск не выполнен'))}")
+        await status.edit_text(f"⚠️ {html.escape(str(res.get('error') or 'Поиск не выполнен'))}", reply_markup=terminal_kb())
         return
 
     results = res.get("results") or []
     if not results:
-        await status.edit_text(f"🔎 По запросу «{html.escape(query)}» ничего не найдено.")
+        await status.edit_text(f"🔎 По запросу «{html.escape(query)}» ничего не найдено.", reply_markup=terminal_kb())
         return
 
     lines = [f"🔎 <b>Результаты по «{html.escape(query)}»</b>\n"]
