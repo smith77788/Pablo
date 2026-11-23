@@ -139,3 +139,16 @@ def test_smart_tags(monkeypatch):
     seen = _spy(monkeypatch, st, "_match_all", None)
     _run(st.apply_smart_tags(_Pool(), 1))
     _off_main(seen)
+
+
+def test_country_filter(monkeypatch):
+    """Фильтр «страна по номеру» разбирает телефоны всей базы — в потоке."""
+    from services.contacts_hub import bulk_ops_engine as b
+
+    class _P(_Pool):
+        async def fetch(self, q, *a):
+            return [{"id": "x", "phones": '["+79990000000"]'}]
+
+    seen = _spy(monkeypatch, b, "_ids_in_country", None)
+    _run(b.count_by_filter(_P(), 1, country="RU"))
+    _off_main(seen)
