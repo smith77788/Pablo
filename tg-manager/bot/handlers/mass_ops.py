@@ -47,7 +47,7 @@ from bot.utils.op_helpers import (
 
 from services import task_registry as _treg
 from database.db import fetch_bots
-from bot.utils.op_helpers import safe_answer
+from bot.utils.op_helpers import safe_answer, terminal_kb
 from bot.utils.owner_error import owner_error
 
 log = logging.getLogger(__name__)
@@ -536,7 +536,7 @@ async def fsm_mp_text_file(message: Message, state: FSMContext) -> None:
         downloaded = await message.bot.download_file(file_info.file_path)
         text = downloaded.read().decode("utf-8", errors="ignore").strip()
     except Exception as e:
-        await message.answer(f"⚠️ Не удалось прочитать файл: {owner_error(e)}")
+        await message.answer(f"⚠️ Не удалось прочитать файл: {owner_error(e)}", reply_markup=terminal_kb())
         return
     if not text:
         await message.answer("⚠️ Файл пустой.")
@@ -1884,7 +1884,7 @@ async def fsm_bulk_join_links_file(
         downloaded = await message.bot.download_file(file_info.file_path)
         raw = downloaded.read().decode("utf-8", errors="ignore")
     except Exception as e:
-        await message.answer(f"⚠️ Не удалось прочитать файл: {owner_error(e)}")
+        await message.answer(f"⚠️ Не удалось прочитать файл: {owner_error(e)}", reply_markup=terminal_kb())
         return
     links = [ln.strip() for ln in raw.splitlines() if ln.strip()]
     if not links:
@@ -2248,7 +2248,7 @@ async def fsm_bulk_leave_channels_file(
         downloaded = await message.bot.download_file(file_info.file_path)
         raw = downloaded.read().decode("utf-8", errors="ignore")
     except Exception as e:
-        await message.answer(f"⚠️ Не удалось прочитать файл: {owner_error(e)}")
+        await message.answer(f"⚠️ Не удалось прочитать файл: {owner_error(e)}", reply_markup=terminal_kb())
         return
     channels = [ln.strip() for ln in raw.splitlines() if ln.strip()]
     if not channels:

@@ -1243,7 +1243,7 @@ async def fsm_seo_feedback(
 
     if not chan_id:
         await state.clear()
-        await message.answer("⚠️ Сессия SEO истекла. Откройте меню заново.")
+        await message.answer("⚠️ Сессия SEO истекла. Откройте меню заново.", reply_markup=terminal_kb())
         return
 
     # Накапливаем фидбек
@@ -1487,7 +1487,7 @@ async def fsm_seo_username(
         log.warning("seo preferred_username: failed to fetch channel row")
         chan = None
     if not chan:
-        await message.answer("⚠️ Канал не найден.")
+        await message.answer("⚠️ Канал не найден.", reply_markup=terminal_kb())
         return
 
     try:

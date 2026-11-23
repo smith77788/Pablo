@@ -2821,7 +2821,7 @@ async def fsm_invite_usernames_file(
     except Exception as e:
         log.warning('handler error in fsm_invite_usernames_file: %s', e)
         await state.clear()
-        await message.answer(f"⚠️ Не удалось прочитать файл: {owner_error(e)}")
+        await message.answer(f"⚠️ Не удалось прочитать файл: {owner_error(e)}", reply_markup=terminal_kb())
         return
     usernames = _parse_username_list(raw)
     if not usernames:
@@ -2837,7 +2837,7 @@ async def fsm_invite_usernames(
     raw = (message.text or "").replace(",", "\n")
     usernames = [u.strip() for u in raw.split("\n") if u.strip()]
     if not usernames:
-        await message.answer("⚠️ Список пуст. Начните заново: /ops")
+        await message.answer("⚠️ Список пуст. Начните заново: /ops", reply_markup=terminal_kb())
         return
     await _show_invite_count_menu(usernames, message, state)
 
@@ -3127,7 +3127,7 @@ async def fsm_kick_user_id(
         pool, data.get("acc_id"), message.from_user.id
     )
     if not acc:
-        await message.answer("⚠️ Аккаунт не найден.")
+        await message.answer("⚠️ Аккаунт не найден.", reply_markup=terminal_kb())
         return
     from services import account_manager
 
@@ -3323,7 +3323,7 @@ async def fsm_botfather_username(
         )
         return
     if not accounts:
-        await message.answer("⚠️ Аккаунты не найдены. Начните заново: /ops")
+        await message.answer("⚠️ Аккаунты не найдены. Начните заново: /ops", reply_markup=terminal_kb())
         return
 
 
@@ -4621,7 +4621,7 @@ async def fsm_bulk_channel_id(
         accounts = []
 
     if not accounts:
-        await message.answer("⚠️ Нет выбранных аккаунтов. Начните заново: /ops")
+        await message.answer("⚠️ Нет выбранных аккаунтов. Начните заново: /ops", reply_markup=terminal_kb())
         return
 
     if op == "leave":
@@ -4688,7 +4688,7 @@ async def fsm_bulk_post_text(
             log_exc_swallow(log, "fsm_bulk_text: fetch accounts for bulk post")
             accounts = []
         if not accounts:
-            await message.answer("⚠️ Аккаунты не найдены. Начните заново: /ops")
+            await message.answer("⚠️ Аккаунты не найдены. Начните заново: /ops", reply_markup=terminal_kb())
             return
         total = len(accounts)
         bulk_access_hash = 0
@@ -4740,7 +4740,7 @@ async def fsm_bulk_post_text(
         await state.clear()
         acc = await db.get_account_for_telethon(pool, acc_id, message.from_user.id)
         if not acc:
-            await message.answer("⚠️ Аккаунт не найден. Начните заново: /ops")
+            await message.answer("⚠️ Аккаунт не найден. Начните заново: /ops", reply_markup=terminal_kb())
             return
         msg = await message.answer("⏳ Публикую...")
         from services import account_manager
@@ -4859,7 +4859,7 @@ async def fsm_join_invite_combined(
             log_exc_swallow(log, "fsm_bulk_invite: fetch account count for bulk join")
             count = None
         if not count:
-            await message.answer("⚠️ Аккаунты не найдены. Начните заново: /ops")
+            await message.answer("⚠️ Аккаунты не найдены. Начните заново: /ops", reply_markup=terminal_kb())
             return
         proxy_mode = data.get("bulk_proxy_mode", "bound")
         op_id = await operation_bus.submit(
@@ -4890,7 +4890,7 @@ async def fsm_join_invite_combined(
         pool, data.get("acc_id"), message.from_user.id
     )
     if not acc:
-        await message.answer("⚠️ Аккаунт не найден. Начните заново: /ops")
+        await message.answer("⚠️ Аккаунт не найден. Начните заново: /ops", reply_markup=terminal_kb())
         return
     msg = await message.answer("⏳ Вступаю...")
     from services.op_worker import write_op_audit as _op_audit
@@ -4960,7 +4960,7 @@ async def fsm_update_profile(
             log_exc_swallow(log, "fsm_bulk_value: fetch accounts for bulk update profiles")
             accounts = []
         if not accounts:
-            await message.answer("⚠️ Аккаунты не найдены.")
+            await message.answer("⚠️ Аккаунты не найдены.", reply_markup=terminal_kb())
             return
         total = len(accounts)
         msg = await message.answer(
@@ -4995,7 +4995,7 @@ async def fsm_update_profile(
             pool, data.get("acc_id"), message.from_user.id
         )
         if not acc:
-            await message.answer("⚠️ Аккаунт не найден.")
+            await message.answer("⚠️ Аккаунт не найден.", reply_markup=terminal_kb())
             return
         kb = _back_kb()
         if field == "username":
@@ -5052,7 +5052,7 @@ def _parse_username_list(raw: str) -> list[str]:
 async def fsm_bulk_dm_usernames_file(message: Message, state: FSMContext) -> None:
     doc = message.document
     if not doc:
-        await message.answer("⚠️ Документ не получен.")
+        await message.answer("⚠️ Документ не получен.", reply_markup=terminal_kb())
         return
     if doc.file_size and doc.file_size > 200_000:
         await message.answer("⚠️ Файл слишком большой. Максимум 200 КБ.")
@@ -5066,7 +5066,7 @@ async def fsm_bulk_dm_usernames_file(message: Message, state: FSMContext) -> Non
     except Exception as e:
         log.warning('handler error in fsm_bulk_dm_usernames_file: %s', e)
         await state.clear()
-        await message.answer(f"⚠️ Не удалось прочитать файл: {owner_error(e)}")
+        await message.answer(f"⚠️ Не удалось прочитать файл: {owner_error(e)}", reply_markup=terminal_kb())
         return
     usernames = _parse_username_list(raw)
     if not usernames:
@@ -5133,7 +5133,7 @@ async def fsm_bulk_dm_text(
     await state.clear()
 
     if not usernames or not selected_ids:
-        await message.answer("⚠️ Данные рассылки устарели. Начните заново: /ops")
+        await message.answer("⚠️ Данные рассылки устарели. Начните заново: /ops", reply_markup=terminal_kb())
         return
 
     try:
@@ -5149,7 +5149,7 @@ async def fsm_bulk_dm_text(
         log_exc_swallow(log, "fsm_bulk_dm_confirm: fetch accounts for bulk DM")
         accounts = []
     if not accounts:
-        await message.answer("⚠️ Аккаунты не найдены. Начните заново: /ops")
+        await message.answer("⚠️ Аккаунты не найдены. Начните заново: /ops", reply_markup=terminal_kb())
         return
 
     n_acc = len(accounts)
@@ -5200,7 +5200,7 @@ async def fsm_bulk_chan_value(
     await state.clear()
 
     if not selected_ids:
-        await message.answer("⚠️ Данные операции устарели. Начните заново: /ops")
+        await message.answer("⚠️ Данные операции устарели. Начните заново: /ops", reply_markup=terminal_kb())
         return
 
     # Validate username pattern
@@ -5821,7 +5821,7 @@ async def fsm_my_chans_post_text(
         log_exc_swallow(log, "fsm_post_to_channel: fetch account session")
         session_row = None
     if not session_row:
-        await message.answer("⚠️ Аккаунт не найден. Начните заново: /ops")
+        await message.answer("⚠️ Аккаунт не найден. Начните заново: /ops", reply_markup=terminal_kb())
         return
     from services import account_manager
 
@@ -6010,7 +6010,7 @@ async def fsm_cinv_channel_input(
     )
     accounts = await _get_accounts(pool, message.from_user.id)
     if not accounts:
-        await message.answer("⚠️ Нет подключённых аккаунтов. Добавьте через /accounts")
+        await message.answer("⚠️ Нет подключённых аккаунтов. Добавьте через /accounts", reply_markup=terminal_kb())
         await state.clear()
         return
     await state.set_state(ContactInviteFSM.choosing_accounts)

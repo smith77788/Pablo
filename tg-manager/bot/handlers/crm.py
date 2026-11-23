@@ -167,7 +167,7 @@ async def msg_global_tag_name(
         return
     await state.clear()
     if not await db.get_bot(pool, data.get("bot_id", 0), message.from_user.id):
-        await message.answer("❌ Бот не найден.")
+        await message.answer("❌ Бот не найден.", reply_markup=terminal_kb())
         return
     safe_tag = tag.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
     # Use user_id=0 as a sentinel to create a standalone tag definition.
@@ -747,7 +747,7 @@ async def msg_rule_name(
     # правило вставало в чужой бот, и тот отвечал подписчикам чужим текстом.
     if not await db.get_bot(pool, data.get("bot_id", 0), message.from_user.id):
         await state.clear()
-        await message.answer("❌ Бот не найден.")
+        await message.answer("❌ Бот не найден.", reply_markup=terminal_kb())
         return
     await state.clear()
     await db.add_automation_rule(

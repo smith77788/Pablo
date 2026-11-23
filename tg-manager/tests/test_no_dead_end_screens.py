@@ -216,3 +216,51 @@ def test_short_detector_sees_a_planted_dead_end(tmp_path):
     finally:
         globals()["HANDLERS"] = old
     assert len(found) == 1 and "planted.py:2" in found[0], found
+
+
+# ── Финальный ответ на сообщение ────────────────────────────────────────────
+# «⚠️ Нет доступных аккаунтов.», «❌ Бот не найден.», «Данные устарели.
+# Начните заново: /ops» — сценарий на этом кончается, а выход был только
+# командой. Подсказки повторного ввода («должно быть от 1 до 64 символов»,
+# «Попробуйте ещё раз:») сюда не входят: там бот ждёт следующее сообщение.
+_MSG_TERMINAL = re.compile(
+    r"Нет доступных|не найден|Начните заново|устарел|истекла|потеряна|Нет выбранных|"
+    r"Нет подключённых|Нет открытых|не получен|Ошибка|Не удалось|отменен|отменён"
+)
+_MSG_RETRY = re.compile(
+    r"Попробуйте (ещё раз|снова)\s*:|символ|должен|должна|должно|Формат|"
+    r"Введите|Отправьте|Пришлите|Укажите|:'$|:\"$"
+)
+
+
+def _message_dead_ends(root: Path) -> list[str]:
+    found = []
+    for path in sorted(root.glob("*.py")):
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        for c in ast.walk(tree):
+            if not (isinstance(c, ast.Call) and isinstance(c.func, ast.Attribute)
+                    and c.func.attr == "answer" and ast.unparse(c.func.value) == "message"):
+                continue
+            if "reply_markup" in {k.arg for k in c.keywords}:
+                continue
+            text = ast.unparse(c.args[0]) if c.args else ""
+            if _MSG_TERMINAL.search(text) and not _MSG_RETRY.search(text):
+                found.append(f"{path.name}:{c.lineno}: {text[:60]}")
+    return found
+
+
+def test_no_terminal_message_reply_without_exit():
+    found = _message_dead_ends(HANDLERS)
+    assert not found, "финальный ответ без кнопок:\n" + "\n".join(f"  {x}" for x in found[:20])
+
+
+def test_message_detector_sees_planted_dead_end(tmp_path):
+    (tmp_path / "planted.py").write_text(
+        "async def h(message):\n"
+        "    await message.answer('⚠️ Нет доступных аккаунтов.')\n"
+        "    await message.answer('⚠️ Название от 1 до 64 символов:')\n"
+        "    await message.answer('❌ Бот не найден.', reply_markup=kb)\n",
+        encoding="utf-8",
+    )
+    found = _message_dead_ends(tmp_path)
+    assert len(found) == 1 and found[0].startswith("planted.py:2"), found
