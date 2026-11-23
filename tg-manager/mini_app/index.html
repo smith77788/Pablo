@@ -8307,12 +8307,12 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
         <div class="field-note">Человекоподобная пауза перед отправкой (0–300)</div>
       </div>
       <div class="field">
-        <label>Рабочие часы (UTC)</label>
+        <label>Рабочие часы (по вашему поясу)</label>
         <div style="display:flex;gap:8px">
           <input type="number" id="arFromHour" min="0" max="23" placeholder="с (0–23)" style="flex:1">
           <input type="number" id="arToHour" min="0" max="23" placeholder="по (0–23)" style="flex:1">
         </div>
-        <div class="field-note">Вне окна правило молчит. Пусто = круглосуточно. Через полночь: с 22 по 6</div>
+        <div class="field-note">Вне окна правило молчит. Пусто = круглосуточно. Через полночь: с 22 по 6. Часы — по поясу из настроек уведомлений (по умолчанию московское время)</div>
       </div>
     </details>
     <div class="field-err" id="arErr"></div>
@@ -8424,9 +8424,9 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
       <textarea id="schText" rows="5" maxlength="4096" placeholder="Текст рассылки…"></textarea>
     </div>
     <div class="field">
-      <label>Дата и время (UTC)</label>
+      <label>Дата и время (по вашим часам)</label>
       <input type="datetime-local" id="schDate">
-      <div class="field-note">Время UTC+0 — сервер отправит точно в указанное время</div>
+      <div class="field-note">Время вашего устройства — пересчитывать в UTC не нужно</div>
     </div>
     <div class="field">
       <label>Повтор</label>
@@ -11578,7 +11578,7 @@ async function loadOrganismPulse() {
         <span style="font-size:18px">🫀</span>
         <span style="font-size:14px;font-weight:700">Пульс</span>
       </div>
-      <div style="font-size:12px;color:var(--hint);line-height:1.5">Не удалось загрузить сводку: ${esc((e && e.message) || 'нет связи с сервером')}.</div>
+      <div style="font-size:12px;color:var(--hint);line-height:1.5">Не удалось загрузить сводку: ${esc(errRu(e, 'нет связи с сервером'))}.</div>
       <button class="err-retry" onclick="loadOrganismPulse()">↺ Повторить</button>
     </div>`;
   }
@@ -12896,7 +12896,7 @@ function renderArList(items) {
     if (r.fired!=null) meta.push(`✅ ${num(r.fired)}×`);
     if (r.priority) meta.push(`⭐ ${r.priority}`);
     if (r.reply_delay_sec) meta.push(`⏱ ${r.reply_delay_sec}с`);
-    if (r.active_from_hour!=null && r.active_to_hour!=null) meta.push(`🕐 ${r.active_from_hour}–${r.active_to_hour}h`);
+    if (r.active_from_hour!=null && r.active_to_hour!=null) meta.push(`🕐 ${r.active_from_hour}–${r.active_to_hour} ч`);
     const metaHtml = meta.length?`<div class="li-sub" style="color:var(--hint);font-size:12px">${meta.join(' · ')}</div>`:'';
     return `<div class="li">
       <div class="ava ava-blue">💬</div>
@@ -14486,10 +14486,12 @@ function renderChLoadMore(shownCount) {
   const loaded = CUR_CHANNELS.length;
   if (!loaded || CH_OFFSET >= CH_TOTAL) { box.innerHTML=''; return; }
   const filtering = !!(CH_SEARCH || CH_FILTER !== 'all');
-  // Поиск идёт по загруженным: «ничего не найдено» при неполном списке — не
-  // ответ, а половина ответа. Говорим, сколько именно просмотрено.
+  // Поиск и срез применяет сервер (_chQuery), и CH_TOTAL — это уже число
+  // НАЙДЕННЫХ по всем каналам. Прежняя подпись про поиск «по загруженным»
+  // осталась от поиска по загруженной странице и говорила неправду: будто
+  // остальные каналы не просмотрены и искать надо, догружая страницы.
   const note = filtering
-    ? `Найдено ${shownCount!=null?shownCount:0} среди загруженных ${loaded} из ${CH_TOTAL}.`
+    ? `Найдено ${CH_TOTAL} по всем каналам.`
     : '';
   box.innerHTML = (note ? `<div class="lst-more-note">${esc(note)}</div>` : '')
     + `<button class="btn btn-s" onclick="loadMoreChannels()" style="width:100%;font-size:13px;padding:10px">Загрузить ещё · показано ${loaded} из ${CH_TOTAL}</button>`;
@@ -15414,7 +15416,7 @@ async function cancelSelectedOps() {
     try { await api('/api/miniapp/operation/'+id+'/cancel', {method:'POST'}); ok++; _opProgressMarkCancelled(id); } catch(e) { lastErr = e; }
   }
   // Недошедшие видны в итоге («N из M») вместе с причиной последнего отказа.
-  toast(ok === ids.length ? `⚠️ Отменено: ${ok}` : `⚠️ Отменено ${ok} из ${ids.length}${lastErr && lastErr.message ? ': ' + lastErr.message : ''}`);
+  toast(ok === ids.length ? `⚠️ Отменено: ${ok}` : `⚠️ Отменено ${ok} из ${ids.length}${lastErr ? ': ' + errRu(lastErr, 'ошибка') : ''}`);
   OPS_SEL.clear(); loadOps();
 }
 async function retrySelectedOps() {
@@ -15425,7 +15427,7 @@ async function retrySelectedOps() {
   for (const id of ids) {
     try { await api('/api/miniapp/operation/'+id+'/retry', {method:'POST'}); ok++; } catch(e) { lastErr = e; }
   }
-  toast(ok === ids.length ? `✅ Поставлено повторно: ${ok}` : `⚠️ Поставлено ${ok} из ${ids.length}${lastErr && lastErr.message ? ': ' + lastErr.message : ''}`);
+  toast(ok === ids.length ? `✅ Поставлено повторно: ${ok}` : `⚠️ Поставлено ${ok} из ${ids.length}${lastErr ? ': ' + errRu(lastErr, 'ошибка') : ''}`);
   OPS_SEL.clear(); loadOps();
 }
 let _opsSearchT = null;
@@ -16850,6 +16852,9 @@ async function loadSchedules() {
       return;
     }
     const statIco = {pending:'⏳',done:'✅',cancelled:'❌',missed:'⚠️'};
+    // Время печатается в часовом поясе устройства (toLocaleString), а подпись
+    // рядом утверждала «UTC»: в Киеве рассылка на 12:00 выглядела как
+    // назначенная на 12:00 по Гринвичу, то есть на два часа позже.
     txt('schList', items.map(s=>{
       const dt = new Date(s.execute_at).toLocaleString('ru-RU',{dateStyle:'short',timeStyle:'short'});
       const [bc,bl] = stb(s.status);
@@ -16859,7 +16864,7 @@ async function loadSchedules() {
         <div style="display:flex;align-items:center;gap:10px">
           <div class="ava ava-orange">${statIco[s.status]||'⏰'}</div>
           <div class="li-body">
-            <div class="li-name">${dt} UTC</div>
+            <div class="li-name">${dt}</div>
             <div class="li-sub">${esc(preview)}${preview.length===60?'…':''}</div>
           </div>
           <div style="display:flex;align-items:center;gap:6px">
@@ -16916,6 +16921,7 @@ async function saveSchedule() {
 }
 
 async function cancelSchedule(id) {
+  if (!await askConfirm('Отменить эту запланированную рассылку? Вернуть её нельзя — только запланировать заново.')) return;
   try {
     await api('/api/miniapp/schedule/'+id+'/cancel', {method:'POST'});
     toast('⚠️ Отменено'); await loadSchedules();
