@@ -42,6 +42,8 @@ from bot.utils.op_helpers import safe_answer, terminal_kb
 from bot.utils.owner_error import owner_error
 
 log = logging.getLogger(__name__)
+from bot.utils.fmt import num_ru  # noqa: E402
+
 router = Router()
 
 _NOTIFY_NEW_USERS = True  # toggle via /admin toggle_notify; loaded from DB at startup
@@ -1862,12 +1864,12 @@ async def _adm_system_stats(callback: CallbackQuery, pool: asyncpg.Pool) -> None
 
     await callback.message.edit_text(
         "📊 <b>Системная статистика</b>\n\n"
-        f"💬 Сообщений отправлено: <b>{int(total_msgs):,}</b>\n"
-        f"📢 Рассылок всего: <b>{int(total_bc):,}</b>\n"
-        f"📨 Relay-диалогов: <b>{int(total_relay):,}</b>\n"
-        f"🔗 Цепочек: <b>{int(total_funnels):,}</b>\n"
-        f"⏰ Запланировано: <b>{int(total_schedules):,}</b>\n"
-        f"👥 Записей в bot_users: <b>{int(db_users):,}</b>\n\n"
+        f"💬 Сообщений отправлено: <b>{num_ru(int(total_msgs))}</b>\n"
+        f"📢 Рассылок всего: <b>{num_ru(int(total_bc))}</b>\n"
+        f"📨 Relay-диалогов: <b>{num_ru(int(total_relay))}</b>\n"
+        f"🔗 Цепочек: <b>{num_ru(int(total_funnels))}</b>\n"
+        f"⏰ Запланировано: <b>{num_ru(int(total_schedules))}</b>\n"
+        f"👥 Записей в bot_users: <b>{num_ru(int(db_users))}</b>\n\n"
         f"🌐 Режим «Роя»: <b>{mode.upper()}</b>",
         parse_mode="HTML",
         reply_markup=_back_kb(),

@@ -113,3 +113,10 @@ def test_no_ui_string_is_entirely_english():
                 if re.search(r"[A-Za-z]{3,}", rest) and not re.search(r"[А-Яа-яЁё]", txt):
                     bad.append(f"{path.name}:{c.lineno}: {txt[:50]!r}")
     assert not bad, "строка интерфейса целиком по-английски:\n" + "\n".join(bad)
+
+
+def test_user_named_things_are_escaped_in_html():
+    """Имя шаблона/получателя с «<» или «&» роняло HTML-ответ Telegram."""
+    assert "«{tpl['name']}»" not in _src("asset_templates.py")
+    gt = _src("gift_transfer.py")
+    assert "<b>{recipient['name']}</b>" not in gt and "<b>{rec['name']}</b>" not in gt

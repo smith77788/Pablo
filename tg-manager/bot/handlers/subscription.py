@@ -78,6 +78,8 @@ _PAY_SETTING_LABELS: dict[str, str] = {
     "CARD_PER_USD": "📈 Единиц этой валюты за $1",
 }
 
+from bot.utils.fmt import num_ru  # noqa: E402
+
 router = Router()
 
 
@@ -407,7 +409,7 @@ async def _build_menu_text_and_kb(pool: asyncpg.Pool, user_id: int, promo_disc: 
     if today_ops > 5:
         social_lines.append(f"⚡ {today_ops} операций выполнено сегодня")
     elif weekly_ops > 20:
-        wops = f"{weekly_ops:,}".replace(",", " ")
+        wops = f"{num_ru(weekly_ops)}".replace(",", " ")
         social_lines.append(f"⚡ {wops} операций за 7 дней")
     social_block = ("\n<i>" + " · ".join(social_lines) + "</i>\n") if social_lines else "\n"
 

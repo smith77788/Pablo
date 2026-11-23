@@ -54,6 +54,8 @@ from services.logger import log_exc_swallow
 from bot.utils.op_helpers import safe_answer
 
 log = logging.getLogger(__name__)
+from bot.utils.fmt import num_ru  # noqa: E402
+
 router = Router(name="reg_checker")
 
 _HELP_TEXT = (
@@ -447,7 +449,7 @@ async def cb_reg_history(
         scam_mark = " ⛔" if row.get("scam") else ""
         verified_mark = " ✅" if row.get("verified") else ""
         pc = row.get("participants_count")
-        participants_s = f" · {pc:,}👥".replace(",", " ") if pc else ""
+        participants_s = f" · {num_ru(pc)}👥".replace(",", " ") if pc else ""
         lines.append(
             f"{icon} {name}{verified_mark}{scam_mark}{participants_s} — "
             f"{date_s} {method_mark}"

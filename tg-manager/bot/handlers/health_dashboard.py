@@ -39,6 +39,8 @@ from database.db import fetch_bots
 from bot.utils.op_helpers import safe_answer
 
 log = logging.getLogger(__name__)
+from bot.utils.fmt import num_ru  # noqa: E402
+
 router = Router()
 
 
@@ -849,7 +851,7 @@ async def cb_health_bots(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
             if isinstance(result, Exception) or not result[0]:
                 lines.append(f"❌ @{name} — токен недействителен")
             else:
-                lines.append(f"✅ @{name} — активен | {user_count:,} пользователей")
+                lines.append(f"✅ @{name} — активен | {num_ru(user_count)} пользователей")
 
     kb = _back_kb()
     kb.adjust(1)

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import html as _html
 from aiogram import Router, F
 from aiogram.types import (
     Message,
@@ -630,7 +631,7 @@ async def cb_use_recipient(callback: CallbackQuery, state: FSMContext, pool):
 
     await callback.message.edit_text(
         "💳 <b>Источник оплаты</b>\n\n"
-        f"Получатель: <b>{recipient['name']}</b>\n\n"
+        f"Получатель: <b>{_html.escape(str(recipient['name']))}</b>\n\n"
         "Выберите способ оплаты:",
         reply_markup=kb.as_markup(),
     )
@@ -1074,7 +1075,7 @@ async def cb_edit_recipient(callback: CallbackQuery, state: FSMContext, pool):
     main_admin = " · 👑 главный админ" if rec.get("is_main_admin") else ""
     uid_line = f"\n🆔 user_id: <code>{rec['user_id']}</code>" if rec.get("user_id") else ""
     await callback.message.edit_text(
-        f"👤 <b>{rec['name']}</b>{main_admin}\n"
+        f"👤 <b>{_html.escape(str(rec['name']))}</b>{main_admin}\n"
         f"📎 {rec['username'] or 'нет @username'}{uid_line}",
         reply_markup=kb.as_markup(),
     )

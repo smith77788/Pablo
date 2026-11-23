@@ -27,6 +27,8 @@ from services.logger import log_exc_swallow
 log = logging.getLogger(__name__)
 from bot.utils.op_helpers import terminal_kb  # noqa: E402
 
+from bot.utils.fmt import num_ru  # noqa: E402
+
 router = Router()
 
 
@@ -253,7 +255,7 @@ async def cb_inviter_from_run(
     await state.set_state(InviterFSM.group)
     await _edit(
         callback,
-        f"👥 <b>Инвайт базы #{run_id}</b> ({int(count):,} чел.)\n\n"
+        f"👥 <b>Инвайт базы #{run_id}</b> ({num_ru(int(count))} чел.)\n\n"
         "Введите @username или ссылку группы, <b>куда</b> добавляем:\n\n"
         "<i>Аккаунты должны уже быть участниками этой группы.</i>",
         _cancel_kb(),
@@ -378,9 +380,9 @@ async def _inv_offer_gender(
         kb = InlineKeyboardBuilder()
         kb.button(text="👥 Все", callback_data=InviterCb(action="gender", item="all"))
         if m_cnt:
-            kb.button(text=f"👨 Только муж. ({m_cnt:,})", callback_data=InviterCb(action="gender", item="m"))
+            kb.button(text=f"👨 Только муж. ({num_ru(m_cnt)})", callback_data=InviterCb(action="gender", item="m"))
         if f_cnt:
-            kb.button(text=f"👩 Только жен. ({f_cnt:,})", callback_data=InviterCb(action="gender", item="f"))
+            kb.button(text=f"👩 Только жен. ({num_ru(f_cnt)})", callback_data=InviterCb(action="gender", item="f"))
         kb.adjust(1)
         await _edit(
             callback,

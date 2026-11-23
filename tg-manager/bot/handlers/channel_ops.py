@@ -128,6 +128,8 @@ def _pacing_kb(current: str) -> InlineKeyboardBuilder:
 from database import db
 
 log = logging.getLogger(__name__)
+from bot.utils.fmt import num_ru  # noqa: E402
+
 router = Router()
 
 
@@ -4928,7 +4930,7 @@ async def fsm_join_invite_combined(
         await msg.edit_text(
             f"✅ <b>Вступил в канал!</b>\n\n"
             f"Название: <b>{title}</b>\n"
-            f"Участников: <b>{members:,}</b>",
+            f"Участников: <b>{num_ru(members)}</b>",
             parse_mode="HTML",
             reply_markup=kb.as_markup(),
         )
@@ -5651,7 +5653,7 @@ async def _show_my_chans_page(
     for ch in chunk:
         ch_type = "📢" if ch.get("type") == "channel" else "👥"
         uname = f" @{ch['username']}" if ch.get("username") else ""
-        members = f" · {ch['members']:,}" if ch.get("members") else ""
+        members = f" · {num_ru(ch['members'])}" if ch.get("members") else ""
         label = f"{ch_type} {(ch.get('title') or '')[:28]}{uname}{members}"
         kb.button(
             text=label,
@@ -6189,7 +6191,7 @@ async def cb_cinv_proceed(
         f"👥 <b>Подтверждение инвайта</b>\n\n"
         f"Канал: <b>{channel_display}</b>\n"
         f"Аккаунтов: <b>{len(acc_rows)}</b>\n"
-        f"Уникальных контактов: <b>{len(unique_ids):,}</b>\n\n"
+        f"Уникальных контактов: <b>{num_ru(len(unique_ids))}</b>\n\n"
         f"⏱ Примерное время: ~{est_min} мин.\n"
         f"Процесс запустится в фоне, уведомление придёт по завершении.",
         parse_mode="HTML",
@@ -6647,7 +6649,7 @@ async def _cinv_bg_inner(
     await _upd(
         f"⚙️ <b>Инвайт · {_ch_disp}</b>\n\n"
         f"{_join_done}"
-        f"✅ Контактов: <b>{len(identifiers):,}</b> ({len(contacts_map)} уник.)\n"
+        f"✅ Контактов: <b>{num_ru(len(identifiers))}</b> ({len(contacts_map)} уник.)\n"
         f"📨 <b>Шаг {_invite_step}/{_total_steps}:</b> Рассылаю инвайты ({_n_accs} аккаунтов)..."
     )
 
@@ -6708,7 +6710,7 @@ async def _cinv_bg_inner(
     await _upd(
         f"✅ <b>Инвайт завершён!</b>\n\n"
         f"Канал: <b>{_ch_disp}</b>\n"
-        f"Контактов: <b>{len(identifiers):,}</b> · приглашено: <b>{total_invited}</b> · ошибок: <b>{total_failed}</b>"
+        f"Контактов: <b>{num_ru(len(identifiers))}</b> · приглашено: <b>{total_invited}</b> · ошибок: <b>{total_failed}</b>"
         + (f"\n⏸ Не дошла очередь: <b>{skipped_by_cap + _untried[0]}</b> — лимиты аккаунтов "
            "на сегодня или пауза Telegram. Запустите ещё раз позже: уже приглашённым "
            "повторно не придёт." if skipped_by_cap + _untried[0] else "")

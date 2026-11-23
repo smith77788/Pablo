@@ -22,6 +22,8 @@ from services.logger import log_exc_swallow
 from bot.utils.op_helpers import safe_answer, terminal_kb
 
 log = logging.getLogger(__name__)
+from bot.utils.fmt import num_ru  # noqa: E402
+
 router = Router()
 
 
@@ -333,7 +335,7 @@ async def cb_seo_analyze(
         f"  📄 Описание: {len(description or '')} / 512 симв.",
         f"  📃 Краткое: {len(short_desc or '')} / 120 симв.",
         f"  🤖 Команд: {len(commands or [])}",
-        f"  👥 Аудитория: {int(audience):,} чел.",
+        f"  👥 Аудитория: {num_ru(int(audience))} чел.",
     ]
     if tips:
         lines.append("\n<b>Что улучшить:</b>")
@@ -546,7 +548,7 @@ def _chan_seo_score(
         )
     elif members < 1_000:
         tips.append(
-            f"👥 Растущий канал! Цель — 1 000+ подписчиков (сейчас {members:,})"
+            f"👥 Растущий канал! Цель — 1 000+ подписчиков (сейчас {num_ru(members)})"
         )
 
     return min(score, 100), tips
@@ -876,7 +878,7 @@ async def cb_seo_chan_analyze(
         f"  📄 Описание: {len(about)}/255 симв."
         + (" ✅" if len(about) >= 150 else " ⚠️ мало"),
         uname_line,
-        f"  👥 Подписчиков: {members:,}",
+        f"  👥 Подписчиков: {num_ru(members)}",
     ]
     if not username:
         lines.append(
@@ -1005,7 +1007,7 @@ async def cb_seo_chan_export_txt(
         f"Название: {title} ({len(title)}/50 симв.)",
         f"Username: {'@' + username if username else '(не задан)'}",
         f"Описание: {len(about)}/255 симв.",
-        f"Подписчиков: {members:,}",
+        f"Подписчиков: {num_ru(members)}",
     ]
     if tips:
         lines.append("")
@@ -2089,7 +2091,7 @@ async def cb_seo_preview(
         audience = 0
 
     uname_line = f"@{uname}" if uname else "⚠️ username не задан"
-    aud_str = f"{int(audience):,}" if int(audience) >= 1000 else str(int(audience))
+    aud_str = f"{num_ru(int(audience))}" if int(audience) >= 1000 else str(int(audience))
     short_preview = (
         (short_desc[:72] + "…") if len(short_desc or "") > 72 else (short_desc or "")
     )
@@ -2204,7 +2206,7 @@ async def cb_seo_chan_preview(
     title = chan.get("title") or "Канал"
     uname = chan.get("username") or ""
     uname_line = f"@{uname}" if uname else "⚠️ без @username"
-    members_line = f"{members:,} подписчиков" if members else "подписчики скрыты"
+    members_line = f"{num_ru(members)} подписчиков" if members else "подписчики скрыты"
     if about.strip():
         about_snippet = html.escape(about.strip()[:100])
         about_line = f"│ <i>{about_snippet}{'…' if len(about.strip()) > 100 else ''}</i>"

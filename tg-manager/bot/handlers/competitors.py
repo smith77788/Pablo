@@ -17,6 +17,8 @@ from services.logger import log_exc_swallow
 from bot.utils.owner_error import owner_error
 
 log = logging.getLogger(__name__)
+from bot.utils.fmt import num_ru  # noqa: E402
+
 router = Router()
 
 
@@ -24,13 +26,13 @@ def _members_trend(current: int | None, previous: int | None) -> str:
     """Возвращает стрелку тренда подписчиков и дельту."""
     if current is None:
         return "?"
-    base = f"{current:,}"
+    base = f"{num_ru(current)}"
     if previous is None or previous == current:
         return base
     delta = current - previous
     if delta > 0:
-        return f"{base} ↗️ (+{delta:,})"
-    return f"{base} ↘️ ({delta:,})"
+        return f"{base} ↗️ (+{num_ru(delta)})"
+    return f"{base} ↘️ ({num_ru(delta)})"
 
 
 @router.callback_query(CompCb.filter(F.action == "menu"))

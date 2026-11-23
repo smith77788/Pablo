@@ -22,6 +22,8 @@ from services import bot_api
 from bot.utils.op_helpers import safe_answer, terminal_kb
 
 log = logging.getLogger(__name__)
+from bot.utils.fmt import num_ru  # noqa: E402
+
 router = Router()
 
 # ── Helpers ───────────────────────────────────────────────────────────────
@@ -1049,7 +1051,7 @@ async def cb_factory_stats(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
         f"📊 <b>Статистика ботов</b>\n\n"
         f"Всего ботов: <b>{total_bots}</b>\n"
         f"Активных: <b>{active_bots}</b>\n"
-        f"Всего пользователей: <b>{total_users:,}</b>",
+        f"Всего пользователей: <b>{num_ru(total_users)}</b>",
         parse_mode="HTML",
         reply_markup=kb.as_markup(),
     )

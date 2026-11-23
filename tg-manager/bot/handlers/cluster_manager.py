@@ -24,6 +24,8 @@ from bot.utils.subscription import require_plan, locked_text
 from bot.utils.op_helpers import safe_answer
 
 log = logging.getLogger(__name__)
+from bot.utils.fmt import num_ru  # noqa: E402
+
 router = Router()
 
 
@@ -171,7 +173,7 @@ async def cb_cluster_stats(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
             lines.append(
                 f"🔗 <b>{_html.escape(row['cluster'])}</b>\n"
                 f"   Ботов: {row['bot_count']} | "
-                f"Пользователей: {row['total_users']:,}"
+                f"Пользователей: {num_ru(row['total_users'])}"
             )
         _cap_text_note(lines, rows, _shown_t, "записей")
 

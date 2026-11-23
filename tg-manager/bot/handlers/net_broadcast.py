@@ -24,6 +24,8 @@ from bot.utils.op_helpers import safe_answer, terminal_kb
 
 from bot.utils.owner_error import owner_error  # noqa: E402
 
+from bot.utils.fmt import num_ru  # noqa: E402
+
 router = Router()
 log = logging.getLogger(__name__)
 
@@ -96,7 +98,7 @@ async def cb_net_bc_cluster(
     await callback.message.edit_text(
         f"📢 <b>Рассылка по кластеру «{_html.escape(cluster_name)}»</b>\n\n"
         f"Ботов: <b>{len(bots)}</b> ({names})\n"
-        f"Аудитория: <b>{total_aud:,}</b>\n\n"
+        f"Аудитория: <b>{num_ru(total_aud)}</b>\n\n"
         "Напишите текст сообщения (HTML поддерживается):",
         parse_mode="HTML",
         reply_markup=kb.as_markup(),
@@ -137,7 +139,7 @@ async def cb_net_bc_target(
     await callback.message.edit_text(
         f"📢 <b>Сетевая рассылка</b>\n\n"
         f"Ботов: <b>{len(bots)}</b>\n"
-        f"Суммарная аудитория: <b>{total_aud:,}</b>\n\n"
+        f"Суммарная аудитория: <b>{num_ru(total_aud)}</b>\n\n"
         "Выберите цель рассылки:",
         parse_mode="HTML",
         reply_markup=net_broadcast_target_menu(),
@@ -168,7 +170,7 @@ def _build_bot_pick_kb(bots: list, selected: list[int]) -> object:
         aud = b.get("audience_count", 0)
         check = "✅ " if bid in selected else "☐ "
         kb.button(
-            text=f"{check}{label} ({aud:,} юз.)",
+            text=f"{check}{label} ({num_ru(aud)} юз.)",
             callback_data=NetBcCb(action="toggle_bot", bot_id=bid),
         )
     _cap_note(kb, bots, _shown, what="bot")
@@ -205,7 +207,7 @@ async def cb_net_bc_choose_bots(
     total = sum(b.get("audience_count", 0) for b in bots)
     await callback.message.edit_text(
         f"🤖 <b>Выбор ботов для рассылки</b>\n\n"
-        f"Выберите ботов (можно несколько). Суммарная аудитория: <b>{total:,}</b>\n\n"
+        f"Выберите ботов (можно несколько). Суммарная аудитория: <b>{num_ru(total)}</b>\n\n"
         "Нажмите на бота чтобы включить/выключить его в рассылку:",
         parse_mode="HTML",
         reply_markup=_build_bot_pick_kb(list(bots), []),
@@ -272,7 +274,7 @@ async def cb_net_bc_bots_confirmed(
     await callback.message.edit_text(
         f"📢 <b>Сетевая рассылка — выбранные боты</b>\n\n"
         f"Боты: <b>{names}</b>\n"
-        f"Аудитория: <b>{total_aud:,}</b>\n\n"
+        f"Аудитория: <b>{num_ru(total_aud)}</b>\n\n"
         "Напишите текст сообщения (HTML поддерживается):",
         parse_mode="HTML",
         reply_markup=kb.as_markup(),
@@ -292,11 +294,11 @@ async def cb_net_bc_segment(
 
     if segment == "all_each":
         total = sum(b.get("audience_count", 0) for b in bots)
-        desc = f"каждый бот → своей аудитории (итого ≈{total:,} отправок)"
+        desc = f"каждый бот → своей аудитории (итого ≈{num_ru(total)} отправок)"
     elif segment == "unique":
         users = await db.get_unique_network_users(pool, callback.from_user.id)
         total = len(users)
-        desc = f"уникальным пользователям сети ({total:,} юзеров)"
+        desc = f"уникальным пользователям сети ({num_ru(total)} юзеров)"
     else:
         desc = segment
 
@@ -354,11 +356,11 @@ async def msg_net_bc_text(
 
     if segment == "all_each":
         total = sum(b.get("audience_count", 0) for b in bots)
-        target_desc = f"каждый бот → своей аудитории ({total:,} отправок)"
+        target_desc = f"каждый бот → своей аудитории ({num_ru(total)} отправок)"
     elif segment == "unique":
         users = await db.get_unique_network_users(pool, message.from_user.id)
         total = len(users)
-        target_desc = f"{total:,} уникальных пользователей"
+        target_desc = f"{num_ru(total)} уникальных пользователей"
     elif segment == "cold_all":
         target_desc = "холодные (7–30 дн) по всей сети"
     elif segment == "lost_all":
@@ -376,7 +378,7 @@ async def msg_net_bc_text(
         )
         if len(chosen) > 3:
             names += f" +{len(chosen) - 3}"
-        target_desc = f"{len(chosen)} бот(ов): {names} ({total:,} юз.)"
+        target_desc = f"{len(chosen)} бот(ов): {names} ({num_ru(total)} юз.)"
     elif segment == "cluster":
         cluster_name = data.get("cluster_name", "")
         try:
@@ -393,7 +395,7 @@ async def msg_net_bc_text(
             log.exception("msg_net_bc_text: cluster_bots fetch failed")
             cluster_bots = []
         total = sum(b["audience_count"] for b in cluster_bots)
-        target_desc = f"кластер «{_html.escape(cluster_name)}» ({len(cluster_bots)} бот(ов), {total:,} юз.)"
+        target_desc = f"кластер «{_html.escape(cluster_name)}» ({len(cluster_bots)} бот(ов), {num_ru(total)} юз.)"
     else:
         target_desc = segment
 
@@ -579,7 +581,7 @@ async def cb_net_bc_confirm(
     await callback.message.edit_text(
         f"📢 <b>Сетевая рассылка поставлена в очередь!</b>\n\n"
         f"📢 Сегмент: <b>{segment_label}</b>\n"
-        f"👥 Получателей: <b>{total_users:,}</b>\n"
+        f"👥 Получателей: <b>{num_ru(total_users)}</b>\n"
         f"🆔 Операция: <code>#{op_id}</code>\n\n"
         "⏳ Рассылка выполняется в фоне через очередь операций.\n"
         "Прогресс можно отслеживать в «Очередь операций».",
