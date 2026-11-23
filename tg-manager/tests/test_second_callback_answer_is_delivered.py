@@ -42,6 +42,25 @@ def test_second_answer_with_text_becomes_a_message(monkeypatch):
     assert bot.send_message.await_args.args == (7, "Нет аккаунтов")
 
 
+def test_long_popup_is_cut_not_rejected(monkeypatch):
+    """Всплывашку длиннее 200 знаков Telegram отвергает целиком — режем."""
+    callback_answer_once.install()
+    sent = []
+    monkeypatch.setattr(callback_answer_once, "_ORIGINAL",
+                        lambda self, **kw: sent.append(kw.get("text")) or _done())
+    cb = _cb("q-long-popup").as_(MagicMock())
+    title = "Очень длинное название канала " * 10
+
+    asyncio.run(cb.answer(f"⚠️ Не удалось вступить в «{title}»", show_alert=True))
+    assert len(sent[0]) == 200 and sent[0].endswith("…")
+    assert sent[0].startswith("⚠️ Не удалось вступить")
+
+    sent.clear()
+    cb2 = _cb("q-short-popup").as_(MagicMock())
+    asyncio.run(cb2.answer("✅ Готово"))
+    assert sent == ["✅ Готово"]
+
+
 def test_install_is_idempotent():
     callback_answer_once.install()
     callback_answer_once.install()
