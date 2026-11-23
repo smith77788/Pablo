@@ -369,6 +369,7 @@ GET /api/miniapp/uch/contacts/{contact_id}/identity
 GET /api/miniapp/uch/contacts/{contact_id}/invite_history
 GET /api/miniapp/uch/contacts/{contact_id}/relationships
 GET /api/miniapp/uch/contacts/{contact_id}/rollback/{version_num}
+GET /api/miniapp/uch/contacts/{contact_id}/tg_profile
 GET /api/miniapp/uch/contacts/{contact_id}/timeline
 GET /api/miniapp/uch/contacts/{contact_id}/versions
 GET /api/miniapp/uch/crm/pipeline
@@ -738,6 +739,7 @@ HEAD /api/miniapp/uch/contacts/{contact_id}/identity
 HEAD /api/miniapp/uch/contacts/{contact_id}/invite_history
 HEAD /api/miniapp/uch/contacts/{contact_id}/relationships
 HEAD /api/miniapp/uch/contacts/{contact_id}/rollback/{version_num}
+HEAD /api/miniapp/uch/contacts/{contact_id}/tg_profile
 HEAD /api/miniapp/uch/contacts/{contact_id}/timeline
 HEAD /api/miniapp/uch/contacts/{contact_id}/versions
 HEAD /api/miniapp/uch/crm/pipeline

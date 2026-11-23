@@ -15,6 +15,7 @@ CRM, дубликаты, смарт-теги, массовые действия 
 """
 from __future__ import annotations
 
+import asyncio
 import json as _json
 import re
 import time
@@ -187,6 +188,39 @@ def setup_routes(app: web.Application, pool) -> None:
             return str(c["telegram_user_id"])
         return None
 
+    def _uch_ref_label(ref: str) -> str:
+        """Подпись получателя для операции: «@ник» или «ID 123» — голый ID с
+        собачкой выглядел как юзернейм и путал (будто бот пишет по нику)."""
+        return f"ID {ref}" if str(ref).isdigit() else f"@{ref}"
+
+    def _uch_dm_routing(res: dict, ref: str) -> dict:
+        """Подсказки адресации для ЛС по голому Telegram ID.
+
+        Telegram принимает сообщение пользователю только с access_hash, а он
+        свой у каждого аккаунта и есть лишь у того, кто человека «видел».
+        Поэтому: аккаунты-источники контакта идут в ротации первыми, а
+        сохранённый синком access_hash передаётся как подсказка (исполнитель
+        проверяет его перед отправкой)."""
+        out: dict = {}
+        pref = [int(s["account_id"]) for s in (res.get("sources") or [])
+                if s.get("account_id") and (s.get("status") or "active") == "active"]
+        if pref:
+            out["preferred_account_ids"] = pref
+        if str(ref).isdigit():
+            fp = (res.get("contact") or {}).get("digital_footprint")
+            if isinstance(fp, str):
+                try:
+                    fp = _json.loads(fp)
+                except (TypeError, ValueError):
+                    fp = None
+            ah = fp.get("access_hash") if isinstance(fp, dict) else None
+            try:
+                if ah:
+                    out["peer_hints"] = {str(ref): int(ah)}
+            except (TypeError, ValueError):
+                pass
+        return out
+
     def _uch_invite_target(c: dict) -> tuple[str | None, str | None]:
         """Кого приглашать: ('user', @username|id) или ('phone', номер).
 
@@ -231,15 +265,94 @@ def setup_routes(app: web.Application, pool) -> None:
             from services import operation_bus
             op_id = await operation_bus.submit(
                 pool, uid, "bulk_dm_adhoc",
-                {"account_ids": acc_ids, "usernames": [ref], "text": text, "delay": delay},
+                {"account_ids": acc_ids, "usernames": [ref], "text": text, "delay": delay,
+                 **_uch_dm_routing(res, ref)},
                 total_items=1,
-                label=f"ЛС контакту @{ref} × {len(acc_ids)} акк.")
+                label=f"ЛС контакту {_uch_ref_label(ref)} × {len(acc_ids)} акк.")
             return _json_resp({"ok": True, "op_id": op_id, "accounts": len(acc_ids)})
         except PermissionError as exc:
             return _err(str(exc) or "Требуется подписка", 403)
         except Exception:
             log.exception("uch_contact_message uid=%s", uid)
             return _err(_INTERNAL_ERROR, 500)
+
+    async def uch_contact_tg_profile(request: web.Request) -> web.Response:
+        """Профиль контакта в Telegram по его Telegram ID.
+
+        Кнопка «👤 Профиль» была ссылкой `tg://user?id=…`: внутри мини-аппа
+        такая ссылка не открывается, а Telegram-клиент владельца показывает
+        профиль только тех, кого сам уже видел. У контакта без @username и
+        телефона профиль, таким образом, не открывался никак. Здесь профиль
+        читает аккаунт флота, который человека видел (источники контакта —
+        первыми), и если у человека нашёлся @username — дописываем его в
+        карточку, после чего работает и обычная ссылка t.me."""
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        contact_id = request.match_info['contact_id']
+        # Мусор вместо uuid в адресе — «нет такого контакта», а не 500.
+        if not _UUID_RE.match(contact_id or ""):
+            return _err("Контакт не найден", 404)
+        from services.contacts_hub.repository import get_contact
+        res = await get_contact(pool, contact_id, uid)
+        if not res:
+            return _err("Контакт не найден", 404)
+        c = res["contact"]
+        tg_id = c.get("telegram_user_id")
+        if not tg_id:
+            return _err("У контакта нет Telegram ID — профиль открыть нечем", 400)
+        routing = _uch_dm_routing(res, str(tg_id))
+        hint = (routing.get("peer_hints") or {}).get(str(tg_id))
+        alive = await _alive_accounts(uid)
+        pref = [a for a in routing.get("preferred_account_ids", []) if a in alive]
+        order = pref + [a for a in alive if a not in pref]
+        if not order:
+            return _err("Нет активных аккаунтов, чтобы открыть профиль", 400)
+        from database import db as _db
+        from services import account_console
+        last_err = None
+        busy = tried = 0
+        # Не больше четырёх аккаунтов: каждый — живая сессия и прогрев диалогов.
+        for acc_id in order[:4]:
+            acc = await _db.get_account_for_telethon(pool, acc_id, uid)
+            if not acc or not acc.get("session_str"):
+                continue
+            tried += 1
+            try:
+                r = await asyncio.wait_for(
+                    account_console.get_user_profile(
+                        acc["session_str"], dict(acc), int(tg_id),
+                        access_hash=hint, pool=pool),
+                    timeout=90)
+            except asyncio.TimeoutError:
+                last_err = "Аккаунт не ответил вовремя — проверьте прокси/сессию"
+                continue
+            if r.get("ok"):
+                prof = r["profile"]
+                found = (prof.get("username") or "").lstrip("@")
+                if found and not (c.get("username") or "").strip():
+                    try:
+                        await pool.execute(
+                            "UPDATE unified_contacts SET username=$1, updated_at=NOW() "
+                            "WHERE id=$2 AND owner_id=$3 "
+                            "AND (username IS NULL OR username='')",
+                            found, contact_id, uid)
+                    except Exception:
+                        log.warning("uch_contact_tg_profile: ник не записан", exc_info=True)
+                return _json_resp({"ok": True, "profile": prof, "account_id": acc_id})
+            if r.get("code") == "busy":
+                busy += 1
+            elif r.get("code") != "unresolved":
+                last_err = r.get("error") or last_err
+        if tried and busy == tried:
+            return _err("Аккаунты заняты другими операциями — попробуйте через минуту", 409)
+        if last_err:
+            return _err(last_err, 400)
+        return _err(
+            "Ни один аккаунт не знает этого пользователя по ID: у него нет "
+            "@username и телефона, а общих чатов/переписки с аккаунтами нет. "
+            "Telegram не открывает профиль по голому ID — нужен общий чат, "
+            "@username или телефон.", 404)
 
     async def uch_contact_media(request: web.Request) -> web.Response:
         """Отправить контакту МЕДИА (фото/видео/док) с подписью выбранными
@@ -302,9 +415,10 @@ def setup_routes(app: web.Application, pool) -> None:
             op_id = await operation_bus.submit(
                 pool, uid, "bulk_dm_adhoc",
                 {"account_ids": acc_ids, "usernames": [ref], "text": caption,
-                 "media_path": path, "media_filename": filename, "delay": 30},
+                 "media_path": path, "media_filename": filename, "delay": 30,
+                 **_uch_dm_routing(res, ref)},
                 total_items=1,
-                label=f"Медиа контакту @{ref} × {len(acc_ids)} акк.")
+                label=f"Медиа контакту {_uch_ref_label(ref)} × {len(acc_ids)} акк.")
             return _json_resp({"ok": True, "op_id": op_id, "accounts": len(acc_ids)})
         except PermissionError as exc:
             try: _os.unlink(path)
@@ -2163,6 +2277,7 @@ def setup_routes(app: web.Application, pool) -> None:
     app.router.add_get("/api/miniapp/uch/contacts/{contact_id}", uch_contact_detail)
     app.router.add_post("/api/miniapp/uch/contacts/{contact_id}", uch_contact_update)
     app.router.add_post("/api/miniapp/uch/contacts/{contact_id}/message", uch_contact_message)
+    app.router.add_get("/api/miniapp/uch/contacts/{contact_id}/tg_profile", uch_contact_tg_profile)
     app.router.add_post("/api/miniapp/uch/contacts/{contact_id}/media", uch_contact_media)
     app.router.add_post("/api/miniapp/uch/contacts/{contact_id}/invite", uch_contact_invite)
     app.router.add_post("/api/miniapp/uch/segment/preview", uch_segment_preview)

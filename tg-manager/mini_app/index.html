@@ -21750,7 +21750,7 @@ async function openContactDetail(id) {
       <button class="btn btn-s" onclick="openContactInvite()" style="flex:0 0 auto">➕ Пригласить</button>
       ${c.telegram_user_id?`<button class="btn btn-s" onclick="openContactHistory()" style="flex:0 0 auto">🕓 История</button>`:''}
       ${c.username?`<a class="btn btn-s" href="https://t.me/${esc(c.username)}" target="_blank" style="flex:0 0 auto;text-decoration:none">↗ В Telegram</a>`:''}
-      ${c.telegram_user_id?`<a class="btn btn-s" href="tg://user?id=${c.telegram_user_id}" target="_blank" style="flex:0 0 auto;text-decoration:none">👤 Профиль</a>`:''}
+      ${c.telegram_user_id||c.username?`<button class="btn btn-s" onclick="openContactProfile()" style="flex:0 0 auto">👤 Профиль</button>`:''}
     </div>`;
     if (sources.length) {
       html += `<div class="sec" style="margin-top:4px">📡 Найден в (${sources.length})</div><div class="lst" style="margin:0 16px">`;
@@ -22243,6 +22243,54 @@ function openContactHistory() {
   const name = [c.first_name,c.last_name].filter(Boolean).join(' ') || c.username || ('#'+c.telegram_user_id);
   VAULT_NAMES[c.telegram_user_id] = name;   // VAULT_NAMES — глобальная (let), инициализирована {}
   openVaultChat(c.telegram_user_id);
+}
+// Профиль контакта. Раньше кнопка была ссылкой tg://user?id=…: из мини-аппа
+// она не открывается, а Telegram владельца показывает профиль только тех, кого
+// сам уже видел, — у контакта без @username и телефона профиль не открывался
+// никак. Есть ник — открываем t.me; нет — профиль читает аккаунт флота,
+// который человека видел (ручка /tg_profile), и найденный ник дописывается.
+async function openContactProfile() {
+  const c = window._cdContact || {};
+  if (c.username) { openTgUser(c.username); return; }
+  if (!c.telegram_user_id) { toast('⚠️ У контакта нет ни @username, ни Telegram ID'); return; }
+  toast('⏳ Открываю профиль через ваш аккаунт…');
+  let d;
+  try {
+    d = await api('/api/miniapp/uch/contacts/'+CURRENT_CONTACT_ID+'/tg_profile');
+  } catch(e) { await showInfo(errRu(e,'Не удалось открыть профиль')); return; }
+  const p = (d && d.profile) || {};
+  if (p.username && !c.username) { c.username = p.username; }
+  const name = [p.first_name,p.last_name].filter(Boolean).join(' ') || ('ID '+p.id);
+  const row = (k,v) => v ? '<div class="row"><div class="row-body"><div class="row-name">'+esc(k)+'</div><div class="row-val">'+esc(String(v))+'</div></div></div>' : '';
+  const marks = [p.premium?'⭐ Premium':'', p.verified?'✔️ Верифицирован':'', p.bot?'🤖 Бот':'',
+                 p.scam?'⚠️ Помечен как мошенник':'', p.deleted?'🗑 Аккаунт удалён':'',
+                 p.mutual_contact?'🤝 Взаимный контакт':''].filter(Boolean).join(' · ');
+  const bg = document.createElement('div');
+  bg.className = 'mbg show';
+  bg.style.zIndex = '9999';
+  bg.innerHTML = '<div class="modal"><div class="modal-title">👤 '+esc(name)+'</div>'
+    + '<div class="lst" style="margin:8px 0">'
+    + row('Telegram ID', p.id) + row('Юзернейм', p.username ? '@'+p.username : 'нет')
+    + row('Телефон', p.phone ? '+'+String(p.phone).replace(/^\+/,'') : '')
+    + row('О себе', p.bio) + row('Статус', p.status)
+    + row('Общих чатов с аккаунтом', p.common_chats) + row('Отметки', marks)
+    + '</div>'
+    + (p.username ? '' : '<div style="font-size:12px;color:var(--hint);margin-bottom:8px">У человека нет @username, поэтому ссылки t.me нет. Написать можно аккаунтом флота — кнопка «Написать». Открыть в вашем Telegram получится, только если ваш Telegram уже видел этого человека.</div>')
+    + '<div style="display:flex;gap:8px;flex-wrap:wrap">'
+    + '<button class="btn btn-p" id="_cpw" style="flex:1 1 auto">✍️ Написать</button>'
+    + '<button class="btn btn-s" id="_cpo" style="flex:1 1 auto">↗ В Telegram</button>'
+    + '<button class="btn btn-d" id="_cpc" style="flex:1 1 100%">Закрыть</button>'
+    + '</div></div>';
+  document.body.appendChild(bg);
+  const done = () => { try { document.body.removeChild(bg); } catch(_) {} };
+  bg.querySelector('#_cpc').onclick = done;
+  bg.onclick = e => { if (e.target === bg) done(); };
+  bg.querySelector('#_cpw').onclick = () => { done(); openContactWrite(); };
+  bg.querySelector('#_cpo').onclick = () => {
+    if (p.username) { openTgUser(p.username); return; }
+    try { window.location.href = 'tg://user?id=' + encodeURIComponent(String(p.id)); }
+    catch(_) { copyText(String(p.id)); }
+  };
 }
 function openContactInvite() {
   SEGMENT_TARGET = null;
