@@ -142,7 +142,7 @@ from bot.utils.op_helpers import safe_answer, terminal_kb
 
 log = logging.getLogger(__name__)
 
-from bot.utils.fmt import num_ru  # noqa: E402
+from bot.utils.fmt import num_ru, plural  # noqa: E402
 
 router = Router()
 
@@ -209,15 +209,30 @@ def _app_button(kb, text: str, screen: str = "") -> bool:
     return True
 
 
-def _main_menu_kb():
+def _main_menu_kb(live: dict | None = None):
     """Главное меню: Итоги, шесть разделов по задачам, уведомления и двери.
 
     Порядок и названия разделов — из `services.task_sections.CORE`.
+
+    `live` — то, что происходит прямо сейчас: идущие операции и свежие
+    предупреждения по аккаунтам. Раньше главный экран называл их только
+    числом в строке статистики («🔔 3 алертов»), и чтобы их увидеть, надо
+    было знать, что они лежат в «Все инструменты → Мониторинг». Теперь,
+    пока они есть, они — первые кнопки экрана.
     """
     from services.task_sections import CORE
 
     kb = InlineKeyboardBuilder()
     rows: list[int] = []
+    live = live or {}
+    running = int(live.get("running") or 0)
+    alerts = int(live.get("alerts") or 0)
+    if running:
+        kb.button(text=f"⏳ Идут операции: {running}", callback_data=BmCb(action="ops"))
+        rows.append(1)
+    if alerts:
+        kb.button(text=f"🔔 Предупреждения за сутки: {alerts}", callback_data=BmCb(action="alerts"))
+        rows.append(1)
     if _app_button(kb, "🌐 Открыть приложение"):
         rows.append(1)
     kb.button(text="📊 Итоги за неделю", callback_data=BmCb(action="summary"))
@@ -589,9 +604,11 @@ async def cb_main(
 
     # Check 30-second cache — serve instantly on repeat visits
     cache_key = f"u:{user_id}:main_stats"
+    live_key = f"u:{user_id}:main_live"
     cached = menu_cache.get(cache_key, ttl=30.0)
     if cached is not None:
-        await _edit(callback, _MAIN_MENU_TEXT + cached, _main_menu_kb())
+        await _edit(callback, _MAIN_MENU_TEXT + cached,
+                    _main_menu_kb(menu_cache.get(live_key, ttl=30.0)))
         return
 
     # Одна правка экрана, а не две. Раньше меню выводилось сразу, а строка
@@ -613,6 +630,8 @@ async def cb_main(
                         + (SELECT COUNT(*) FROM operation_queue
                            WHERE owner_id=$1 AND created_at >= CURRENT_DATE
                              AND status IN ('pending','running')) AS today_ops,
+                        (SELECT COUNT(*) FROM operation_queue
+                         WHERE owner_id=$1 AND status IN ('pending','running')) AS running_ops,
                         COUNT(DISTINCT ta.id) FILTER (WHERE ta.is_active = TRUE) AS active_accs,
                         COUNT(DISTINCT ta.id) FILTER (WHERE ta.cooldown_until > now()) AS in_cooldown,
                         COUNT(DISTINCT re.id) FILTER (WHERE re.created_at > now() - INTERVAL '24h') AS new_alerts
@@ -636,12 +655,22 @@ async def cb_main(
                 p_score = pdata.get("score", 0) if isinstance(pdata, dict) else 0
                 p_emoji = pdata.get("level_emoji", "🟢") if isinstance(pdata, dict) else "🟢"
                 pressure_str = f" · Риск бана: {p_emoji} {p_score}" if p_score else ""
-                alert_str = f" · 🔔 {new_alerts} алертов" if new_alerts else ""
+                alert_str = (
+                    f" · 🔔 {new_alerts} "
+                    f"{plural(new_alerts, 'предупреждение', 'предупреждения', 'предупреждений')}"
+                    if new_alerts else ""
+                )
                 cooldown_str = f" · ⏳ {in_cooldown} на паузе" if in_cooldown else ""
                 status_line = (
-                    f"\n\n<i>📈 Сегодня: {today_ops} операций · {active_accs} аккаунтов"
+                    f"\n\n<i>📈 Сегодня: {today_ops} {plural(today_ops, 'операция', 'операции', 'операций')}"
+                    f" · {active_accs} {plural(active_accs, 'аккаунт', 'аккаунта', 'аккаунтов')}"
                     f"{pressure_str}{cooldown_str}{alert_str}</i>"
                 )
+                try:
+                    running_ops = int(row["running_ops"] or 0)
+                except (KeyError, TypeError, ValueError):
+                    running_ops = 0
+                menu_cache.set(live_key, {"running": running_ops, "alerts": new_alerts})
         except Exception:
             log_exc_swallow(log, "cb_main: stats fetch failed")
         menu_cache.set(cache_key, status_line)
@@ -653,7 +682,8 @@ async def cb_main(
     if task not in done:
         _MAIN_STATS_INFLIGHT.add(task)
         task.add_done_callback(_MAIN_STATS_INFLIGHT.discard)
-    await _edit(callback, _MAIN_MENU_TEXT + line, _main_menu_kb())
+    live = menu_cache.get(live_key, ttl=30.0) if task in done else None
+    await _edit(callback, _MAIN_MENU_TEXT + line, _main_menu_kb(live))
 
 
 # ── Итоги, разделы по задачам, все инструменты ─────────────────────────────
