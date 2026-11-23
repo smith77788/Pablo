@@ -263,9 +263,55 @@ function _dkRender() {
     '</div>';
   }).join('') + '</div>' +
   // Аналитика воронки — по кнопке, а не сразу: доска нужна каждый день,
-  // отчёт — когда владелец разбирается, где теряются сделки.
-  '<div style="padding:0 16px 16px"><button class="btn btn-s" style="width:100%" onclick="dkAnalytics(' + (_DK_AN_DAYS) + ')">' +
-    '📈 Аналитика воронки</button></div><div id="dkAn"></div>';
+  // отчёт — когда владелец разбирается, где теряются сделки. Рядом — быстрый
+  // текстовый отчёт в буфер (как в «Пересечениях» и «Плане роста»): переслать
+  // партнёру или вставить в заметку, не открывая аналитику.
+  '<div style="display:flex;gap:8px;padding:0 16px 16px">' +
+    '<button class="btn btn-s" style="flex:2" onclick="dkAnalytics(' + (_DK_AN_DAYS) + ')">📈 Аналитика воронки</button>' +
+    '<button class="btn btn-s" style="flex:1" onclick="dkCopyReport()">📋 Отчёт</button>' +
+  '</div><div id="dkAn"></div>';
+}
+
+// Текстовый отчёт по воронке: по стадиям — число сделок и суммы по валютам
+// (by_currency — серверный итог по стадии, тот же, что в шапке колонки),
+// плюс итоги «в работе» и «выиграно». Суммы НЕ складываем между валютами
+// (CLAUDE.md: рубли с долларами — красивое неверное число).
+function dkReportText() {
+  if (!_DK) return '';
+  const cols = _DK.columns || [];
+  const money = function (byCur) {
+    const parts = Object.entries(byCur || {}).filter(function (p) { return Number(p[1]) > 0; });
+    return parts.map(function (p) { return num(Math.round(Number(p[1]))) + ' ' + p[0]; }).join(' · ');
+  };
+  const lines = ['Воронка сделок:'];
+  const openCur = {};
+  cols.forEach(function (col) {
+    const n = _dkCount(col);
+    const sum = money(col.by_currency);
+    lines.push('• ' + col.label + ': ' + n + (sum ? ' · ' + sum : ''));
+    if (col.stage !== 'won' && col.stage !== 'lost') {
+      Object.entries(col.by_currency || {}).forEach(function (p) {
+        if (Number(p[1]) > 0) openCur[p[0]] = (openCur[p[0]] || 0) + Number(p[1]);
+      });
+    }
+  });
+  const openN = cols.filter(function (c) { return c.stage !== 'won' && c.stage !== 'lost'; })
+    .reduce(function (s, c) { return s + _dkCount(c); }, 0);
+  const openSum = money(openCur);
+  lines.push('');
+  lines.push('В работе: ' + openN + (openSum ? ' · ' + openSum : ''));
+  const wonCol = cols.find(function (c) { return c.stage === 'won'; });
+  if (wonCol) {
+    const wonSum = money(wonCol.by_currency);
+    lines.push('Выиграно: ' + _dkCount(wonCol) + (wonSum ? ' · ' + wonSum : ''));
+  }
+  return lines.join('\n');
+}
+
+function dkCopyReport() {
+  const text = dkReportText();
+  if (!text) { toast('Пусто'); return; }
+  copyToClipboard(text, '📋 Отчёт по воронке скопирован');
 }
 
 // ── Аналитика воронки (GET /api/miniapp/crm/funnel_analytics) ───────────────
