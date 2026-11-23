@@ -9239,99 +9239,141 @@ async def _exec_bulk_dm_adhoc(
                 )
                 continue
 
-            # Явный вращающийся индекс вместо i % len: при выбывании аккаунта
-            # из ротации модуль по счётчику получателей перескакивал через
-            # оставшиеся аккаунты и грузил одни сильнее других.
-            acc, acc_idx = _pick_acc(active_accounts, acc_idx, sent_by_acc, per_acc_cap)
-            if acc is None:
-                # Все аккаунты выбрали лимит на эту рассылку — это защита, а не
-                # ошибка: честно сообщаем и не дожимаем флот.
-                _left = total - i
-                skip_count += _left
-                await _log_step(i + 1, username, "skip",
-                                f"лимит {per_acc_cap} на аккаунт исчерпан")
-                log.info("bulk_dm_adhoc op=%d: лимит на аккаунт исчерпан, не отправлено %d",
-                         op_id, _left)
-                break
-            _msg = _expand_spintax(text)  # свой вариант текста этому получателю
-
-            try:
-                if media_bytes is not None:
-                    # Медиа с подписью — уникализируем под каждого (анти-детект).
-                    _sent = await account_manager.send_media_via_account(
-                        acc["session_str"], username, caption=_msg, _acc=acc,
-                        media_bytes=media_bytes, media_filename=media_filename,
-                        uniquify=True)
-                    result = {"ok": True} if _sent else {"error": "media send failed"}
-                else:
-                    result = await account_manager.send_dm(
-                        acc["session_str"], username, _msg, _acc=acc
-                    )
-
-                kind = _classify_send_result(result)
-                _err_text = str(result.get("error") or "")
-
-                if kind == "sent":
-                    ok_count += 1
-                    sent_by_acc[int(acc["id"])] = sent_by_acc.get(int(acc["id"]), 0) + 1
-                    await _log_step(i + 1, username, "ok", f"отправлено · акк {acc['id']}")
-                elif kind == "flood":
-                    # Флуд-вейт — ограничение КОНКРЕТНОГО аккаунта. Ставим cooldown
-                    # и выводим его из ротации, иначе следующий получатель уйдёт с
-                    # того же аккаунта и добьёт его.
-                    fw = int(result.get("flood_wait") or 0)
-                    flood_wait_total += fw
+            _tries = 0
+            _cap_stop = False
+            while True:
+                _tries += 1
+                _again = False
+                if not active_accounts:
                     err_count += 1
-                    await _safe_execute(
-                        pool,
-                        "UPDATE tg_accounts SET cooldown_until = NOW() + ($1 * INTERVAL '1 second'), "
-                        "last_flood_at = NOW(), flood_count_7d = COALESCE(flood_count_7d, 0) + 1 "
-                        "WHERE id=$2",
-                        min(max(fw, 60), 3600), acc["id"],
-                    )
-                    if len(active_accounts) > 1:
+                    await _log_step(i + 1, username, "error", "не осталось рабочих аккаунтов")
+                    break
+                # Явный вращающийся индекс вместо i % len: при выбывании аккаунта
+                # из ротации модуль по счётчику получателей перескакивал через
+                # оставшиеся аккаунты и грузил одни сильнее других.
+                acc, acc_idx = _pick_acc(active_accounts, acc_idx, sent_by_acc, per_acc_cap)
+                if acc is None:
+                    # Все аккаунты выбрали лимит на эту рассылку — это защита, а не
+                    # ошибка: честно сообщаем и не дожимаем флот.
+                    _left = total - i
+                    skip_count += _left
+                    _cap_stop = True
+                    # НЕ 'skip': этот статус журнал считает «вопрос закрыт
+                    # навсегда», и повтор операции пропустил бы получателя,
+                    # которому так ничего и не ушло. Лимит — пауза, не исход.
+                    await _log_step(i + 1, username, "error",
+                                    f"не отправлено: лимит {per_acc_cap} на аккаунт исчерпан")
+                    log.info("bulk_dm_adhoc op=%d: лимит на аккаунт исчерпан, не отправлено %d",
+                             op_id, _left)
+                    break
+                _msg = _expand_spintax(text)  # свой вариант текста этому получателю
+
+                try:
+                    if media_bytes is not None:
+                        # Медиа с подписью — уникализируем под каждого (анти-детект).
+                        _sent = await account_manager.send_media_via_account(
+                            acc["session_str"], username, caption=_msg, _acc=acc,
+                            media_bytes=media_bytes, media_filename=media_filename,
+                            uniquify=True)
+                        result = {"ok": True} if _sent else {"error": "media send failed"}
+                    else:
+                        result = await account_manager.send_dm(
+                            acc["session_str"], username, _msg, _acc=acc
+                        )
+
+                    kind = _classify_send_result(result)
+                    _err_text = str(result.get("error") or "")
+
+                    if kind == "sent":
+                        ok_count += 1
+                        sent_by_acc[int(acc["id"])] = sent_by_acc.get(int(acc["id"]), 0) + 1
+                        await _log_step(i + 1, username, "ok", f"отправлено · акк {acc['id']}")
+                    elif kind == "flood":
+                        # Флуд-вейт — ограничение КОНКРЕТНОГО аккаунта. Ставим cooldown
+                        # и выводим его из ротации, иначе следующий получатель уйдёт с
+                        # того же аккаунта и добьёт его.
+                        fw = int(result.get("flood_wait") or 0)
+                        flood_wait_total += fw
+                        err_count += 1
+                        await _safe_execute(
+                            pool,
+                            "UPDATE tg_accounts SET cooldown_until = NOW() + ($1 * INTERVAL '1 second'), "
+                            "last_flood_at = NOW(), flood_count_7d = COALESCE(flood_count_7d, 0) + 1 "
+                            "WHERE id=$2",
+                            min(max(fw, 60), 3600), acc["id"],
+                        )
+                        # Получатель тут ни при чём: раньше он записывался в
+                        # ошибки и терялся, а при единственном аккаунте
+                        # следующий получатель уходил с того же аккаунта прямо
+                        # во флуд. Теперь тот же получатель — следующим
+                        # аккаунтом; последний аккаунт ждёт короткий флуд или
+                        # откладывает операцию (журнал не даст дублей).
+                        err_count -= 1
+                        if len(active_accounts) > 1:
+                            active_accounts = [a for a in active_accounts if a["id"] != acc["id"]]
+                            log.info("bulk_dm_adhoc: flood_wait %ss acc=%s → выведен из ротации, "
+                                     "@%s — следующим аккаунтом", fw, acc["id"], username)
+                            _again = True
+                        elif fw <= _FLOOD_INLINE_MAX_S and _tries <= 2:
+                            await bounded_flood_sleep(max(fw, 1), "bulk_dm_adhoc")
+                            _again = True
+                        else:
+                            return {
+                                "status": "requeue",
+                                "defer_s": max(fw, 60),
+                                "reason": (f"Рассылка ЛС: Telegram просит подождать {fw} с "
+                                           f"на последнем аккаунте — продолжу позже"),
+                            }
+                    elif kind == "peer_flood":
+                        # Аккаунт помечен Telegram за спам ВООБЩЕ. Продолжать им —
+                        # гарантированная потеря аккаунта: длинный кулдаун и из ротации.
+                        err_count += 1
+                        await _safe_execute(
+                            pool,
+                            "UPDATE tg_accounts SET cooldown_until = NOW() + ($1 * INTERVAL '1 second'), "
+                            "last_flood_at = NOW(), flood_count_7d = COALESCE(flood_count_7d, 0) + 1 "
+                            "WHERE id=$2",
+                            _PEER_FLOOD_COOLDOWN_S, acc["id"],
+                        )
                         active_accounts = [a for a in active_accounts if a["id"] != acc["id"]]
-                    await _log_step(i + 1, username, "error", f"FloodWait {fw}с · акк {acc['id']}")
-                    log.info("bulk_dm_adhoc: flood_wait %ss acc=%s → выведен из ротации", fw, acc["id"])
-                elif kind == "peer_flood":
-                    # Аккаунт помечен Telegram за спам ВООБЩЕ. Продолжать им —
-                    # гарантированная потеря аккаунта: длинный кулдаун и из ротации.
+                        log.warning("bulk_dm_adhoc: PeerFlood acc=%s — аккаунт выведен из рассылки", acc["id"])
+                        if active_accounts:
+                            # Флаг на аккаунте, не на получателе — пробуем им же
+                            # следующим аккаунтом, а не теряем.
+                            err_count -= 1
+                            _again = True
+                        else:
+                            await _log_step(i + 1, username, "error", f"PeerFlood · акк {acc['id']} выведен")
+                    elif kind == "auth":
+                        # Мёртвая сессия. Прежний код искал ключ 'banned', которого
+                        # send_dm никогда не возвращает, — то есть не ловил это вообще.
+                        await _db.deactivate_account(pool, acc["id"], "dead session in bulk_dm_adhoc")
+                        await _on_account_banned(pool, owner_id, acc["id"], "bulk_dm_adhoc", bot=bot)
+                        active_accounts = [a for a in active_accounts if a["id"] != acc["id"]]
+                        err_count += 1
+                        await _log_step(i + 1, username, "error", f"сессия мертва · акк {acc['id']}")
+                        log.info("bulk_dm_adhoc: dead session acc %s, removed from pool", acc["id"])
+                    elif kind == "skip":
+                        # Получатель недостижим навсегда (приватность/чёрный список/
+                        # удалён). Аккаунт здоров — не трогаем его и не считаем это
+                        # нашей ошибкой, иначе метрика «ошибок» врёт про здоровье флота.
+                        skip_count += 1
+                        await _log_step(i + 1, username, "skip", _err_text or "получатель недоступен")
+                    else:
+                        err_count += 1
+                        await _log_step(i + 1, username, "error", _err_text or "unknown")
+                        log.warning("bulk_dm_adhoc: failed @%s: %s", username, _err_text or "unknown")
+                except asyncio.CancelledError:
+                    raise
+                except Exception as exc:
+                    log_exc_swallow(log, "bulk_dm_adhoc: send_dm @%s: %s", username, exc)
                     err_count += 1
-                    await _safe_execute(
-                        pool,
-                        "UPDATE tg_accounts SET cooldown_until = NOW() + ($1 * INTERVAL '1 second'), "
-                        "last_flood_at = NOW(), flood_count_7d = COALESCE(flood_count_7d, 0) + 1 "
-                        "WHERE id=$2",
-                        _PEER_FLOOD_COOLDOWN_S, acc["id"],
-                    )
-                    active_accounts = [a for a in active_accounts if a["id"] != acc["id"]]
-                    await _log_step(i + 1, username, "error", f"PeerFlood · акк {acc['id']} выведен")
-                    log.warning("bulk_dm_adhoc: PeerFlood acc=%s — аккаунт выведен из рассылки", acc["id"])
-                elif kind == "auth":
-                    # Мёртвая сессия. Прежний код искал ключ 'banned', которого
-                    # send_dm никогда не возвращает, — то есть не ловил это вообще.
-                    await _db.deactivate_account(pool, acc["id"], "dead session in bulk_dm_adhoc")
-                    await _on_account_banned(pool, owner_id, acc["id"], "bulk_dm_adhoc", bot=bot)
-                    active_accounts = [a for a in active_accounts if a["id"] != acc["id"]]
-                    err_count += 1
-                    await _log_step(i + 1, username, "error", f"сессия мертва · акк {acc['id']}")
-                    log.info("bulk_dm_adhoc: dead session acc %s, removed from pool", acc["id"])
-                elif kind == "skip":
-                    # Получатель недостижим навсегда (приватность/чёрный список/
-                    # удалён). Аккаунт здоров — не трогаем его и не считаем это
-                    # нашей ошибкой, иначе метрика «ошибок» врёт про здоровье флота.
-                    skip_count += 1
-                    await _log_step(i + 1, username, "skip", _err_text or "получатель недоступен")
-                else:
-                    err_count += 1
-                    await _log_step(i + 1, username, "error", _err_text or "unknown")
-                    log.warning("bulk_dm_adhoc: failed @%s: %s", username, _err_text or "unknown")
-            except asyncio.CancelledError:
-                raise
-            except Exception as exc:
-                log_exc_swallow(log, "bulk_dm_adhoc: send_dm @%s: %s", username, exc)
-                err_count += 1
-                await _log_step(i + 1, username, "error", str(exc))
+                    await _log_step(i + 1, username, "error", str(exc))
+                if _again:
+                    continue
+                break
+            if _cap_stop:
+                break
 
             await _safe_execute(
                     pool,
