@@ -30,6 +30,7 @@ from services.account_manager import (
 )
 from services.logger import log_exc_swallow
 from bot.utils.owner_error import owner_error
+from bot.utils.op_helpers import no_accounts_kb
 
 # SMTP авто-определение по домену почты
 _SMTP_PRESETS: dict[str, tuple[str, int]] = {
@@ -993,7 +994,7 @@ async def cb_mini_strike_category(
             "⚠️ <b>Нет активных аккаунтов</b>\n\n"
             "Добавьте аккаунт в разделе <b>📱 Аккаунты</b>, затем вернитесь сюда.",
             parse_mode="HTML",
-            reply_markup=kb.as_markup(),
+            reply_markup=no_accounts_kb(back=StrikeCb(action="menu")),
         )
         return
 

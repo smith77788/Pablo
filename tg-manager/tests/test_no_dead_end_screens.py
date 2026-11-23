@@ -335,3 +335,60 @@ def test_input_prompts_offer_cancel():
 def test_cancel_kb_leads_to_main_menu():
     body = _helper_src("cancel_kb")
     assert 'BmCb(action="main")' in body and "Отменить" in body
+
+
+_NO_ACCOUNTS = re.compile(r"Нет (активных|подключённых) аккаунтов")
+_ADD_ACCOUNT_WAY = ("no_accounts_kb(", 'AccCb(action="add")', 'AccCb(action="menu")')
+
+
+def _no_accounts_screens_without_a_way_to_add(src: str) -> list[str]:
+    tree = ast.parse(src)
+    bad = []
+    for fn in ast.walk(tree):
+        if not isinstance(fn, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            continue
+        body = ast.get_source_segment(src, fn) or ""
+        if any(w in body for w in _ADD_ACCOUNT_WAY):
+            continue
+        for call in ast.walk(fn):
+            if not isinstance(call, ast.Call):
+                continue
+            name = ast.unparse(call.func)
+            # всплывашка callback.answer и сборка списка — не экран
+            if name.endswith(".append") or (name.endswith(".answer") and "message" not in name):
+                continue
+            if any(isinstance(a, (ast.Constant, ast.JoinedStr)) and _NO_ACCOUNTS.search(ast.unparse(a))
+                   for a in call.args):
+                bad.append(f"{fn.name}:{call.lineno}")
+    return bad
+
+
+def test_no_accounts_screen_offers_to_add_one():
+    """«⚠️ Нет активных аккаунтов» с одной кнопкой «Назад»: человек узнаёт, что
+    без аккаунта нельзя, и сам ищет, где его добавить. Таких экранов было 35.
+    Экран обязан вести к добавлению (`no_accounts_kb`)."""
+    bad = []
+    for p in sorted(HANDLERS.glob("*.py")):
+        bad += [f"{p.name}:{x}" for x in _no_accounts_screens_without_a_way_to_add(
+            p.read_text(encoding="utf-8"))]
+    assert not bad, "экран «нет аккаунтов» без кнопки добавления:\n" + "\n".join(bad)
+
+
+def test_no_accounts_probe_sees_a_known_dead_end():
+    dead = (
+        "async def h(callback):\n"
+        "    await callback.message.edit_text('⚠️ Нет активных аккаунтов.', reply_markup=_back_kb().as_markup())\n"
+    )
+    fixed = dead.replace("_back_kb().as_markup()", "no_accounts_kb()")
+    popup = "async def h(callback):\n    await callback.answer('Нет активных аккаунтов.', show_alert=True)\n"
+    assert _no_accounts_screens_without_a_way_to_add(dead) == ["h:2"]
+    assert _no_accounts_screens_without_a_way_to_add(fixed) == []
+    assert _no_accounts_screens_without_a_way_to_add(popup) == []
+
+
+def test_no_accounts_kb_leads_to_adding_an_account():
+    from bot.utils.op_helpers import no_accounts_kb
+    from bot.callbacks import HealthCb
+    rows = no_accounts_kb(back=HealthCb(action="menu")).inline_keyboard
+    assert rows[0][0].text == "➕ Добавить аккаунт" and rows[0][0].callback_data == "acc:add:0:0:0"
+    assert [b.text for b in rows[1]] == ["◀️ Назад", "🏠 Главное меню"]

@@ -48,6 +48,7 @@ log = logging.getLogger(__name__)
 from bot.utils.owner_error import owner_error  # noqa: E402
 
 from bot.utils.fmt import plural  # noqa: E402
+from bot.utils.op_helpers import no_accounts_kb
 
 router = Router()
 
@@ -1064,7 +1065,7 @@ async def cb_bot_parse(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
     if not accounts:
         await callback.message.answer(
             "⚠️ Нет подключённых аккаунтов.\nДобавьте аккаунт в /accounts и попробуйте снова.",
-            reply_markup=terminal_kb(),
+            reply_markup=no_accounts_kb(),
         )
         return
 

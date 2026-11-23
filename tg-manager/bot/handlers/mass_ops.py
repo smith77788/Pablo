@@ -57,6 +57,7 @@ router = Router()
 from bot.utils.op_names import op_name as _op_name  # noqa: E402
 
 from bot.utils.op_names import status_label as _ost_label  # noqa: E402
+from bot.utils.op_helpers import no_accounts_kb
 
 
 # ── Timing options ──────────────────────────────────────────────────────────
@@ -344,7 +345,7 @@ async def cb_mp_filter_chosen(
             await safe_edit(
                 callback,
                 "⚠️ Нет активных аккаунтов.",
-                reply_markup=_back_menu_kb().as_markup(),
+                reply_markup=no_accounts_kb(back=MassOpCb(action="menu")),
             )
             return
         kb = InlineKeyboardBuilder()
@@ -683,7 +684,7 @@ async def cb_mp_confirm(
             callback,
             f"⚠️ Нет активных аккаунтов для {filter_hint}.\n"
             "Проверьте аккаунты в разделе 📱 Аккаунты.",
-            reply_markup=_back_menu_kb().as_markup(),
+            reply_markup=no_accounts_kb(back=MassOpCb(action="menu")),
         )
         return
 

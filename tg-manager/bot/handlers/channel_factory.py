@@ -43,6 +43,7 @@ from bot.utils.op_helpers import safe_answer
 
 log = logging.getLogger(__name__)
 from bot.utils.fmt import num_ru, plural  # noqa: E402
+from bot.utils.op_helpers import no_accounts_kb
 
 router = Router()
 
@@ -1107,7 +1108,7 @@ async def cb_chanf_be_scope_acc(
         await callback.message.edit_text(
             "⚠️ Нет активных аккаунтов.",
             parse_mode="HTML",
-            reply_markup=_back_menu_kb().as_markup(),
+            reply_markup=no_accounts_kb(back=ChanFactCb(action="menu")),
         )
         return
     kb = InlineKeyboardBuilder()
@@ -1361,7 +1362,7 @@ async def cb_chanf_gen_links(
         await callback.message.edit_text(
             "⚠️ Нет активных аккаунтов.",
             parse_mode="HTML",
-            reply_markup=_back_menu_kb().as_markup(),
+            reply_markup=no_accounts_kb(back=ChanFactCb(action="menu")),
         )
         return
     kb = InlineKeyboardBuilder()
@@ -1705,7 +1706,7 @@ async def cb_chanf_seo_pick_acc(
         await callback.message.edit_text(
             "⚠️ <b>Нет активных аккаунтов</b>\n\nДобавьте аккаунт в разделе 📱 Аккаунты.",
             parse_mode="HTML",
-            reply_markup=_back_menu_kb().as_markup(),
+            reply_markup=no_accounts_kb(back=ChanFactCb(action="menu")),
         )
         return
     if len(accounts) == 1:

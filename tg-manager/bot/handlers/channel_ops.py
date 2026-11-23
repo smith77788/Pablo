@@ -134,6 +134,7 @@ router = Router()
 
 
 from bot.utils.op_names import op_name as _op_name  # noqa: E402
+from bot.utils.op_helpers import no_accounts_kb
 
 
 def _friendly_join_error(error_str: str) -> str:
@@ -722,7 +723,7 @@ async def cb_create_pick_account(
         await callback.message.edit_text(
             "⚠️ Нет активных аккаунтов. Проверьте подключение: /accounts",
             parse_mode="HTML",
-            reply_markup=_back_kb().as_markup(),
+            reply_markup=no_accounts_kb(back=ChanCb(action="menu")),
         )
         return
     entity_type = "группу" if is_group else "канал"
@@ -2676,7 +2677,7 @@ async def cb_members_invite(
         await callback.message.edit_text(
             "⚠️ Нет активных аккаунтов. Подключите аккаунты: /accounts",
             parse_mode="HTML",
-            reply_markup=_back_kb().as_markup(),
+            reply_markup=no_accounts_kb(back=ChanCb(action="menu")),
         )
         return
 
@@ -5401,7 +5402,7 @@ async def cb_my_chans(
         await callback.message.edit_text(
             "⚠️ <b>Нет активных аккаунтов</b>\n\nДобавьте через /accounts",
             parse_mode="HTML",
-            reply_markup=_back_kb().as_markup(),
+            reply_markup=no_accounts_kb(back=ChanCb(action="menu")),
         )
         return
     if len(active) == 1:
@@ -6013,7 +6014,7 @@ async def fsm_cinv_channel_input(
     )
     accounts = await _get_accounts(pool, message.from_user.id)
     if not accounts:
-        await message.answer("⚠️ Нет подключённых аккаунтов. Добавьте через /accounts", reply_markup=terminal_kb())
+        await message.answer("⚠️ Нет подключённых аккаунтов. Добавьте через /accounts", reply_markup=no_accounts_kb(back=ChanCb(action="menu")))
         await state.clear()
         return
     await state.set_state(ContactInviteFSM.choosing_accounts)
@@ -6065,7 +6066,7 @@ async def cb_cinv_pick_channel(
     if not accounts:
         await callback.message.edit_text(
             "⚠️ Нет подключённых аккаунтов. Добавьте через /accounts",
-            reply_markup=_back_kb().as_markup(),
+            reply_markup=no_accounts_kb(back=ChanCb(action="menu")),
         )
         await state.clear()
         return

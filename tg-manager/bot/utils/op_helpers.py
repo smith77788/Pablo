@@ -165,6 +165,25 @@ async def safe_answer(callback: "CallbackQuery", text: str = "", show_alert: boo
 # ── Выход с терминального экрана ─────────────────────────────────────────────
 
 
+def no_accounts_kb(*, back: object | None = None):
+    """Клавиатура экрана «нет активных аккаунтов».
+
+    Экран объясняет, что без аккаунта дальше нельзя, и раньше предлагал только
+    «Назад»: человеку приходилось самому искать, где аккаунт добавляется. Здесь
+    первая кнопка ведёт прямо к добавлению.
+    """
+    from aiogram.utils.keyboard import InlineKeyboardBuilder
+    from bot.callbacks import AccCb, BmCb
+
+    kb = InlineKeyboardBuilder()
+    kb.button(text="➕ Добавить аккаунт", callback_data=AccCb(action="add"))
+    if back is not None:
+        kb.button(text="◀️ Назад", callback_data=back)
+    kb.button(text="🏠 Главное меню", callback_data=BmCb(action="main"))
+    kb.adjust(1, 2)
+    return kb.as_markup()
+
+
 def terminal_kb(*, back: object | None = None, back_text: str = "◀️ Назад"):
     """Клавиатура для финального экрана — «готово», «ошибка», «отменено».
 

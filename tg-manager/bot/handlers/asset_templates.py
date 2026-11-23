@@ -47,6 +47,7 @@ from bot.utils.subscription import require_plan, locked_text
 from bot.utils.template_validator import validate_asset_template
 from database import db
 from bot.utils.op_helpers import safe_answer
+from bot.utils.op_helpers import no_accounts_kb
 
 log = logging.getLogger(__name__)
 router = Router()
@@ -664,7 +665,7 @@ async def cb_apply(
         if not accounts:
             await callback.message.edit_text(
                 "⚠️ Нет активных аккаунтов для создания. Добавьте аккаунт.",
-                reply_markup=_menu_kb(),
+                reply_markup=no_accounts_kb(),
             )
             return
 
@@ -1355,7 +1356,7 @@ async def cb_lib_apply(
             await callback.message.edit_text(
                 "⚠️ Нет активных аккаунтов. Добавьте аккаунт.",
                 parse_mode="HTML",
-                reply_markup=kb.as_markup(),
+                reply_markup=no_accounts_kb(back=LibCb(action="menu")),
             )
             return
         await state.update_data(tpl_prefill=data)
