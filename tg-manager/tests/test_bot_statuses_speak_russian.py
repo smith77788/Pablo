@@ -62,3 +62,12 @@ def test_raw_statuses_gone_from_screens():
 def test_funnel_names_are_escaped():
     src = _src("funnels.py")
     assert not re.search(r"\{funnel\['name'\][^}]*\}", src), "имя цепочки без escape"
+
+
+def test_leftover_english_labels_gone():
+    from bot.handlers.account_shield_hub import _ACTION_LABEL
+    assert _ACTION_LABEL["ok"] == "✅ Всё в порядке"
+    assert "Saved Messages" not in _src("account_warmup.py")
+    acc = _src("accounts.py")
+    assert "FloodWait / cooldown" not in acc
+    assert 'status_title = "FloodWait' not in acc

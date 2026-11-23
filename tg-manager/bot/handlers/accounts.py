@@ -117,7 +117,7 @@ def _display_acc_status_label(acc: dict) -> str:
     status = _display_acc_status(acc)
     labels = {
         "active": "✅ Активен",
-        "cooldown": "⏳ FloodWait / cooldown",
+        "cooldown": "⏳ Пауза от Telegram (флуд-лимит)",
         "spamblock": "⚠️ Спам-ограничения",
         "banned": "❌ Заблокирован",
         "deactivated": "💀 Деактивирован",
@@ -2545,7 +2545,7 @@ async def cb_check_health(
         status_title = "Спам-блокировка"
     elif status == "cooldown":
         status_icon = "⏳"
-        status_title = "FloodWait — временные ограничения"
+        status_title = "Флуд-лимит — временные ограничения"
     elif status == "banned":
         status_icon = "💀"
         status_title = "Аккаунт заблокирован Telegram"

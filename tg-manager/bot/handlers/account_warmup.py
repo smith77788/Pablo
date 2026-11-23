@@ -134,7 +134,7 @@ async def cb_warmup_menu(callback: CallbackQuery, pool: asyncpg.Pool, state: FSM
         "❤️ Ставит реакции на посты\n"
         "💬 Оставляет комментарии в обсуждениях\n"
         "🤖 Взаимодействует с ботами (/start, /help)\n"
-        "📌 Сохраняет посты в Saved Messages\n"
+        "📌 Сохраняет посты в «Избранное»\n"
         "📊 Голосует в опросах\n\n"
         f"Активных сессий: <b>{active_sessions}</b> · Одиночных планов: <b>{active_plans}</b>\n\n"
         "<b>Режимы:</b>\n"
