@@ -45,7 +45,7 @@ class _Pool:
         self.rows = rows
 
     async def fetch(self, q, *a):
-        if "WITH agg AS" in q:
+        if "agg AS" in q:  # запрос списка диалогов
             return [dict(r) for r in self.rows]
         return []
 

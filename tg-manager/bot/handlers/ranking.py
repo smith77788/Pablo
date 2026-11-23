@@ -1149,6 +1149,32 @@ async def vis_dashboard(
 # ── VisCb(action="all_positions") — Все позиции всех ботов ───────────────────
 
 
+async def _prev_positions(pool: asyncpg.Pool, pairs) -> dict:
+    """Предыдущая позиция для каждой пары (бот, слово) — ОДНИМ запросом.
+
+    Раньше экран делал запрос на каждую строку списка (до 30 подряд, пока
+    владелец ждёт ответа на кнопку). Пропавшая история — просто без стрелки
+    тренда, как и раньше: сбой здесь экран не роняет.
+    """
+    pairs = [(int(b), str(k)) for b, k in dict.fromkeys(pairs) if b is not None and k]
+    if not pairs:
+        return {}
+    try:
+        rows = await pool.fetch(
+            """SELECT v.bot_id, v.keyword, ph.position
+                 FROM unnest($1::bigint[], $2::text[]) AS v(bot_id, keyword)
+                 CROSS JOIN LATERAL (
+                     SELECT position FROM position_history
+                      WHERE bot_id = v.bot_id AND keyword = v.keyword
+                      ORDER BY checked_at DESC
+                      LIMIT 1 OFFSET 1) ph""",
+            [b for b, _ in pairs], [k for _, k in pairs])
+    except Exception:
+        log.debug("ranking: история позиций недоступна", exc_info=True)
+        return {}
+    return {(int(r["bot_id"]), r["keyword"]): r["position"] for r in rows}
+
+
 @router.callback_query(VisCb.filter(F.action == "all_positions"))
 async def vis_all_positions(
     callback: CallbackQuery,
@@ -1160,7 +1186,8 @@ async def vis_all_positions(
 
     try:
         rows = await pool.fetch(
-            """SELECT tk.keyword, sr.position, sr.checked_at, b.username AS bot_username
+            """SELECT tk.keyword, sr.position, sr.checked_at, b.username AS bot_username,
+                      sr.bot_id
                FROM search_rankings sr
                JOIN tracked_keywords tk ON tk.id = sr.keyword_id
                JOIN managed_bots b ON b.bot_id = sr.bot_id
@@ -1202,6 +1229,8 @@ async def vis_all_positions(
     for row in rows:
         by_bot[row["bot_username"] or "unknown"].append(row)
 
+    prev_of = await _prev_positions(
+        pool, [(row["bot_id"], row["keyword"]) for row in rows])
     lines = ["📊 <b>Позиции в поиске</b>\n"]
     for bot_un, entries in by_bot.items():
         bot_safe = html.escape(f"@{bot_un}")
@@ -1209,21 +1238,7 @@ async def vis_all_positions(
         for e in entries:
             kw_safe = html.escape(e["keyword"])
             pos = e["position"]
-
-            # Fetch previous position from position_history for delta
-            try:
-                prev_row = await pool.fetchrow(
-                    """SELECT position FROM position_history
-                       WHERE bot_id = (SELECT bot_id FROM managed_bots WHERE username=$1 LIMIT 1)
-                         AND keyword = $2
-                       ORDER BY checked_at DESC
-                       LIMIT 1 OFFSET 1""",
-                    bot_un,
-                    e["keyword"],
-                )
-                prev_pos = prev_row["position"] if prev_row else None
-            except Exception:
-                prev_pos = None
+            prev_pos = prev_of.get((e["bot_id"], e["keyword"]))
 
             arrow = _trend_arrow(pos, prev_pos)
             alert = ""
@@ -1353,22 +1368,12 @@ async def vis_by_bot(
         if row["keyword"] not in seen:
             seen[row["keyword"]] = dict(row)
 
+    prev_of = await _prev_positions(pool, [(bot_id, kw) for kw in seen])
     lines = [f"🔍 <b>Позиции — {html.escape(label)}</b>\n"]
     for kw_text, entry in seen.items():
         kw_safe = html.escape(kw_text)
         pos = entry["position"]
-        try:
-            prev_row = await pool.fetchrow(
-                """SELECT position FROM position_history
-                   WHERE bot_id = $1 AND keyword = $2
-                   ORDER BY checked_at DESC
-                   LIMIT 1 OFFSET 1""",
-                bot_id,
-                kw_text,
-            )
-            prev_pos = prev_row["position"] if prev_row else None
-        except Exception:
-            prev_pos = None
+        prev_pos = prev_of.get((bot_id, kw_text))
 
         arrow = _trend_arrow(pos, prev_pos)
         delta_str = ""

@@ -325,6 +325,31 @@ async def record_cross_nav(
         log.exception("record_cross_nav error")
 
 
+async def record_cross_nav_many(pool: asyncpg.Pool, owner_id: int, edges: list) -> int:
+    """То же, что record_cross_nav, для списка рёбер — одной пачкой.
+
+    edges: [(from_type, from_id, to_type, to_id), ...]. Возвращает число
+    записанных рёбер (0 при сбое — как поштучная версия, не бросает).
+    """
+    rows = [(owner_id, ft, fid, json.dumps(
+                {"from_type": ft, "from_id": fid, "to_type": tt, "to_id": tid},
+                ensure_ascii=False))
+            for ft, fid, tt, tid in edges]
+    if not rows:
+        return 0
+    try:
+        await pool.executemany(
+            "INSERT INTO behavioral_events"
+            "(owner_id, entity_type, entity_id, event_type, meta) "
+            "VALUES ($1, $2, $3, 'cross_nav', $4)",
+            rows,
+        )
+        return len(rows)
+    except Exception:
+        log.exception("record_cross_nav_many error")
+        return 0
+
+
 # ── Anomaly detection ────────────────────────────────────────────────────
 
 

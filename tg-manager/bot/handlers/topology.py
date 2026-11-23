@@ -585,43 +585,25 @@ async def cb_topo_rebuild(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
     channels = await db.get_managed_channels(pool, owner_id)
     bots = await db.get_bots(pool, owner_id)
 
+    # Рёбра пишутся одной пачкой: поштучно это был INSERT на каждый канал,
+    # и на сети в тысячи каналов кнопка «Обновить граф» висела десятки секунд.
+    edges = []
     # Build edges: account → channel
-    edge_count = 0
     for ch in channels:
         acc_id = ch.get("acc_id")
         chan_id = ch.get("channel_id") or ch.get("id")
         if acc_id and chan_id:
-            try:
-                await behavioral_engine.record_cross_nav(
-                    pool,
-                    owner_id=owner_id,
-                    from_type="account",
-                    from_id=acc_id,
-                    to_type="channel",
-                    to_id=chan_id,
-                )
-                edge_count += 1
-            except Exception:
-                log_exc_swallow(log, "Ошибка записи ребра account→channel")
+            edges.append(("account", acc_id, "channel", chan_id))
 
     # Build edges: bot → account (bots belong to owners; structural link)
-    for b in bots:
-        bot_id = b.get("bot_id")
-        if bot_id:
-            for acc in accounts:
-                try:
-                    await behavioral_engine.record_cross_nav(
-                        pool,
-                        owner_id=owner_id,
-                        from_type="bot",
-                        from_id=bot_id,
-                        to_type="account",
-                        to_id=acc["id"],
-                    )
-                    edge_count += 1
-                except Exception:
-                    log_exc_swallow(log, "Ошибка записи ребра bot→account")
-                break  # one representative edge per bot is enough
+    # One representative edge per bot is enough.
+    if accounts:
+        for b in bots:
+            bot_id = b.get("bot_id")
+            if bot_id:
+                edges.append(("bot", bot_id, "account", accounts[0]["id"]))
+
+    edge_count = await behavioral_engine.record_cross_nav_many(pool, owner_id, edges)
 
     kb = InlineKeyboardBuilder()
     kb.button(text="🗺️ Обзорная карта", callback_data=TopoCb(action="overview"))

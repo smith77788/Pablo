@@ -1591,6 +1591,11 @@ async def main() -> None:
         from database.db import run_pool_monitor
         _spawn(_resilient("pool_monitor", run_pool_monitor, pool))
         log.info("TG Manager started")
+        # Стартовая куча живёт до конца процесса: убираем её из обхода
+        # сборщика мусора, иначе каждая полная сборка останавливает бот и
+        # мини-апп на 150–250 мс (services/gc_tuning.py).
+        from services.gc_tuning import freeze_startup_heap
+        freeze_startup_heap()
 
         # ── Webhook or long-polling ───────────────────────────────────────────
         if _webhook_url:
