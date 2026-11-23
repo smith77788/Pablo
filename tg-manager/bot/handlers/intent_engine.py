@@ -361,7 +361,7 @@ async def cb_intent_strategy(
     intent_id = callback_data.intent_id
     new_strategy = callback_data.value or ""
     if new_strategy not in ("safest", "balanced", "fastest", "scalable"):
-        await callback.answer("Неизвестная стратегия", show_alert=True)
+        await callback.answer("⚠️ Кнопка устарела. Откройте раздел заново.", show_alert=True)
         return
 
     row = await db.get_intent(pool, intent_id, callback.from_user.id)

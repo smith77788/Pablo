@@ -3274,7 +3274,7 @@ async def cb_gp_bulk_run(
     plan_id = callback_data.plan_id
     action = callback_data.item or "both"
     if action not in _BULK_LABELS:
-        await callback.answer("Неизвестное действие", show_alert=True)
+        await callback.answer("⚠️ Кнопка устарела. Откройте раздел заново.", show_alert=True)
         return
 
     plan = await db.get_global_presence_plan(pool, plan_id, callback.from_user.id)

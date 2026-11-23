@@ -655,7 +655,7 @@ async def cb_boost_confirm(
         prem_suffix = " (только Premium)" if premium_only else ""
         label = f"Старты в боте: @{bot_username} × {len(account_ids)} акк.{prem_suffix}"
     else:
-        await callback.answer("⚠️ Неизвестный тип накрутки", show_alert=True)
+        await callback.answer("⚠️ Кнопка устарела. Откройте раздел заново.", show_alert=True)
         return
 
     # Все типы накрутки ставятся через operation_bus — единая нервная система

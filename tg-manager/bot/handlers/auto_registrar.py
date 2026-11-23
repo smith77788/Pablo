@@ -356,7 +356,7 @@ async def cb_autoreg_reset_device_profile(cb: CallbackQuery, pool: asyncpg.Pool)
 async def cb_autoreg_set_service(cb: CallbackQuery, callback_data: AutoRegCb, pool: asyncpg.Pool) -> None:
     svc = callback_data.sub
     if svc not in _SERVICES:
-        await cb.answer("Неизвестный сервис", show_alert=True)
+        await cb.answer("⚠️ Кнопка устарела. Откройте раздел заново.", show_alert=True)
         return
     await db.set_platform_setting(pool, _SETTING_SERVICE, svc)
     await cb.answer(f"✅ {_SERVICES[svc]}")

@@ -1215,7 +1215,7 @@ async def cb_admin(
         try:
             target_uid = int(uid_str)
         except ValueError:
-            await callback.answer("Неверный ID", show_alert=True)
+            await callback.answer("⚠️ Кнопка устарела. Откройте раздел заново.", show_alert=True)
             return
         await _adm_logs(
             callback,
@@ -1281,7 +1281,7 @@ async def cb_admin(
             await _adm_error_reports(callback, pool, page=page, status=status)
         else:
             await callback.message.edit_text(
-                "❌ Некорректный формат.", reply_markup=_back_kb()
+                "⚠️ Кнопка устарела. Откройте раздел заново.", reply_markup=_back_kb()
             )
 
     elif action.startswith("error_report:"):
@@ -1298,7 +1298,7 @@ async def cb_admin(
             await _adm_set_error_report_status(callback, pool, report_id, new_status)
         else:
             await callback.message.edit_text(
-                "❌ Некорректный формат.", reply_markup=_back_kb()
+                "⚠️ Кнопка устарела. Откройте раздел заново.", reply_markup=_back_kb()
             )
 
     elif action == "audit_log":
@@ -2485,7 +2485,7 @@ async def handle_admin_message(
         try:
             uid = int(text)
         except ValueError:
-            await message.answer("❌ Неверный ID.", reply_markup=_admin_main_kb())
+            await message.answer("❌ Нужен числовой ID пользователя, например 123456789. Отправьте ещё раз.", reply_markup=_admin_main_kb())
         else:
             try:
                 await db.ban_user(pool, uid, message.from_user.id, "Забанен администратором")
@@ -2515,7 +2515,7 @@ async def handle_admin_message(
         try:
             uid = int(text)
         except ValueError:
-            await message.answer("❌ Неверный ID.", reply_markup=_admin_main_kb())
+            await message.answer("❌ Нужен числовой ID пользователя, например 123456789. Отправьте ещё раз.", reply_markup=_admin_main_kb())
         else:
             try:
                 await db.unban_user(pool, uid, message.from_user.id)
@@ -2545,7 +2545,7 @@ async def handle_admin_message(
         try:
             uid = int(text)
         except ValueError:
-            await message.answer("❌ Неверный ID.", reply_markup=_admin_main_kb())
+            await message.answer("❌ Нужен числовой ID пользователя, например 123456789. Отправьте ещё раз.", reply_markup=_admin_main_kb())
         else:
             try:
                 bot_ids = await pool.fetch(
@@ -2652,7 +2652,7 @@ async def handle_admin_message(
         try:
             uid = int(text)
         except ValueError:
-            await message.answer("❌ Неверный ID.", reply_markup=_admin_main_kb())
+            await message.answer("❌ Нужен числовой ID пользователя, например 123456789. Отправьте ещё раз.", reply_markup=_admin_main_kb())
         else:
             try:
                 bots = await pool.fetch(
@@ -2779,13 +2779,13 @@ async def handle_admin_message(
                     user_id=uid,
                 )
         except ValueError:
-            await message.answer("❌ Неверный ID.", reply_markup=_admin_main_kb())
+            await message.answer("❌ Нужен числовой ID пользователя, например 123456789. Отправьте ещё раз.", reply_markup=_admin_main_kb())
 
     elif state == "strike_grant":
         try:
             target_uid = int(text.strip())
         except ValueError:
-            await message.answer("❌ Неверный ID.", reply_markup=_admin_main_kb())
+            await message.answer("❌ Нужен числовой ID пользователя, например 123456789. Отправьте ещё раз.", reply_markup=_admin_main_kb())
         else:
             try:
                 from bot.handlers.strike import _ensure_table
@@ -2849,14 +2849,14 @@ async def handle_admin_message(
                     user_id=target_uid,
                 )
         except ValueError:
-            await message.answer("❌ Неверный ID.", reply_markup=_admin_main_kb())
+            await message.answer("❌ Нужен числовой ID пользователя, например 123456789. Отправьте ещё раз.", reply_markup=_admin_main_kb())
 
     elif state == "logs_find_user":
         try:
             target_uid = int(text.strip())
         except ValueError:
             await message.answer(
-                "❌ Неверный Telegram ID.", reply_markup=_admin_main_kb()
+                "❌ Нужен числовой Telegram ID, например 123456789. Отправьте ещё раз.", reply_markup=_admin_main_kb()
             )
             return
         kb = InlineKeyboardBuilder()
@@ -4056,7 +4056,7 @@ async def cb_adm_budget_set(callback: CallbackQuery, pool: asyncpg.Pool) -> None
     try:
         n = int(callback.data.removeprefix("adm:budget_set:"))
     except (TypeError, ValueError):
-        await callback.answer("Некорректное значение", show_alert=True)
+        await callback.answer("⚠️ Кнопка устарела. Откройте раздел заново.", show_alert=True)
         return
     try:
         await db.set_platform_setting(pool, "account_daily_action_budget", str(n))
@@ -4076,7 +4076,7 @@ async def cb_adm_ai_set(callback: CallbackQuery, state: FSMContext) -> None:
     pid = callback.data.removeprefix("adm:ai_set:")
     meta = next((p for p in _AI_PROVIDERS if p[0] == pid), None)
     if not meta:
-        await callback.answer("Неизвестный провайдер", show_alert=True)
+        await callback.answer("⚠️ Кнопка устарела. Откройте раздел заново.", show_alert=True)
         return
     await safe_answer(callback)
     await state.set_state(AiKeyFSM.waiting_key)
@@ -4100,7 +4100,7 @@ async def cb_adm_ai_del(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
     pid = callback.data.removeprefix("adm:ai_del:")
     meta = next((p for p in _AI_PROVIDERS if p[0] == pid), None)
     if not meta:
-        await callback.answer("Неизвестный провайдер", show_alert=True)
+        await callback.answer("⚠️ Кнопка устарела. Откройте раздел заново.", show_alert=True)
         return
     try:
         await db.set_platform_setting(pool, meta[2], "")
@@ -4297,7 +4297,7 @@ async def cb_adm_gate_del(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
     try:
         channel_id = int(callback.data.split(":")[-1])
     except ValueError:
-        await callback.answer("Некорректный ID.", show_alert=True)
+        await callback.answer("⚠️ Кнопка устарела. Откройте раздел заново.", show_alert=True)
         return
     await safe_answer(callback)
     await db.remove_subscription_gate_channel(pool, channel_id)

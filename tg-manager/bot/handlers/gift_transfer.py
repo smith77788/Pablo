@@ -1060,7 +1060,7 @@ async def cb_edit_recipient(callback: CallbackQuery, state: FSMContext, pool):
     try:
         recipient_id = int(callback.data.split(":")[2])
     except (IndexError, ValueError):
-        await callback.answer("Некорректный получатель", show_alert=True)
+        await callback.answer("⚠️ Кнопка устарела. Откройте раздел заново.", show_alert=True)
         return
 
     recipients = await db.get_gift_recipients(pool, callback.from_user.id)
@@ -1089,7 +1089,7 @@ async def cb_del_recipient(callback: CallbackQuery, state: FSMContext, pool):
     try:
         recipient_id = int(callback.data.split(":")[2])
     except (IndexError, ValueError):
-        await callback.answer("Некорректный получатель", show_alert=True)
+        await callback.answer("⚠️ Кнопка устарела. Откройте раздел заново.", show_alert=True)
         return
 
     deleted = await db.delete_gift_recipient(pool, callback.from_user.id, recipient_id)
@@ -1141,7 +1141,7 @@ async def cb_report_detail(callback: CallbackQuery, state: FSMContext, pool):
     try:
         report_id = int(callback.data.split(":")[2])
     except (IndexError, ValueError):
-        await callback.answer("Некорректный отчёт", show_alert=True)
+        await callback.answer("⚠️ Кнопка устарела. Откройте раздел заново.", show_alert=True)
         return
 
     report = await GiftTransferReportService.get_report(pool, report_id)

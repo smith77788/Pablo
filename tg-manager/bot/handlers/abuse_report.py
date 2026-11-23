@@ -91,7 +91,7 @@ async def cmd_report_abuse(message: Message, state: FSMContext, pool: asyncpg.Po
 async def cb_mailbox(callback: CallbackQuery, state: FSMContext, pool: asyncpg.Pool) -> None:
     raw = callback.data.split(':', 2)[2]
     if not raw.isdigit() or len(raw) > 18:
-        await callback.answer('Неверный ящик', show_alert=True)
+        await callback.answer('⚠️ Кнопка устарела. Откройте раздел заново.', show_alert=True)
         return
     row = await pool.fetchrow(
         'SELECT id, email FROM strike_email_accounts '
@@ -119,7 +119,7 @@ async def cb_cancel(callback: CallbackQuery, state: FSMContext) -> None:
 async def cb_category(callback: CallbackQuery, state: FSMContext) -> None:
     cat = callback.data.split(":", 2)[2]
     if cat not in abuse_report.CATEGORIES:
-        await callback.answer("Неизвестная категория", show_alert=True)
+        await callback.answer("⚠️ Кнопка устарела. Откройте раздел заново.", show_alert=True)
         return
     await state.update_data(category=cat)
     await state.set_state(AbuseFSM.recipient)

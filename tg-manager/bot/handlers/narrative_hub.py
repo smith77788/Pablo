@@ -406,7 +406,7 @@ async def cb_narr_set_type(
     await safe_answer(callback)
     ctype = callback_data.action.replace("set_type_", "")
     if ctype not in _TYPE_LABELS:
-        await callback.answer("Неверный тип", show_alert=True)
+        await callback.answer("⚠️ Кнопка устарела. Откройте раздел заново.", show_alert=True)
         return
 
     await state.update_data(campaign_type=ctype)
@@ -443,7 +443,7 @@ async def cb_narr_set_spread(
     try:
         spread_hours = int(callback_data.action.replace("set_spread_", ""))
     except ValueError:
-        await callback.answer("Неверный интервал", show_alert=True)
+        await callback.answer("⚠️ Кнопка устарела. Откройте раздел заново.", show_alert=True)
         return
 
     await state.update_data(spread_hours=spread_hours)

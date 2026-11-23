@@ -163,7 +163,7 @@ async def cb_setter_op(callback: CallbackQuery, callback_data: ProfileSetterCb, 
         return
     prompt = _INPUT_PROMPTS.get(op)
     if not prompt:
-        await callback.answer("Неизвестная операция", show_alert=True)
+        await callback.answer("⚠️ Кнопка устарела. Откройте раздел заново.", show_alert=True)
         return
     await state.set_state(SetterFSM.value)
     await _edit(callback, prompt, _cancel_kb())
@@ -358,7 +358,7 @@ async def _run_local_op(callback: CallbackQuery, op: str, owner_id: int,
             n = await aba.remove_role(pool, owner_id, account_ids, data.get("role", ""))
             what = f"Снята роль «{html.escape(data.get('role', ''))}»"
         else:
-            await callback.answer("Неизвестная операция", show_alert=True)
+            await callback.answer("⚠️ Кнопка устарела. Откройте раздел заново.", show_alert=True)
             return
     except ValueError as e:
         await callback.answer(f"⚠️ {owner_error(e, html_escape=False)}", show_alert=True)
