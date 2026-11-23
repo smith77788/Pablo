@@ -36,15 +36,20 @@ async def regenerate_versions(
     rows = await pool.fetch(
         "SELECT id FROM tg_accounts WHERE owner_id=$1 AND id = ANY($2::bigint[])",
         owner_id, [int(i) for i in account_ids])
-    n = 0
+    # Отпечаток у каждого свой, а запись — одна пачка: на выборе в тысячи
+    # аккаунтов запрос на аккаунт держал кнопку секундами.
+    params = []
     for r in rows:
         fp = generate_device_fingerprint()
-        await pool.execute(
+        params.append((r["id"], fp["device_model"], fp["system_version"],
+                       fp["app_version"], fp["lang_code"], fp["system_lang_code"],
+                       owner_id))
+    if params:
+        await pool.executemany(
             "UPDATE tg_accounts SET device_model=$2, system_version=$3, app_version=$4, "
             "lang_code=$5, system_lang_code=$6 WHERE id=$1 AND owner_id=$7",
-            r["id"], fp["device_model"], fp["system_version"], fp["app_version"],
-            fp["lang_code"], fp["system_lang_code"], owner_id)
-        n += 1
+            params)
+    n = len(params)
     log.info("account_bulk_attrs.regenerate_versions owner=%s → %d", owner_id, n)
     return n
 
