@@ -208,3 +208,22 @@ def retry_kb(retry_cb: object, *, retry_text: str = "🔄 Попробовать
     kb.button(text="🏠 Главное меню", callback_data=BmCb(action="main"))
     kb.adjust(1)
     return kb.as_markup()
+
+
+def cancel_kb(*, back: object | None = None):
+    """Клавиатура под запросом ввода («Введите…», «Пришлите…»).
+
+    Без неё человек, передумавший на шаге мастера, оставался в состоянии
+    ввода: любое следующее сообщение уходило в брошенный шаг, а выйти можно
+    было только командой /cancel, которую надо знать. «Отменить» ведёт в
+    главное меню, а оно само завершает мастер (`state.clear()`).
+    """
+    from aiogram.utils.keyboard import InlineKeyboardBuilder
+    from bot.callbacks import BmCb
+
+    kb = InlineKeyboardBuilder()
+    if back is not None:
+        kb.button(text="◀️ Назад", callback_data=back)
+    kb.button(text="✖️ Отменить", callback_data=BmCb(action="main"))
+    kb.adjust(2 if back is not None else 1)
+    return kb.as_markup()

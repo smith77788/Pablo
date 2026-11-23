@@ -38,7 +38,7 @@ from config import ADMIN_SECRET
 from database import db
 from services import railway_api
 from services.logger import log_exc_swallow
-from bot.utils.op_helpers import safe_answer, terminal_kb
+from bot.utils.op_helpers import safe_answer, terminal_kb, cancel_kb
 from bot.utils.owner_error import owner_error
 
 log = logging.getLogger(__name__)
@@ -379,7 +379,7 @@ async def cmd_admin(message: Message, pool: asyncpg.Pool) -> None:
         await message.answer(
             "🔑 <b>Введите секретную фразу для доступа к AdminPanel</b>\n\n"
             f"Ваш ID: <code>{uid}</code>",
-            parse_mode="HTML",
+            parse_mode="HTML", reply_markup=cancel_kb(),
         )
     # Иначе — молчим (не раскрываем существование команды)
 
@@ -1355,7 +1355,7 @@ async def cb_admin(
             "Введите ID или @username канала:\n"
             "<i>Примеры: @InfragramChannel или -1001234567890</i>\n\n"
             "Бот должен быть администратором канала с правом публикации.",
-            parse_mode="HTML",
+            parse_mode="HTML", reply_markup=cancel_kb(),
         )
 
     elif action == "bm_post_update":

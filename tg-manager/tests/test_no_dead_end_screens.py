@@ -293,3 +293,45 @@ def test_section_menus_have_a_way_out():
         if 'BmCb(action="main")' not in body and "Назад" not in body:
             missing.append(f"{fname}::{fn}")
     assert not missing, f"меню раздела без выхода: {missing}"
+
+
+# ── Запрос ввода без «Отменить» ─────────────────────────────────────────────
+# «Введите цену…», «Пришлите ключи…» без единой кнопки: передумавший человек
+# оставался в мастере, и следующее же сообщение уходило в брошенный шаг.
+_ASK = re.compile(r"Введите|Отправьте|Пришлите|Укажите|Напишите")
+_ASK_RETRY = re.compile(
+    r"Попробуйте (ещё раз|снова)|Неверн|должн|символ|не может быть пуст|Формат:|❌|⚠️"
+)
+# Справка о команде, а не шаг мастера.
+_ASK_ALLOWED = {"start.py: '🔍 <b>Поиск</b>"}
+
+
+def _prompts_without_exit(root: Path) -> list[str]:
+    found = []
+    for path in sorted(root.glob("*.py")):
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        for c in ast.walk(tree):
+            if not (isinstance(c, ast.Call) and isinstance(c.func, ast.Attribute)
+                    and c.func.attr in ("answer", "edit_text") and c.args):
+                continue
+            if ast.unparse(c.func.value) not in ("message", "callback.message"):
+                continue
+            if "reply_markup" in {k.arg for k in c.keywords}:
+                continue
+            text = ast.unparse(c.args[0])
+            if not _ASK.search(text) or _ASK_RETRY.search(text):
+                continue
+            if any(f"{path.name}: {text}".startswith(a) for a in _ASK_ALLOWED):
+                continue
+            found.append(f"{path.name}:{c.lineno}: {text[:60]}")
+    return found
+
+
+def test_input_prompts_offer_cancel():
+    found = _prompts_without_exit(HANDLERS)
+    assert not found, "запрос ввода без кнопки отмены:\n" + "\n".join(found[:20])
+
+
+def test_cancel_kb_leads_to_main_menu():
+    body = _helper_src("cancel_kb")
+    assert 'BmCb(action="main")' in body and "Отменить" in body

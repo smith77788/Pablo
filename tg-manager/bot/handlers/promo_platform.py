@@ -36,7 +36,7 @@ from bot.states import (
     PromoTopCheckFSM,
     PromoTransferFSM,
 )
-from bot.utils.op_helpers import safe_edit, terminal_kb
+from bot.utils.op_helpers import safe_edit, terminal_kb, cancel_kb
 from bot.utils.subscription import require_plan
 from database import db
 from services import bot_api
@@ -977,7 +977,7 @@ async def fsm_bot_reg_date(message: Message, state: FSMContext) -> None:
     await state.set_state(PromoAddBotFSM.token)
     await message.answer(
         f"✅ Дата: {text}\n\n"
-        "Введите <b>токен бота</b> (из BotFather) или <code>-</code> чтобы пропустить:"
+        "Введите <b>токен бота</b> (из BotFather) или <code>-</code> чтобы пропустить:", reply_markup=cancel_kb()
     )
 
 
@@ -986,7 +986,7 @@ async def fsm_bot_token(message: Message, state: FSMContext) -> None:
     token = (message.text or "").strip()
     await state.update_data(token=None if token == "-" else token)
     await state.set_state(PromoAddBotFSM.notes)
-    await message.answer("Введите <b>заметки</b> или <code>-</code> чтобы пропустить:")
+    await message.answer("Введите <b>заметки</b> или <code>-</code> чтобы пропустить:", reply_markup=cancel_kb())
 
 
 @router.message(PromoAddBotFSM.notes)
