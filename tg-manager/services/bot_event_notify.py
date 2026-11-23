@@ -22,6 +22,9 @@
 уходит сразу, следующие внутри окна копятся и уходят одним сообщением РОВНО по
 окончании окна (таймер), а не «когда придёт кто-то ещё». Защита от накрутки
 (не больше одного сообщения в минуту на источник) при этом сохраняется.
+
+Куда уходит: в каналы-приёмники владельца (services/bot_notify_routes.py —
+отдельный канал на каждую сеть проектов) и в личку, если её не выключили.
 """
 from __future__ import annotations
 
@@ -31,6 +34,8 @@ import itertools
 import logging
 import time
 from typing import Any, Awaitable, Callable
+
+from services import bot_notify_routes as _routes
 
 log = logging.getLogger(__name__)
 
@@ -347,8 +352,12 @@ async def notify_join_request(pool, main_bot, owner_id: int, *, bot_id: int,
                 markup = join_buttons(bot_id, chat_id, batch[0]["user_id"])
             except Exception:
                 log.debug("join buttons", exc_info=True)
+        text = join_note(chat, batch, via_bot)
+        if await _routes.deliver(pool, main_bot, owner_id, bot_id=bot_id,
+                                 event="join_request", text=text, reply_markup=markup):
+            return
         await db.notify_if_enabled(
-            pool, main_bot, owner_id, "new_user", join_note(chat, batch, via_bot),
+            pool, main_bot, owner_id, "new_user", text,
             reply_markup=markup, dedup_key=dedup_key(key))
 
     submit(key, join_event(cjr), _send)
@@ -364,8 +373,11 @@ async def notify_start(pool, main_bot, owner_id: int, *, bot_id: int,
     key = f"start:{bot_id}"
 
     async def _send(batch: list[dict]) -> None:
+        text = start_note(bot_name, batch)
+        if await _routes.deliver(pool, main_bot, owner_id, bot_id=bot_id,
+                                 event="start", text=text):
+            return
         await db.notify_if_enabled(
-            pool, main_bot, owner_id, "new_user", start_note(bot_name, batch),
-            dedup_key=dedup_key(key))
+            pool, main_bot, owner_id, "new_user", text, dedup_key=dedup_key(key))
 
     submit(key, event, _send)

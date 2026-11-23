@@ -34,6 +34,7 @@ from services.contacts_hub import segments as _segments
 from services import mini_app_bots
 from services import mini_app_invite
 from services import mini_app_channels
+from services import mini_app_notify_routes
 from services import mini_app_monitor
 from services import mini_app_operations
 from services import mini_app_dashboard
@@ -10276,6 +10277,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     mini_app_bots.setup_routes(app, pool)
     mini_app_invite.setup_routes(app, pool)
     mini_app_channels.setup_routes(app, pool)
+    mini_app_notify_routes.setup_routes(app, pool)
     mini_app_operations.setup_routes(app, pool)
     mini_app_dashboard.setup_routes(app, pool)
     mini_app_dm.setup_routes(app, pool)

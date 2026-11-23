@@ -32,6 +32,7 @@ DELETE /api/miniapp/networks/edges/{edge_id}
 DELETE /api/miniapp/networks/nodes/{node_id}
 DELETE /api/miniapp/node/{node_id}
 DELETE /api/miniapp/notary/{watch_id}
+DELETE /api/miniapp/notify_routes/{route_id}
 DELETE /api/miniapp/persona/{persona_id}
 DELETE /api/miniapp/persona/{persona_id}/memory
 DELETE /api/miniapp/persona/{persona_id}/peer/{peer_id}
@@ -142,6 +143,7 @@ GET /api/miniapp/campaigns
 GET /api/miniapp/cf/pool/status
 GET /api/miniapp/channel/{ch_id}
 GET /api/miniapp/channel/{ch_id}/invite_link
+GET /api/miniapp/channel/{ch_id}/settings
 GET /api/miniapp/channel_factory/recent
 GET /api/miniapp/channel_rankings
 GET /api/miniapp/channels
@@ -280,6 +282,7 @@ GET /api/miniapp/node/{node_id}/threads
 GET /api/miniapp/nodes
 GET /api/miniapp/notary
 GET /api/miniapp/notary/{watch_id}
+GET /api/miniapp/notify_routes
 GET /api/miniapp/onboarding
 GET /api/miniapp/operation/{op_id}
 GET /api/miniapp/operation/{op_id}/editable
@@ -512,6 +515,7 @@ HEAD /api/miniapp/campaigns
 HEAD /api/miniapp/cf/pool/status
 HEAD /api/miniapp/channel/{ch_id}
 HEAD /api/miniapp/channel/{ch_id}/invite_link
+HEAD /api/miniapp/channel/{ch_id}/settings
 HEAD /api/miniapp/channel_factory/recent
 HEAD /api/miniapp/channel_rankings
 HEAD /api/miniapp/channels
@@ -650,6 +654,7 @@ HEAD /api/miniapp/node/{node_id}/threads
 HEAD /api/miniapp/nodes
 HEAD /api/miniapp/notary
 HEAD /api/miniapp/notary/{watch_id}
+HEAD /api/miniapp/notify_routes
 HEAD /api/miniapp/onboarding
 HEAD /api/miniapp/operation/{op_id}
 HEAD /api/miniapp/operation/{op_id}/editable
@@ -915,6 +920,7 @@ POST /api/miniapp/channel/{ch_id}/post
 POST /api/miniapp/channel/{ch_id}/promote
 POST /api/miniapp/channel/{ch_id}/promote_one
 POST /api/miniapp/channel/{ch_id}/restore
+POST /api/miniapp/channel/{ch_id}/settings
 POST /api/miniapp/channel_factory/submit
 POST /api/miniapp/channel_rankings/add
 POST /api/miniapp/channel_rankings/check
@@ -1067,6 +1073,8 @@ POST /api/miniapp/niche/keywords
 POST /api/miniapp/node
 POST /api/miniapp/notary
 POST /api/miniapp/notary/{watch_id}/check
+POST /api/miniapp/notify_routes
+POST /api/miniapp/notify_routes/{route_id}/test
 POST /api/miniapp/onboarding/goal
 POST /api/miniapp/op_chain/launch
 POST /api/miniapp/operation/{op_id}/cancel
