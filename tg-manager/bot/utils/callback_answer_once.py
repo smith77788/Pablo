@@ -26,6 +26,12 @@ from aiogram.types import CallbackQuery
 log = logging.getLogger(__name__)
 
 _MAX_REMEMBERED = 5000
+# Всплывашку длиннее 200 знаков Telegram отвергает ЦЕЛИКОМ (MESSAGE_TOO_LONG),
+# а глобальный обработчик ошибок такое не показывает: человек нажал кнопку, и
+# ничего не произошло. Длинный текст чаще всего собирается из данных —
+# названия канала, причины от Telegram, — поэтому обрезаем здесь, в одном
+# месте, а не надеемся на каждую подпись.
+_ALERT_MAX = 200
 _answered: "OrderedDict[str, bool]" = OrderedDict()
 _ORIGINAL = CallbackQuery.answer
 
@@ -41,6 +47,8 @@ def _answer(self: CallbackQuery, text: str | None = None, show_alert: bool | Non
             log.info("повторный ответ на нажатие ушёл сообщением: %r", text[:60])
             return self.bot.send_message(self.message.chat.id, text, parse_mode=None)
         return _noop()
+    if text and len(text) > _ALERT_MAX:
+        text = text[: _ALERT_MAX - 1] + "…"
     _answered[self.id] = True
     while len(_answered) > _MAX_REMEMBERED:
         _answered.popitem(last=False)
