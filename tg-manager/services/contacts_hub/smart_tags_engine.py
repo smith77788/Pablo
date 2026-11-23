@@ -1,4 +1,5 @@
 from __future__ import annotations
+import asyncio
 import json
 import logging
 import re
@@ -87,6 +88,20 @@ _INSERT_TAGS_SQL = """
 """
 
 
+def _match_all(contacts: list, all_rules: list) -> list:
+    pending = []
+    for c in contacts:
+        cd = _normalize_contact(c)
+        cid = cd['id']
+        for rule in all_rules:
+            tag = (rule.get('tag') or '').strip()
+            if not tag:
+                continue
+            if _check_condition(cd, rule.get('conditions') or {}):
+                pending.append((cid, tag, rule['source'], rule['rule_id']))
+    return pending
+
+
 async def apply_smart_tags(pool, owner_id: int, contact_id: str = None) -> dict:
     """Разложить метки по контактам согласно правилам.
 
@@ -139,16 +154,9 @@ async def apply_smart_tags(pool, owner_id: int, contact_id: str = None) -> dict:
         contacts = await pool.fetch(
             f'SELECT c.*, {cnt_sql} FROM unified_contacts c WHERE c.owner_id=$1', owner_id)
 
-    pending = []
-    for c in contacts:
-        cd = _normalize_contact(dict(c))
-        cid = cd['id']
-        for rule in all_rules:
-            tag = (rule.get('tag') or '').strip()
-            if not tag:
-                continue
-            if _check_condition(cd, rule.get('conditions') or {}):
-                pending.append((cid, tag, rule['source'], rule['rule_id']))
+    # Сверка в потоке: контакты × правила — чистый Python, и на 30 000
+    # контактов с тысячей правил он держал цикл событий 6,4 с (бот молчал).
+    pending = await asyncio.to_thread(_match_all, [dict(c) for c in contacts], all_rules)
 
     # Раньше на каждое совпадение уходил отдельный INSERT: при 20 тысячах
     # контактов это 140 тысяч обращений к базе, и экран отваливался по таймауту
