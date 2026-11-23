@@ -147,10 +147,10 @@ async def cb_cluster_stats(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
                 COUNT(*) AS bot_count,
                 COALESCE(SUM(aud.cnt), 0) AS total_users
             FROM managed_bots m
-            LEFT JOIN (
-                SELECT bot_id, COUNT(*) AS cnt
-                FROM bot_users WHERE is_active=TRUE GROUP BY bot_id
-            ) aud ON aud.bot_id = m.bot_id
+            LEFT JOIN LATERAL (
+               SELECT NULLIF(COUNT(*), 0) AS cnt FROM bot_users x
+                WHERE x.bot_id = m.bot_id AND x.is_active
+           ) aud ON TRUE
             WHERE m.added_by=$1 AND m.cluster IS NOT NULL AND m.is_active=TRUE
             GROUP BY cluster
             ORDER BY total_users DESC

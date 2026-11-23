@@ -826,10 +826,10 @@ async def cb_health_bots(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
             SELECT b.bot_id, b.username, b.first_name, b.token,
                    COALESCE(aud.cnt, 0) AS user_count
             FROM managed_bots b
-            LEFT JOIN (
-                SELECT bot_id, COUNT(*) AS cnt
-                FROM bot_users WHERE is_active=TRUE GROUP BY bot_id
-            ) aud ON aud.bot_id = b.bot_id
+            LEFT JOIN LATERAL (
+               SELECT NULLIF(COUNT(*), 0) AS cnt FROM bot_users x
+                WHERE x.bot_id = b.bot_id AND x.is_active
+           ) aud ON TRUE
             WHERE b.added_by=$1 AND b.is_active=TRUE
             ORDER BY b.added_at DESC
             """,

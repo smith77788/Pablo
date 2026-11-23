@@ -669,9 +669,10 @@ async def cb_asset_registry(callback: CallbackQuery, pool: asyncpg.Pool) -> None
                       COUNT(CASE WHEN is_active THEN 1 END) AS active,
                       COALESCE(SUM(u.cnt), 0) AS total_users
                FROM managed_bots b
-               LEFT JOIN (
-                   SELECT bot_id, COUNT(*) AS cnt FROM bot_users WHERE is_active=TRUE GROUP BY bot_id
-               ) u ON u.bot_id = b.bot_id
+               LEFT JOIN LATERAL (
+               SELECT NULLIF(COUNT(*), 0) AS cnt FROM bot_users x
+                WHERE x.bot_id = b.bot_id AND x.is_active
+           ) u ON TRUE
                WHERE b.added_by=$1""",
             uid,
         )

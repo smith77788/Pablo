@@ -52,9 +52,10 @@ async def cb_net_bc_cluster(
             """SELECT bot_id, username, first_name, token,
                       COALESCE(aud.cnt, 0) AS audience_count
                FROM managed_bots m
-               LEFT JOIN (
-                   SELECT bot_id, COUNT(*) AS cnt FROM bot_users WHERE is_active=TRUE GROUP BY bot_id
-               ) aud ON aud.bot_id = m.bot_id
+               LEFT JOIN LATERAL (
+               SELECT NULLIF(COUNT(*), 0) AS cnt FROM bot_users x
+                WHERE x.bot_id = m.bot_id AND x.is_active
+           ) aud ON TRUE
                WHERE m.added_by=$1 AND m.cluster=$2 AND m.is_active=TRUE
                ORDER BY m.first_name""",
             callback.from_user.id,
@@ -385,8 +386,10 @@ async def msg_net_bc_text(
             cluster_bots = await pool.fetch(
                 """SELECT m.bot_id, COALESCE(aud.cnt, 0) AS audience_count
                    FROM managed_bots m
-                   LEFT JOIN (SELECT bot_id, COUNT(*) AS cnt FROM bot_users WHERE is_active=TRUE GROUP BY bot_id) aud
-                   ON aud.bot_id = m.bot_id
+                   LEFT JOIN LATERAL (
+               SELECT NULLIF(COUNT(*), 0) AS cnt FROM bot_users x
+                WHERE x.bot_id = m.bot_id AND x.is_active
+           ) aud ON TRUE
                    WHERE m.added_by=$1 AND m.cluster=$2 AND m.is_active=TRUE""",
                 message.from_user.id,
                 cluster_name,
