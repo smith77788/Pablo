@@ -25,7 +25,7 @@ from bot.callbacks import AiCb, BmCb
 from bot.states import AiChat
 from bot.utils.subscription import require_plan
 from bot.utils.ai_tools import TOOL_DEFINITIONS, run_tool, execute_action
-from bot.utils.op_helpers import safe_answer, safe_edit, terminal_kb
+from bot.utils.op_helpers import retry_kb, safe_answer, safe_edit, terminal_kb
 
 from services import ai_gateway, ai_memory, llm_gate
 from services.ai_providers import configured_providers
@@ -763,7 +763,7 @@ async def _process_ai_turn(
 
     if turns >= _MAX_TURNS:
         await state.clear()
-        await message.answer("Диалог стал слишком длинным. Начните новую сессию: /ai")
+        await message.answer("Диалог стал слишком длинным. Начните новую сессию кнопкой ниже.", reply_markup=retry_kb(AiCb(action="start"), retry_text="🤖 Новая сессия"))
         return
 
     messages.append({"role": "user", "content": user_content})

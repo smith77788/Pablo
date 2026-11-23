@@ -105,7 +105,7 @@ async def msg_error_screenshot(
             f"ID отчёта: <code>#{report_id}</code>\n\n"
             f"Я проанализирую его и если нужна дополнительная информация — свяжусь с вами."
         )
-        await message.answer(text)
+        await message.answer(text, reply_markup=terminal_kb())
 
         # Notify all admins about the new error report
         user = message.from_user
