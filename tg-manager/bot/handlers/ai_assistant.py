@@ -1329,12 +1329,12 @@ async def cb_ai_retry(
     data = await state.get_data()
     messages: list = data.get("messages", [])
     if not messages:
-        await callback.message.edit_text("❌ Нет предыдущего сообщения для повтора.")
+        await callback.message.edit_text("❌ Нет предыдущего сообщения для повтора.", reply_markup=terminal_kb())
         return
     # Find last user message
     last_user = next((m for m in reversed(messages) if m.get("role") == "user"), None)
     if not last_user:
-        await callback.message.edit_text("❌ Нет предыдущего сообщения для повтора.")
+        await callback.message.edit_text("❌ Нет предыдущего сообщения для повтора.", reply_markup=terminal_kb())
         return
     # Remove last assistant message if present so we don't duplicate it
     retry_messages = (

@@ -70,7 +70,7 @@ async def cb_scan_open(callback: CallbackQuery, state: FSMContext) -> None:
 async def cb_scan_cancel(callback: CallbackQuery, state: FSMContext) -> None:
     await safe_answer(callback)
     await state.clear()
-    await callback.message.edit_text("Проверка отменена.")
+    await callback.message.edit_text("Проверка отменена.", reply_markup=terminal_kb())
 
 
 @router.message(ComplianceScanFSM.waiting_resources, F.text)

@@ -780,7 +780,7 @@ async def cb_resend_sms(callback: CallbackQuery, state: FSMContext) -> None:
     phone_code_hash: str = data.get("phone_code_hash", "")
 
     if not phone or not phone_code_hash:
-        await callback.message.answer("❌ Сессия истекла. Начните заново: /accounts")
+        await callback.message.answer("❌ Сессия истекла. Начните заново: /accounts", reply_markup=terminal_kb())
         await state.clear()
         return
 
@@ -2466,7 +2466,7 @@ async def cb_remove_confirm(
     except Exception as _e:
         await callback.message.edit_text(
             f"❌ Ошибка при проверке операций: {escape(str(_e)[:200])}",
-            parse_mode="HTML",
+            parse_mode="HTML", reply_markup=terminal_kb(),
         )
         return
     if active_ops:
@@ -2491,7 +2491,7 @@ async def cb_remove_confirm(
     except Exception as _e:
         await callback.message.edit_text(
             f"❌ Ошибка при удалении аккаунта: {escape(str(_e)[:200])}",
-            parse_mode="HTML",
+            parse_mode="HTML", reply_markup=terminal_kb(),
         )
         return
 

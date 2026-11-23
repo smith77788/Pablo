@@ -603,7 +603,7 @@ async def cb_pack_confirm_create(
         bot_username=sd.get("pack_bot_username"),
     )
     if not pack_id:
-        await callback.message.answer("❌ Ошибка создания пакета. Попробуйте ещё раз.")
+        await callback.message.answer("❌ Ошибка создания пакета. Попробуйте ещё раз.", reply_markup=terminal_kb())
         return
     ch_ids = sd.get("pack_channel_ids") or []
     gr_ids = sd.get("pack_group_ids") or []

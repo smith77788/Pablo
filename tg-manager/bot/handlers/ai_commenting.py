@@ -70,7 +70,7 @@ async def cb_ai_comment_open(callback: CallbackQuery, state: FSMContext) -> None
 async def cb_ai_comment_cancel(callback: CallbackQuery, state: FSMContext) -> None:
     await safe_answer(callback)
     await state.clear()
-    await callback.message.edit_text("AI-комментирование отменено.")
+    await callback.message.edit_text("AI-комментирование отменено.", reply_markup=terminal_kb())
 
 
 @router.message(AiCommentFSM.waiting_channels, F.text)
@@ -132,7 +132,7 @@ async def cb_ai_comment_tone(
 
     tone = callback_data.tone if callback_data.tone in COMMENT_TONES else "neutral"
     if not channels:
-        await callback.message.edit_text("⚠️ Сессия истекла, начните заново: /ai_comment")
+        await callback.message.edit_text("⚠️ Сессия истекла, начните заново: /ai_comment", reply_markup=terminal_kb())
         return
 
     # Проверка активных аккаунтов (как в mini-app).
@@ -174,7 +174,7 @@ async def cb_ai_comment_tone(
         )
     except Exception as exc:
         log.exception("ai_comment submit uid=%s", callback.from_user.id)
-        await callback.message.edit_text(f"⚠️ Не удалось поставить в очередь: {owner_error(exc)}")
+        await callback.message.edit_text(f"⚠️ Не удалось поставить в очередь: {owner_error(exc)}", reply_markup=terminal_kb())
         return
 
     kb = InlineKeyboardBuilder()

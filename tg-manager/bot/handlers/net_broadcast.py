@@ -128,7 +128,7 @@ async def cb_net_bc_target(
     except Exception:
         log.exception("cb_net_bc_target: db.get_bots failed")
         await callback.message.edit_text(
-            "⚠️ Ошибка загрузки ботов. Попробуйте снова.", parse_mode="HTML"
+            "⚠️ Ошибка загрузки ботов. Попробуйте снова.", parse_mode="HTML", reply_markup=terminal_kb()
         )
         return
     total_aud = sum(b.get("audience_count", 0) for b in bots)

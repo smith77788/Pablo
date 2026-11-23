@@ -108,11 +108,11 @@ async def cb_buy(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
     try:
         res = await hs.create_purchase(pool, uid)
     except usdt_invoice.NoFreeAmountError as exc:
-        await callback.message.edit_text(f"⏳ Счёт не создан.\n\n{owner_error(exc)}")
+        await callback.message.edit_text(f"⏳ Счёт не создан.\n\n{owner_error(exc)}", reply_markup=terminal_kb())
         return
     except Exception:
         log_exc_swallow(log, "host cb_buy")
-        await callback.message.edit_text("❌ Ошибка создания платежа. Попробуйте позже.")
+        await callback.message.edit_text("❌ Ошибка создания платежа. Попробуйте позже.", reply_markup=terminal_kb())
         return
     kb = InlineKeyboardBuilder()
     kb.button(text="🔄 Проверить оплату", callback_data=HostCb(action="check_pay"))

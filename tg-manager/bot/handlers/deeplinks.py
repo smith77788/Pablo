@@ -15,7 +15,7 @@ from bot.states import CreateDeepLink
 from bot.utils.subscription import require_plan, locked_text
 from database import db
 from aiogram.utils.keyboard import InlineKeyboardBuilder
-from bot.utils.op_helpers import safe_answer
+from bot.utils.op_helpers import safe_answer, terminal_kb
 
 router = Router()
 
@@ -44,7 +44,7 @@ async def cb_dl_menu(
     if not row:
         await callback.message.edit_text(
             "❌ Бот не найден. Возможно, он был удалён.",
-            parse_mode="HTML",
+            parse_mode="HTML", reply_markup=terminal_kb(),
         )
         return
     links = await db.get_deep_links(pool, callback_data.bot_id)
@@ -85,7 +85,7 @@ async def cb_dl_view(
     if not row:
         await callback.message.edit_text(
             "❌ Бот не найден. Возможно, он был удалён.",
-            parse_mode="HTML",
+            parse_mode="HTML", reply_markup=terminal_kb(),
         )
         return
     links = await db.get_deep_links(pool, callback_data.bot_id)
