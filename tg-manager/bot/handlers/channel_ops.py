@@ -128,7 +128,7 @@ def _pacing_kb(current: str) -> InlineKeyboardBuilder:
 from database import db
 
 log = logging.getLogger(__name__)
-from bot.utils.fmt import num_ru  # noqa: E402
+from bot.utils.fmt import num_ru, plural  # noqa: E402
 
 router = Router()
 
@@ -1083,7 +1083,7 @@ async def _render_bulk_confirm(
 
     kb = InlineKeyboardBuilder()
     kb.button(
-        text=f"✅ Создать {total} объект(ов)",
+        text=f"✅ Создать {total} {plural(total, 'объект', 'объекта', 'объектов')}",
         callback_data=ChanCb(action="do_bulk_create"),
     )
     kb.button(text="❌ Отмена", callback_data=ChanCb(action="bulk_menu"))
@@ -1444,7 +1444,7 @@ async def _show_bpchans_page(msg, state: FSMContext, edit: bool = False) -> None
     n_sel = len(selected)
     if n_sel:
         kb.button(
-            text=f"▶️ Продолжить ({n_sel} канал(ов))",
+            text=f"▶️ Продолжить ({n_sel} {plural(n_sel, 'канал', 'канала', 'каналов')})",
             callback_data=f"chan:cpsdone:{data['bpchans_acc_id']}",
         )
     kb.button(text="◀️ Назад", callback_data=ChanCb(action="bulk_post_chans"))
@@ -2376,7 +2376,7 @@ async def cb_promote_all(
     kb.adjust(1)
     await callback.message.edit_text(
         f"👑 <b>Назначение администраторов поставлено в очередь</b>\n\n"
-        f"📋 Операция <code>#{op_id}</code> · {n_others} аккаунт(ов)\n"
+        f"📋 Операция <code>#{op_id}</code> · {n_others} {plural(n_others, 'аккаунт', 'аккаунта', 'аккаунтов')}\n"
         f"⏱ Ожидаемое время: ~{n_others * 2} сек.\n\n"
         f"<i>Аккаунты должны быть участниками канала перед промоцией.</i>\n"
         "Статус: /ops",
@@ -2715,7 +2715,7 @@ async def _show_invite_acc_selector(
         f"Канал: <code>{html.escape(channel_display)}</code>\n\n"
         f"Выберите аккаунты для инвайта.\n"
         f"Список равномерно распределится между аккаунтами.\n\n"
-        f"Выбрано: <b>{n}</b> аккаунт(ов)"
+        f"Выбрано: <b>{n}</b> {plural(n, 'аккаунт', 'аккаунта', 'аккаунтов')}"
     )
     if edit:
         try:
@@ -3345,7 +3345,7 @@ async def fsm_botfather_username(
     )
     await message.answer(
         f"✅ Создание ботов поставлено в очередь\n"
-        f"📋 Операция #{op_id} • {total} бот(ов) через {len(accounts)} аккаунт(ов)\n\n"
+        f"📋 Операция #{op_id} • {total} {plural(total, 'бот', 'бота', 'ботов')} через {len(accounts)} {plural(len(accounts), 'аккаунт', 'аккаунта', 'аккаунтов')}\n\n"
         "Прогресс и результаты: /ops",
         parse_mode="HTML",
         reply_markup=_back_kb().as_markup(),
@@ -3876,7 +3876,7 @@ async def fsm_bulk_report_peers_batch(message: Message, state: FSMContext) -> No
     if len(peers) > 5:
         preview += f"\n<i>...и ещё {len(peers) - 5}</i>"
     await message.answer(
-        f"🚨 Жалоба на <b>{len(peers)}</b> ресурс(ов):\n{preview}\n\n"
+        f"🚨 Жалоба на <b>{len(peers)}</b> {plural(len(peers), 'ресурс', 'ресурса', 'ресурсов')}:\n{preview}\n\n"
         "Выберите тип нарушения:",
         parse_mode="HTML",
         reply_markup=_reason_kb().as_markup(),
@@ -4880,7 +4880,7 @@ async def fsm_join_invite_combined(
         mode_label = "☁️ релей CF" if proxy_mode == "relay" else "🔐 прокси аккаунтов"
         await message.answer(
             f"✅ Массовое вступление в <code>{html.escape(invite)}</code> поставлено в очередь\n"
-            f"📋 Операция #{op_id} · {count} аккаунт(ов) · {mode_label}\n\n"
+            f"📋 Операция #{op_id} · {count} {plural(count, 'аккаунт', 'аккаунта', 'аккаунтов')} · {mode_label}\n\n"
             "Прогресс и результаты: /ops\n\n"
             "💡 После вступления используйте <b>👥 Инвайт из контактов</b> для приглашения участников.",
             parse_mode="HTML",
@@ -6149,7 +6149,7 @@ async def cb_cinv_proceed(
         await state.update_data(selected_accs=selected_accs)
     await safe_answer(callback)
     msg = await callback.message.edit_text(
-        f"⏳ Подсчёт контактов с {len(selected_accs)} аккаунт(ов)...",
+        f"⏳ Считаю контакты, аккаунтов: {len(selected_accs)}…",
         parse_mode="HTML",
     )
     from services import account_manager as _am

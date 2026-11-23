@@ -39,7 +39,7 @@ from database.db import fetch_bots
 from bot.utils.op_helpers import safe_answer
 
 log = logging.getLogger(__name__)
-from bot.utils.fmt import num_ru  # noqa: E402
+from bot.utils.fmt import num_ru, plural  # noqa: E402
 
 router = Router()
 
@@ -1932,7 +1932,7 @@ async def cb_reset_cooldown_menu(callback: CallbackQuery, pool: asyncpg.Pool) ->
 
     lines = [
         "🔓 <b>Снять паузы и карантин</b>\n",
-        f"Не берутся в работу: <b>{len(rows)}</b> аккаунт(ов)\n",
+        f"Не берутся в работу: <b>{len(rows)}</b> {plural(len(rows), 'аккаунт', 'аккаунта', 'аккаунтов')}\n",
     ]
     _shown = _cap(rows)
     for acc in _shown:

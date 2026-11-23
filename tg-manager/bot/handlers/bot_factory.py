@@ -22,7 +22,7 @@ from services import bot_api
 from bot.utils.op_helpers import safe_answer, terminal_kb
 
 log = logging.getLogger(__name__)
-from bot.utils.fmt import num_ru  # noqa: E402
+from bot.utils.fmt import num_ru, plural  # noqa: E402
 
 router = Router()
 
@@ -396,7 +396,7 @@ async def msg_import_tokens(
         )
         return
 
-    info_msg = await message.answer(f"⏳ Проверяю {len(tokens)} токен(ов)...")
+    info_msg = await message.answer(f"⏳ Проверяю {len(tokens)} {plural(len(tokens), 'токен', 'токена', 'токенов')}...")
 
     valid: list[dict] = []
     invalid: list[str] = []
@@ -582,7 +582,7 @@ async def msg_validate_tokens(
         )
         return
 
-    info_msg = await message.answer(f"⏳ Проверяю {len(tokens)} токен(ов)...")
+    info_msg = await message.answer(f"⏳ Проверяю {len(tokens)} {plural(len(tokens), 'токен', 'токена', 'токенов')}...")
 
     working: list[dict] = []
     broken: list[str] = []
@@ -999,7 +999,7 @@ async def cb_clone_confirm(
     skip_line = f"\nПропущено (нечего применять): <b>{skipped_count}</b>" if skipped_count else ""
     await callback.message.edit_text(
         f"✅ <b>Клонирование завершено</b>\n\n"
-        f"Скопировано в: <b>{ok_count}</b> бот(ов)\n"
+        f"Скопировано в: <b>{ok_count}</b> {plural(ok_count, 'бот', 'бота', 'ботов')}\n"
         f"Ошибок: <b>{fail_count}</b>{skip_line}",
         parse_mode="HTML",
         reply_markup=kb.as_markup(),

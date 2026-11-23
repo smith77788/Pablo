@@ -20,6 +20,8 @@ from bot.utils.op_helpers import safe_answer
 _TOKEN_RE = re.compile(r"^\d{8,10}:[A-Za-z0-9_-]{35,}$")
 
 log = logging.getLogger(__name__)
+from bot.utils.fmt import plural  # noqa: E402
+
 router = Router()
 
 
@@ -144,7 +146,7 @@ async def cb_add(
             kb.button(text="📋 Подписка", callback_data=SubCb(action="menu"))
             upgrade_text = (
                 f"⛔️ <b>Достигнут лимит ботов</b>\n\n"
-                f"На вашем тарифе можно добавить максимум <b>{limit}</b> бот(ов).\n"
+                f"На вашем тарифе можно добавить максимум <b>{limit}</b> {plural(limit, 'бот', 'бота', 'ботов')}.\n"
                 f"У вас уже добавлено: <b>{len(current_bots)}</b>"
             )
 
@@ -434,7 +436,7 @@ async def cb_pset_view(
         f"<i>{html.escape(preset.get('description', ''))}</i>\n\n"
         f"<b>Команды ({len(cmds)}):</b>\n{cmd_list}\n\n"
         f"<b>Авто-ответы ({len(replies)}):</b>\n{reply_list}\n\n"
-        f"<b>Приветственная воронка:</b> {len(steps)} шаг(а/ов)\n"
+        f"<b>Приветственная воронка:</b> {len(steps)} {plural(len(steps), 'шаг', 'шага', 'шагов')}\n"
         f"{fields_hint}",
         parse_mode="HTML",
         reply_markup=kb.as_markup(),
@@ -525,7 +527,7 @@ async def cb_pset_apply(
                     await db.add_funnel_step(
                         pool, funnel_id, i, msg, int(delay_h * 60)
                     )
-            applied.append(f"✅ Воронка ({len(steps)} шаг(а))")
+            applied.append(f"✅ Воронка ({len(steps)} {plural(len(steps), 'шаг', 'шага', 'шагов')})")
         except Exception as e:
             errors.append(f"❌ Воронка: {e}")
 

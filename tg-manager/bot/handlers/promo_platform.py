@@ -47,6 +47,8 @@ from bot.utils.op_helpers import safe_answer
 log = logging.getLogger(__name__)
 from bot.utils.owner_error import owner_error  # noqa: E402
 
+from bot.utils.fmt import plural  # noqa: E402
+
 router = Router()
 
 _PRO = "pro"
@@ -761,7 +763,7 @@ async def cb_warehouse(callback: CallbackQuery, callback_data: PromoCb, pool: as
         f"<b>Сейчас:</b> {status_line}\n"
     )
     if updated:
-        header += f"<i>✅ {updated} бот(а) только что перешли в статус «Готов»</i>\n"
+        header += f"<i>✅ {updated} {plural(updated, 'бот', 'бота', 'ботов')} только что перешли в статус «Готов»</i>\n"
 
     if not bots:
         text = header + "\nБотов нет. Добавьте или спарсите из BotFather."
@@ -1067,7 +1069,7 @@ async def cb_bot_parse(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
         return
 
     progress_msg = await callback.message.answer(
-        f"⏳ <b>Парсинг BotFather</b>\n\nПроверяю {len(accounts)} аккаунт(ов)...\n"
+        f"⏳ <b>Парсинг BotFather</b>\n\nПроверяю {len(accounts)} {plural(len(accounts), 'аккаунт', 'аккаунта', 'аккаунтов')}...\n"
         "<i>Это может занять 1–2 минуты</i>"
     )
 

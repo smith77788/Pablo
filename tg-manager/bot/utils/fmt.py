@@ -13,3 +13,22 @@ def num_ru(value) -> str:
         return f"{value:,}".replace(",", " ")
     except (TypeError, ValueError):
         return str(value)
+
+
+def plural(n, one: str, few: str, many: str) -> str:
+    """Слово по числу: 1 бот, 2 бота, 5 ботов, 11 ботов, 21 бот.
+
+    Вместо «{n} бот(ов)»: скобка с окончанием — это форма из бланка, а не
+    фраза, и владелец её читает как недоделку.
+    """
+    try:
+        k = abs(int(n))
+    except (TypeError, ValueError):
+        return many
+    if 11 <= k % 100 <= 14:
+        return many
+    if k % 10 == 1:
+        return one
+    if 2 <= k % 10 <= 4:
+        return few
+    return many

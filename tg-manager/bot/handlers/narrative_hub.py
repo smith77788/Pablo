@@ -26,6 +26,8 @@ from services.logger import log_exc_swallow
 from bot.utils.op_helpers import safe_answer
 
 log = logging.getLogger(__name__)
+from bot.utils.fmt import plural  # noqa: E402
+
 router = Router(name="narrative_hub")
 
 # ── Constants ─────────────────────────────────────────────────────────────────
@@ -312,7 +314,7 @@ async def cb_narr_channel_toggle(
     await _edit(
         callback,
         f"<b>Шаг 3/5 — Выбор каналов</b>\n\n"
-        f"Выбрано: <b>{cnt}</b> канал(ов)\n\n"
+        f"Выбрано: <b>{cnt}</b> {plural(cnt, 'канал', 'канала', 'каналов')}\n\n"
         "Каждый канал получит уникальный пост с разным углом подачи.\n"
         "<i>Рекомендуется: 3–6 каналов</i>",
         kb.as_markup(),
@@ -352,7 +354,7 @@ async def cb_narr_channels_back(
     await _edit(
         callback,
         f"<b>Шаг 3/5 — Выбор каналов</b>\n\n"
-        f"Выбрано: <b>{cnt}</b> канал(ов)\n\n"
+        f"Выбрано: <b>{cnt}</b> {plural(cnt, 'канал', 'канала', 'каналов')}\n\n"
         "Каждый канал получит уникальный пост с разным углом подачи.\n"
         "<i>Рекомендуется: 3–6 каналов</i>",
         kb.as_markup(),
