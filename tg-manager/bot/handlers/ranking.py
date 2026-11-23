@@ -24,6 +24,7 @@ from bot.utils import tariffs
 from database import db
 from services.logger import log_exc_swallow
 from bot.utils.op_helpers import safe_answer
+from bot.utils.op_helpers import no_bots_kb
 
 log = logging.getLogger(__name__)
 
@@ -1263,7 +1264,7 @@ async def vis_select_bot(
         await safe_edit(
             callback,
             "👁️ <b>Позиции в поиске</b>\n\nУ вас пока нет ботов.",
-            reply_markup=kb.as_markup(),
+            reply_markup=no_bots_kb(back=VisCb(action="dashboard")),
         )
         return
 
@@ -1602,8 +1603,8 @@ async def vis_trends(
             kb.button(text="◀️ Назад", callback_data=VisCb(action="dashboard"))
             await safe_edit(
                 callback,
-                "📈 <b>Тренды позиций</b>\n\nНет ботов.",
-                reply_markup=kb.as_markup(),
+                "📈 <b>Тренды позиций</b>\n\nУ вас пока нет ботов.",
+                reply_markup=no_bots_kb(back=VisCb(action="dashboard")),
             )
             return
         if len(bots) == 1:

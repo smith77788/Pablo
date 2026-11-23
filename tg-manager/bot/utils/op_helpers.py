@@ -184,6 +184,21 @@ def no_accounts_kb(*, back: object | None = None):
     return kb.as_markup()
 
 
+def no_bots_kb(*, back: object | None = None):
+    """Клавиатура экрана «у вас нет ботов»: первая кнопка — добавить бота,
+    а не «Назад» и поиск раздела по подсказке в тексте."""
+    from aiogram.utils.keyboard import InlineKeyboardBuilder
+    from bot.callbacks import BmCb, BotCb
+
+    kb = InlineKeyboardBuilder()
+    kb.button(text="➕ Добавить бота", callback_data=BotCb(action="add"))
+    if back is not None:
+        kb.button(text="◀️ Назад", callback_data=back)
+    kb.button(text="🏠 Главное меню", callback_data=BmCb(action="main"))
+    kb.adjust(1, 2)
+    return kb.as_markup()
+
+
 def terminal_kb(*, back: object | None = None, back_text: str = "◀️ Назад"):
     """Клавиатура для финального экрана — «готово», «ошибка», «отменено».
 

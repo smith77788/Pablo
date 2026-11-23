@@ -23,6 +23,7 @@ from bot.utils.op_helpers import safe_answer
 
 log = logging.getLogger(__name__)
 from bot.utils.owner_error import owner_error  # noqa: E402
+from bot.utils.op_helpers import no_bots_kb
 
 router = Router()
 
@@ -177,9 +178,7 @@ async def cb_ca_start(callback: CallbackQuery, state: FSMContext, pool: asyncpg.
         await callback.message.edit_text(
             "🔀 <b>Клон и адаптация</b>\n\nУ вас нет ботов. Сначала добавьте бота.",
             parse_mode="HTML",
-            reply_markup=InlineKeyboardBuilder().button(
-                text="◀️ Назад", callback_data=CloneAdaptCb(action="menu")
-            ).as_markup(),
+            reply_markup=no_bots_kb(back=CloneAdaptCb(action="menu")),
         )
         return
     kb = InlineKeyboardBuilder()

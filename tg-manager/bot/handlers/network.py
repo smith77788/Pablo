@@ -29,6 +29,7 @@ from services import broadcaster, bot_api
 from bot.utils.op_helpers import safe_answer
 
 from bot.utils.fmt import num_ru  # noqa: E402
+from bot.utils.op_helpers import no_bots_kb
 
 router = Router()
 
@@ -526,7 +527,7 @@ async def cb_net_health(
     if not bots:
         kb = InlineKeyboardBuilder()
         kb.button(text="◀️ Назад", callback_data=NetworkCb(action="menu"))
-        await callback.message.edit_text("❤️ Нет ботов.", reply_markup=kb.as_markup())
+        await callback.message.edit_text("❤️ <b>Здоровье сети</b>\n\nУ вас пока нет ботов.", reply_markup=no_bots_kb(back=NetworkCb(action="menu")))
         return
 
     # Batch check all tokens concurrently
