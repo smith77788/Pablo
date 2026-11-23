@@ -1008,7 +1008,7 @@ async def _apply_bot_template_data(
 
     # Welcome /start message
     if data.get("welcome_message") and not any(
-        ar.get("keyword", "").strip().lower() in ("/start", "start")
+        (ar.get("keyword") or "").strip().lower() in ("/start", "start")
         for ar in (data.get("auto_replies") or [])
     ):
         try:
@@ -1022,7 +1022,7 @@ async def _apply_bot_template_data(
     if data.get("funnel_steps"):
         funnel_trigger = data.get("funnel_trigger", "start")
         _has_start_welcome = bool(data.get("welcome_message")) or any(
-            ar.get("keyword", "").strip().lower() in ("/start", "start")
+            (ar.get("keyword") or "").strip().lower() in ("/start", "start")
             for ar in (data.get("auto_replies") or [])
         )
         from services.preset_templates import strip_duplicate_welcome_steps
