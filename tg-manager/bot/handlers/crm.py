@@ -1338,7 +1338,7 @@ async def _process_csv_import(
             if mapped:
                 norm[mapped] = (v or "").strip()
 
-        title = norm.get("title", "").strip()
+        title = (norm.get("title") or "").strip()
         if not title:
             errors += 1
             continue

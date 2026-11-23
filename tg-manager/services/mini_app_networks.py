@@ -634,7 +634,7 @@ def setup_routes(app: web.Application, pool) -> None:
             return _err("Недоступно", 403)
         nid = validate_integer(request.match_info["net_id"], min_val=1)
         kind = request.query.get("type", "")
-        search = request.query.get("q", "").strip()
+        search = (request.query.get("q") or "").strip()
         if nid is None or kind not in nb.PROJECT_RESOURCES or len(search) > 100:
             return _err("Неверные параметры каталога", 400)
         if not await pool.fetchval(
