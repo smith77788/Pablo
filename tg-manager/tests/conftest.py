@@ -329,8 +329,26 @@ def _clear_op_worker_claims() -> None:
         from services import op_worker as _ow
         _ow._accounts_in_use.clear()
         _ow._operation_account_locks.clear()
+        _ow._claim_ledger.clear()
     except Exception:
         pass
+
+
+@pytest.fixture(autouse=True)
+def _no_background_hold_wait():
+    """Захват под операцию ждёт аккаунты, занятые фоновым циклом, до
+    `_BG_HOLD_WAIT_S` (45 с в проде). Тесты, кладущие аккаунт в
+    `_accounts_in_use` руками, моделируют «занят» и ждали бы зря. Само ожидание
+    проверяет `tests/test_fleet_fair_share.py`, ставя своё значение."""
+    try:
+        from services import op_worker as _ow
+    except Exception:
+        yield
+        return
+    saved = _ow._BG_HOLD_WAIT_S
+    _ow._BG_HOLD_WAIT_S = 0.0
+    yield
+    _ow._BG_HOLD_WAIT_S = saved
 
 
 @pytest.fixture(autouse=True)

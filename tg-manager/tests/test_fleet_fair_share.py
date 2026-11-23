@@ -61,6 +61,10 @@ def _isolate_op_worker_globals():
     saved_in_use = set(ow._accounts_in_use)
     saved_locks = dict(ow._operation_account_locks)
     saved_active = set(ow._active_op_ids)
+    saved_started = dict(ow._op_started_mono)
+    saved_ledger = dict(ow._claim_ledger)
+    ow._op_started_mono.clear()
+    ow._claim_ledger.clear()
     ow._accounts_in_use.clear()
     ow._operation_account_locks.clear()
     ow._active_op_ids.clear()
@@ -74,12 +78,25 @@ def _isolate_op_worker_globals():
         ow._operation_account_locks.update(saved_locks)
         ow._active_op_ids.clear()
         ow._active_op_ids.update(saved_active)
+        ow._op_started_mono.clear()
+        ow._op_started_mono.update(saved_started)
+        ow._claim_ledger.clear()
+        ow._claim_ledger.update(saved_ledger)
 
 
 def _reset():
     ow._accounts_in_use.clear()
     ow._operation_account_locks.clear()
     ow._active_op_ids.clear()
+
+
+def _start_ops(*op_ids: int, age_s: float = 0.0):
+    """Операции op_ids только что стартовали в этом процессе (как в _process_pending)."""
+    import time as _t
+    ow._active_op_ids.clear()
+    ow._active_op_ids.update(op_ids)
+    for i in op_ids:
+        ow._op_started_mono[i] = _t.monotonic() - age_s
 
 
 def _set_live_ops(n: int):
@@ -109,7 +126,7 @@ def test_solo_op_not_starved_by_phantom_running_rows():
 
 def test_three_parallel_ops_split_fleet_disjointly():
     _reset()
-    _set_live_ops(3)                    # три РЕАЛЬНО живые операции
+    _start_ops(1, 2, 3)                 # три операции стартовали разом
     ow._db_pool = _FakePool(running=3)  # три параллельные операции владельца
     a = asyncio.run(ow._claim_available_accounts(1, _accts(9), owner_id=7))
     b = asyncio.run(ow._claim_available_accounts(2, _accts(9), owner_id=7))
@@ -122,13 +139,124 @@ def test_three_parallel_ops_split_fleet_disjointly():
 
 def test_second_op_is_not_starved_under_contention():
     _reset()
-    _set_live_ops(2)
+    _start_ops(1, 2)
     ow._db_pool = _FakePool(running=2)
     a = asyncio.run(ow._claim_available_accounts(1, _accts(10), owner_id=7))
     b = asyncio.run(ow._claim_available_accounts(2, _accts(10), owner_id=7))
     # первая НЕ забрала весь флот → второй досталось (раньше было 0 → «заняты»)
     assert len(a) == 5 and len(b) == 5
     assert not (set(x["id"] for x in a) & set(x["id"] for x in b))
+
+
+def test_neighbour_that_already_holds_its_accounts_does_not_cut_my_selection():
+    """Регресс жалобы «операция захватывает несколько аккаунтов, а работает лишь
+    часть». Соседняя операция владельца уже держит СВОИ аккаунты 1..5; эта
+    выбрала 6..10, все свободны. Прежний делитель считал соседа претендентом и
+    отдавал этой ⌈5/2⌉=3 — два выбранных свободных аккаунта не работали вовсе."""
+    _reset()
+    _start_ops(1)
+    ow._db_pool = _FakePool(running=2)
+    held = asyncio.run(ow._claim_available_accounts(1, _accts(5), owner_id=7))
+    assert len(held) == 5
+    _start_ops(1, 2)                    # вторая стартовала, первая уже с флотом
+    mine = [{"id": i} for i in range(6, 11)]
+    got = asyncio.run(ow._claim_available_accounts(2, mine, owner_id=7))
+    assert [a["id"] for a in got] == [6, 7, 8, 9, 10]
+
+
+def test_long_running_op_without_accounts_does_not_halve_the_fleet():
+    """Рассылка ботом/разбор идут часами и аккаунтов не берут. Пока такая
+    операция жила, любая массовая операция владельца получала половину выбора."""
+    _reset()
+    _start_ops(1, 2, age_s=3600)        # сосед №1 стартовал час назад
+    ow._op_started_mono[2] = __import__("time").monotonic()
+    ow._db_pool = _FakePool(running=2)
+    got = asyncio.run(ow._claim_available_accounts(2, _accts(10), owner_id=7))
+    assert len(got) == 10
+
+
+def test_account_held_by_background_loop_is_waited_for_not_dropped(monkeypatch):
+    """Аккаунт, который в момент старта держал призрак/прогрев (секунды), раньше
+    выпадал из прогона насовсем. Теперь его ждут и берут."""
+    _reset()
+    ow._db_pool = _FakePool(running=1)
+    monkeypatch.setattr(ow, "_BG_HOLD_WAIT_S", 5.0)
+    monkeypatch.setattr(ow, "_BG_HOLD_POLL_S", 0.05)
+    ow._accounts_in_use.add(3)          # фоновый цикл держит аккаунт 3
+
+    async def _run():
+        async def _bg_done():
+            await asyncio.sleep(0.2)
+            await ow.release_accounts([3])
+        t = asyncio.create_task(_bg_done())
+        got = await ow._claim_available_accounts(101, _accts(4), owner_id=7)
+        await t
+        return got
+
+    got = asyncio.run(_run())
+    assert sorted(a["id"] for a in got) == [1, 2, 3, 4]
+    assert 3 in ow._operation_account_locks.get(101, set())
+
+
+def test_account_held_by_another_operation_is_not_waited_for(monkeypatch):
+    """Чужую операцию не ждём: она может идти часами. Аккаунт уходит в «не пошли
+    в работу» с причиной, а не вешает старт."""
+    _reset()
+    ow._db_pool = _FakePool(running=1)
+    monkeypatch.setattr(ow, "_BG_HOLD_WAIT_S", 30.0)
+    ow._accounts_in_use.add(3)
+    ow._operation_account_locks[555] = {3}
+    import time as _t
+    t0 = _t.monotonic()
+    got = asyncio.run(ow._claim_available_accounts(101, _accts(4), owner_id=7))
+    assert _t.monotonic() - t0 < 2.0
+    assert sorted(a["id"] for a in got) == [1, 2, 4]
+
+
+class _DiagPool(_FakePool):
+    async def fetch(self, q, *a):
+        if "FROM tg_accounts" in q:
+            return [{"id": int(i), "is_active": True, "has_sess": True,
+                     "acc_status": "active", "on_cooldown": False}
+                    for i in (a[1] if len(a) > 1 else [])]
+        return await super().fetch(q, *a)
+
+
+def test_dropped_selected_accounts_are_named_in_the_summary(monkeypatch):
+    """Итог операции обязан сказать, что часть выбранных не работала и почему."""
+    _reset()
+    ow._db_pool = _FakePool(running=1)
+    monkeypatch.setattr(ow, "_BG_HOLD_WAIT_S", 0.0)
+    ow._accounts_in_use.add(3)
+    ow._operation_account_locks[555] = {3}
+    asyncio.run(ow._claim_available_accounts(101, _accts(4), owner_id=7))
+
+    async def _no_quar(pool, ids):
+        return set()
+    monkeypatch.setattr(ow._infra_mem, "quarantined_accounts", _no_quar)
+    note = asyncio.run(ow._claim_shortfall_note(
+        _DiagPool(running=1), 7, 101, {"account_ids": [1, 2, 3, 4]}))
+    assert "Не пошли в работу 1" in note and "заняты другой операцией" in note
+    assert 101 not in ow._claim_ledger      # ледгер снят
+
+
+def test_no_note_when_every_selected_account_worked():
+    _reset()
+    ow._db_pool = _FakePool(running=1)
+    asyncio.run(ow._claim_available_accounts(101, _accts(4), owner_id=7))
+    note = asyncio.run(ow._claim_shortfall_note(
+        _FakePool(running=1), 7, 101, {"account_ids": [1, 2, 3, 4]}))
+    assert note == ""
+
+
+def test_run_op_task_reports_shortfall_before_final_status():
+    """Строка о недоборе попадает в итог ДО классификации статуса: иначе
+    операция с выпавшими аккаунтами уходила владельцу как «выполнена»."""
+    import inspect
+    src = inspect.getsource(ow._run_op_task)
+    i_note = src.index("_claim_shortfall_note(")
+    i_cls = src.index("op_status.classify_final(")
+    assert i_note < i_cls
 
 
 def test_min_floor_when_more_ops_than_accounts():
