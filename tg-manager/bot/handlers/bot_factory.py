@@ -215,16 +215,16 @@ async def fsm_botcreate_name_tpl(message: Message, state: FSMContext) -> None:
     await state.set_state(BotCreateFSM.waiting_uname_tpl)
     kb = InlineKeyboardBuilder()
     kb.button(
-        text="⏭ Авто-username", callback_data=BotFactCb(action="create_skip_uname")
+        text="⏭ Авто-юзернейм", callback_data=BotFactCb(action="create_skip_uname")
     )
     kb.button(text="❌ Отмена", callback_data=BotFactCb(action="menu"))
     kb.adjust(1)
     await message.answer(
-        "🔤 <b>Шаблон username</b>\n\n"
-        "Введите базовый username (без @, без суффикса <code>bot</code>).\n"
+        "🔤 <b>Шаблон юзернейма</b>\n\n"
+        "Введите базовый юзернейм (без @, без суффикса <code>bot</code>).\n"
         "Суффикс <code>bot</code> добавляется автоматически.\n\n"
         "Пример: <code>myassistant</code> → <i>myassistant1bot, myassistant2bot...</i>\n\n"
-        "Или нажмите «Авто-username» — система сгенерирует уникальные имена сама.",
+        "Или нажмите «Авто-юзернейм» — система сгенерирует уникальные имена сама.",
         parse_mode="HTML",
         reply_markup=kb.as_markup(),
     )
@@ -244,7 +244,7 @@ async def fsm_botcreate_uname_tpl(message: Message, state: FSMContext) -> None:
         kb = InlineKeyboardBuilder()
         kb.button(text="❌ Отмена", callback_data=BotFactCb(action="menu"))
         await message.answer(
-            "⚠️ Шаблон username от 3 до 20 символов. Попробуйте ещё раз:",
+            "⚠️ Шаблон юзернейма от 3 до 20 символов. Попробуйте ещё раз:",
             reply_markup=kb.as_markup(),
         )
         return

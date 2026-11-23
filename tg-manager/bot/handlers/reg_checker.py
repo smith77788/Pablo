@@ -788,8 +788,8 @@ async def _handle_text_entity(
     # Complete failure — inform user
     await message.answer(
         f"⚠️ Не удалось найти <code>{html.escape(username_str)}</code>.\n\n"
-        "Возможно, аккаунта/канала с таким username не существует.\n"
-        "<i>Для приватных аккаунтов без username — используйте числовой ID или "
+        "Возможно, аккаунта/канала с таким юзернеймом не существует.\n"
+        "<i>Для приватных аккаунтов без юзернейма — используйте числовой ID или "
         "перешлите сообщение от этого человека.</i>",
         parse_mode="HTML",
         reply_markup=_waiting_kb(),
@@ -1388,6 +1388,6 @@ async def cmd_follows(message: Message, pool: asyncpg.Pool) -> None:
         kb_part = f"\n   /analyze_{eid}"
         lines.append(f"{icon} {ref}{name_part}{label_part}")
     lines.append(
-        "\n<i>Вы получите уведомление при изменении username или имени.</i>"
+        "\n<i>Вы получите уведомление при изменении юзернейма или имени.</i>"
     )
     await message.answer("\n".join(lines), parse_mode="HTML")

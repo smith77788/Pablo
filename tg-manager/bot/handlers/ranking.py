@@ -458,7 +458,7 @@ async def cb_rank_check_now(
     if not username:
         await safe_edit(
             callback,
-            "⚠️ У бота нет username — поиск невозможен.",
+            "⚠️ У бота нет юзернейма — поиск невозможен.",
             reply_markup=back_kb.as_markup(),
         )
         return

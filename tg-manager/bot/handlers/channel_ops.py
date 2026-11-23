@@ -418,10 +418,10 @@ def _bulk_menu_kb() -> InlineKeyboardBuilder:
         text="📤 Пост с нескольких аккаунтов", callback_data=ChanCb(action="bulk_post")
     )
     # ── Рассылка
-    kb.button(text="✉️ DM по username-списку", callback_data=ChanCb(action="bulk_dm"))
+    kb.button(text="✉️ ЛС по списку юзернеймов", callback_data=ChanCb(action="bulk_dm"))
     # ── Массовое управление каналами
     kb.button(
-        text="🔤 Username каналам (массово)",
+        text="🔤 Юзернейм каналам (массово)",
         callback_data=ChanCb(action="bulk_chan_uname"),
     )
     kb.button(
@@ -436,7 +436,7 @@ def _bulk_menu_kb() -> InlineKeyboardBuilder:
         text="📝 Описание профиля (массово)", callback_data=ChanCb(action="bulk_prof_bio")
     )
     kb.button(
-        text="🔤 Username аккаунта (массово)",
+        text="🔤 Юзернейм аккаунта (массово)",
         callback_data=ChanCb(action="bulk_prof_uname"),
     )
     kb.button(text="◀️ Назад", callback_data=ChanCb(action="menu"))
@@ -456,14 +456,14 @@ def _make_title(base: str, mode: str, global_idx: int, acc_label: str) -> str:
 _BULK_OP_LABELS = {
     "create": "📢 Создать канал/группу",
     "botfather": "🤖 Создать бота через @BotFather",
-    "dm": "✉️ Рассылка по username-списку",
+    "dm": "✉️ Рассылка по списку юзернеймов",
     "join": "🔗 Вступить в канал",
     "leave": "🚪 Выйти из канала",
     "post": "📤 Опубликовать пост",
     "prof_name": "✏️ Изменить имя",
     "prof_bio": "📝 Изменить описание профиля",
-    "prof_uname": "🔤 Изменить username",
-    "chan_uname": "🔤 Username каналам (массово)",
+    "prof_uname": "🔤 Изменить юзернейм",
+    "chan_uname": "🔤 Юзернейм каналам (массово)",
     "chan_about": "📄 Описание каналам (массово)",
 }
 
@@ -660,11 +660,11 @@ async def cb_chan_menu(callback: CallbackQuery, pool: asyncpg.Pool, state: FSMCo
     await callback.message.edit_text(
         f"📡 <b>Операции с аккаунтами</b>\n\n"
         f"Аккаунтов: <b>{count}</b> ({active} активных)\n\n"
-        "• <b>Управление каналом</b> → название / описание / <b>username</b> / ссылка\n"
+        "• <b>Управление каналом</b> → название / описание / <b>юзернейм</b> / ссылка\n"
         "• <b>Создать</b> → новый канал или группу\n"
         "• <b>Вступить / Выйти</b> → управление подписками\n"
         "• <b>Опубликовать пост</b> → от имени аккаунта\n"
-        "• <b>Профиль аккаунта</b> → имя, bio, username аккаунта\n"
+        "• <b>Профиль аккаунта</b> → имя, bio, юзернейм аккаунта\n"
         "• <b>⚡ Массовые операции</b> → одно действие на всех аккаунтах\n\n"
         "💡 Нет аккаунтов? 📱 /accounts",
         parse_mode="HTML",
@@ -1640,7 +1640,7 @@ async def _start_join_fsm(msg, state: FSMContext, edit: bool = False) -> None:
     kb.button(text="❌ Отмена", callback_data=ChanCb(action="menu"))
     text = (
         "🔗 <b>Вступить в канал</b>\n\n"
-        "Введите username канала или ссылку:\n"
+        "Введите юзернейм канала или ссылку:\n"
         "• <code>@channelname</code>\n"
         "• <code>https://t.me/channelname</code>\n"
         "• <code>https://t.me/+AbcPrivateHash</code>"
@@ -1940,7 +1940,7 @@ async def cb_manage_show_dialogs(
     if db_chans:
         for ch in db_chans[:25]:
             uname_tag = (
-                f" @{ch['username']}" if ch.get("username") else " (без username)"
+                f" @{ch['username']}" if ch.get("username") else " (без юзернейма)"
             )
             title = (ch["title"] or f"ID {ch['channel_id']}")[:28]
             kb.button(
@@ -2009,7 +2009,7 @@ async def cb_manage_show_dialogs_live(
         return
     kb = InlineKeyboardBuilder()
     for d in all_items[:25]:
-        uname_tag = f" @{d['username']}" if d.get("username") else " (без username)"
+        uname_tag = f" @{d['username']}" if d.get("username") else " (без юзернейма)"
         title = (d["title"] or f"ID {d['id']}")[:28]
         kb.button(
             text=f"✏️ {title}{uname_tag}",
@@ -2043,7 +2043,7 @@ async def cb_manage_channel_menu(
         callback_data=ChanCb(action="edit_about", acc_id=acc_id, channel_id=ch_id),
     )
     kb.button(
-        text="🔤 Установить username",
+        text="🔤 Установить юзернейм",
         callback_data=ChanCb(action="edit_uname", acc_id=acc_id, channel_id=ch_id),
     )
     kb.button(
@@ -2117,7 +2117,7 @@ async def cb_edit_uname(
     kb = InlineKeyboardBuilder()
     kb.button(text="❌ Отмена", callback_data=ChanCb(action="menu"))
     await callback.message.edit_text(
-        "🔤 Введите новый <b>username</b> (без @, только a-z, 0-9, _):",
+        "🔤 Введите новый <b>юзернейм</b> (без @, только a-z, 0-9, _):",
         parse_mode="HTML",
         reply_markup=kb.as_markup(),
     )
@@ -2174,7 +2174,7 @@ async def fsm_edit_value(
             )
         else:
             await message.answer(
-                f"✅ Username установлен: @{html.escape(value)}",
+                f"✅ Юзернейм установлен: @{html.escape(value)}",
                 parse_mode="HTML",
                 reply_markup=kb.as_markup(),
             )
@@ -2767,7 +2767,7 @@ async def cb_invite_acc_action(
             f"➕ <b>Пригласить пользователей</b>\n"
             f"Канал: <code>{html.escape(channel_display)}</code>\n"
             f"Аккаунтов: <b>{len(selected)}</b>\n\n"
-            "Введите username'ы через запятую или по одному на строку:\n"
+            "Введите юзернеймы через запятую или по одному на строку:\n"
             "<code>@user1, @user2, @user3</code>\n\n"
             "Или отправьте <b>.txt файл</b> (до 1 МБ).\n\n"
             "⚠️ Лимит Telegram: <b>200 инвайтов/сутки</b> на аккаунт.\n"
@@ -2804,7 +2804,7 @@ async def cb_invite_cancel_all(callback: CallbackQuery, state: FSMContext) -> No
 
 @router.callback_query(F.data == "invite:hint:file")
 async def cb_invite_hint_file(callback: CallbackQuery) -> None:
-    await callback.answer("Отправьте .txt файл со списком username'ов", show_alert=True)
+    await callback.answer("Отправьте .txt файл со списком юзернеймов", show_alert=True)
 
 
 @router.message(InviteUsersFSM.waiting_usernames, F.document)
@@ -2828,7 +2828,7 @@ async def fsm_invite_usernames_file(
         return
     usernames = _parse_username_list(raw)
     if not usernames:
-        await message.answer("⚠️ Файл не содержит распознанных usernames.")
+        await message.answer("⚠️ Файл не содержит распознанных юзернеймов.")
         return
     await _show_invite_count_menu(usernames, message, state)
 
@@ -3194,7 +3194,7 @@ async def cb_profile_menu(callback: CallbackQuery, callback_data: ChanCb) -> Non
         text="📝 Изменить описание профиля", callback_data=ChanCb(action="prof_bio", acc_id=acc_id)
     )
     kb.button(
-        text="🔤 Изменить username",
+        text="🔤 Изменить юзернейм",
         callback_data=ChanCb(action="prof_uname", acc_id=acc_id),
     )
     kb.button(text="◀️ Назад", callback_data=ChanCb(action="profile_pick"))
@@ -3209,7 +3209,7 @@ async def cb_profile_menu(callback: CallbackQuery, callback_data: ChanCb) -> Non
 for _prof_action, _prof_field, _prof_prompt in [
     ("prof_name", "first_name", "✏️ Введите новое <b>имя</b>:"),
     ("prof_bio", "about", "📝 Введите новое <b>bio</b> (до 70 символов):"),
-    ("prof_uname", "username", "🔤 Введите новый <b>username</b> аккаунта (без @):"),
+    ("prof_uname", "username", "🔤 Введите новый <b>юзернейм</b> аккаунта (без @):"),
 ]:
 
     def _make_prof_handler(prof_field, prof_prompt):
@@ -3286,7 +3286,7 @@ async def fsm_botfather_name(message: Message, state: FSMContext) -> None:
     kb.button(text="❌ Отмена", callback_data=ChanCb(action="bulk_menu"))
     await message.answer(
         f"🤖 Имя: <b>{html.escape(name)}</b>\n\n"
-        "Введите <b>базовый username</b> бота.\n"
+        "Введите <b>базовый юзернейм</b> бота.\n"
         "Для нескольких ботов будет добавляться порядковый номер (например: <i>mysalesbot</i>, <i>mysalesbot2</i>):\n\n"
         "Например: <i>mysalesbot</i>",
         parse_mode="HTML",
@@ -3298,7 +3298,7 @@ async def fsm_botfather_username(
 ) -> None:
     base_username = (message.text or "").strip().lstrip("@")
     if not base_username or len(base_username) < 5:
-        await message.answer("⚠️ Username минимум 5 символов.")
+        await message.answer("⚠️ Юзернейм минимум 5 символов.")
         return
     data = await state.get_data()
     await state.clear()
@@ -3617,7 +3617,7 @@ async def cb_report_account_chosen(
     kb = InlineKeyboardBuilder()
     kb.button(text="❌ Отмена", callback_data=ChanCb(action="menu"))
     await callback.message.edit_text(
-        "🚨 <b>Жалоба</b>\n\nВведите username канала/пользователя:\n<code>@username</code>",
+        "🚨 <b>Жалоба</b>\n\nВведите юзернейм канала/пользователя:\n<code>@username</code>",
         parse_mode="HTML",
         reply_markup=kb.as_markup(),
     )
@@ -3670,7 +3670,7 @@ async def cb_report_reason(
         else f"❌ <b>Ошибка отправки жалобы</b>\n\n"
         f"Объект: <code>{html.escape(data.get('peer', '?'))}</code>\n\n"
         "Возможные причины:\n"
-        "• Username не существует или написан с ошибкой\n"
+        "• Юзернейм не существует или написан с ошибкой\n"
         "• Аккаунт не имеет доступа к этому контенту\n"
         "• Telegram временно ограничил жалобы — повторите позже",
         parse_mode="HTML",
@@ -3744,7 +3744,7 @@ async def cb_bulk_report_start(
         f"Доступно аккаунтов: <b>{len(active)}</b>\n\n"
         "Выберите режим:\n"
         "• <b>Один ресурс</b> — жалоба на один канал/бот\n"
-        "• <b>Список ресурсов</b> — вставить несколько username сразу",
+        "• <b>Список ресурсов</b> — вставить несколько юзернеймов сразу",
         parse_mode="HTML",
         reply_markup=kb.as_markup(),
     )
@@ -3765,7 +3765,7 @@ async def cb_br_mode_single(
     kb.button(text="❌ Отмена", callback_data=ChanCb(action="menu"))
     await callback.message.edit_text(
         "🚨 <b>Жалоба — один ресурс</b>\n\n"
-        "Введите username или ссылку:\n"
+        "Введите юзернейм или ссылку:\n"
         "<code>@username</code>\n"
         "<code>https://t.me/username</code>",
         parse_mode="HTML",
@@ -3850,7 +3850,7 @@ def _reason_kb() -> InlineKeyboardBuilder:
 async def fsm_bulk_report_peer(message: Message, state: FSMContext) -> None:
     peer = _normalize_peer(message.text or "")
     if not peer or peer == "@":
-        await message.answer("⚠️ Введите username.")
+        await message.answer("⚠️ Введите юзернейм.")
         return
     await state.update_data(peer=peer, peers=[peer])
     await state.set_state(BulkReportFSM.choosing_reason)
@@ -3866,7 +3866,7 @@ async def fsm_bulk_report_peers_batch(message: Message, state: FSMContext) -> No
     raw = (message.text or "").replace(",", "\n")
     lines = [l.strip() for l in raw.splitlines() if l.strip()]
     if not lines:
-        await message.answer("⚠️ Введите хотя бы один username.")
+        await message.answer("⚠️ Введите хотя бы один юзернейм.")
         return
     peers = [_normalize_peer(l) for l in lines if l]
     peers = list(dict.fromkeys(p for p in peers if len(p) > 1))  # дедупликация
@@ -4437,7 +4437,7 @@ async def cb_bulk_confirm_selection(
             f"Аккаунтов для отправки: <b>{n_acc}</b>\n"
             f"Задержка между сообщениями: ~<b>{delay_s:.0f}с</b>\n\n"
             "📋 <b>Шаг 1/2 — Список получателей</b>\n\n"
-            "Отправьте список username (по одному на строку):\n\n"
+            "Отправьте список юзернеймов (по одному на строку):\n\n"
             "<code>@username1\n@username2\n@username3</code>\n\n"
             "💡 Символ @ необязателен. Принимаются также числовые ID.\n"
             "⚠️ Рекомендуется не более 200 получателей за сеанс.",
@@ -4528,7 +4528,7 @@ async def cb_bulk_confirm_selection(
         await callback.message.edit_text(
             f"📤 <b>Опубликовать пост</b>\n\n"
             f"Выбрано аккаунтов: <b>{len(selected_ids)}</b>\n\n"
-            "Введите username или числовой ID канала для публикации:",
+            "Введите юзернейм или числовой ID канала для публикации:",
             parse_mode="HTML",
             reply_markup=kb.as_markup(),
         )
@@ -4552,7 +4552,7 @@ async def cb_bulk_confirm_selection(
             "prof_bio": ("about", "📝 Введите новое <b>bio</b> (до 70 символов):"),
             "prof_uname": (
                 "username",
-                "🔤 Введите <b>username</b> (для 2-го+ аккаунтов добавится цифра):",
+                "🔤 Введите <b>юзернейм</b> (для 2-го+ аккаунтов добавится цифра):",
             ),
         }
         field, prompt = field_map[op]
@@ -4572,13 +4572,13 @@ async def cb_bulk_confirm_selection(
         kb = InlineKeyboardBuilder()
         kb.button(text="❌ Отмена", callback_data=ChanCb(action="bulk_menu"))
         await callback.message.edit_text(
-            f"🔤 <b>Массовая установка username каналов</b>\n\n"
+            f"🔤 <b>Массовая установка юзернейма каналов</b>\n\n"
             f"Выбрано аккаунтов: <b>{len(selected_ids)}</b>\n\n"
-            "Система выберет все каналы из выбранных аккаунтов и установит им username по шаблону.\n\n"
-            "Введите <b>базовый username</b> (цифра будет добавлена автоматически):\n\n"
+            "Система выберет все каналы из выбранных аккаунтов и установит им юзернейм по шаблону.\n\n"
+            "Введите <b>базовый юзернейм</b> (цифра будет добавлена автоматически):\n\n"
             "<code>mychannel</code> → <code>mychannel1</code>, <code>mychannel2</code>…\n\n"
-            "⚠️ Username должен содержать только буквы, цифры и _\n"
-            "⚠️ Канал должен быть публичным для установки username",
+            "⚠️ Юзернейм должен содержать только буквы, цифры и _\n"
+            "⚠️ Канал должен быть публичным для установки юзернейма",
             parse_mode="HTML",
             reply_markup=kb.as_markup(),
         )
@@ -4800,7 +4800,7 @@ async def cb_bulk_join_proxy_mode(
     await callback.message.edit_text(
         f"🔗 <b>Вступить в канал</b>\n\n"
         f"Аккаунтов: <b>{len(selected_ids)}</b> · Режим: {mode_label}\n\n"
-        "Введите username или ссылку-приглашение:\n"
+        "Введите юзернейм или ссылку-приглашение:\n"
         "• <code>@channelname</code>\n"
         "• <code>https://t.me/+AbcHash</code>\n"
         "• <code>https://t.me/joinchat/Hash</code>",
@@ -4825,7 +4825,7 @@ async def cb_bulk_leave_proxy_mode(
     await callback.message.edit_text(
         f"🚪 <b>Выйти из канала</b>\n\n"
         f"Аккаунтов: <b>{len(selected_ids)}</b> · Режим: {mode_label}\n\n"
-        "Введите username или числовой ID канала:\n"
+        "Введите юзернейм или числовой ID канала:\n"
         "• <code>@channelname</code>\n"
         "• <code>-100123456789</code>",
         parse_mode="HTML",
@@ -5013,7 +5013,7 @@ async def fsm_update_profile(
                 )
             else:
                 await message.answer(
-                    f"✅ Username обновлён: @{html.escape(value)}",
+                    f"✅ Юзернейм обновлён: @{html.escape(value)}",
                     parse_mode="HTML",
                     reply_markup=kb.as_markup(),
                 )
@@ -5073,7 +5073,7 @@ async def fsm_bulk_dm_usernames_file(message: Message, state: FSMContext) -> Non
         return
     usernames = _parse_username_list(raw)
     if not usernames:
-        await message.answer("⚠️ Файл не содержит распознанных usernames.")
+        await message.answer("⚠️ Файл не содержит распознанных юзернеймов.")
         return
     if len(usernames) > 500:
         usernames = usernames[:500]
@@ -5087,7 +5087,7 @@ async def fsm_bulk_dm_usernames(message: Message, state: FSMContext) -> None:
     usernames = _parse_username_list(raw)
     if not usernames:
         await message.answer(
-            "⚠️ Список пустой. Отправьте usernames — по одному на строке:\n"
+            "⚠️ Список пустой. Отправьте юзернеймы — по одному на строке:\n"
             "<code>@username1\n@username2</code>",
             parse_mode="HTML",
         )
@@ -5214,8 +5214,8 @@ async def fsm_bulk_chan_value(
             kb_cancel = InlineKeyboardBuilder()
             kb_cancel.button(text="❌ Отмена", callback_data=ChanCb(action="bulk_menu"))
             await message.answer(
-                "⚠️ Username должен начинаться с буквы, содержать только a–z, 0–9, _ и быть длиной 5+ символов.\n"
-                "Введите базовый username заново:",
+                "⚠️ Юзернейм должен начинаться с буквы, содержать только a–z, 0–9, _ и быть длиной 5+ символов.\n"
+                "Введите базовый юзернейм заново:",
                 reply_markup=kb_cancel.as_markup(),
             )
             await state.set_state(BulkChanFSM.waiting_value)
@@ -6586,7 +6586,7 @@ async def _cinv_bg_inner(
     if not identifiers:
         await _upd(
             "⚠️ <b>Инвайт: нет идентификаторов</b>\n\n"
-            "У контактов нет username и телефонов — невозможно пригласить."
+            "У контактов нет юзернейма и телефонов — невозможно пригласить."
         )
         return
 

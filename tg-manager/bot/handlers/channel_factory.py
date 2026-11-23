@@ -463,12 +463,12 @@ async def fsm_chanf_about(message: Message, state: FSMContext) -> None:
 
 async def _ask_username(msg, edit: bool) -> None:
     kb = InlineKeyboardBuilder()
-    kb.button(text="⏭ Без username", callback_data=ChanFactCb(action="skip_username"))
+    kb.button(text="⏭ Без юзернейма", callback_data=ChanFactCb(action="skip_username"))
     kb.button(text="❌ Отмена", callback_data=ChanFactCb(action="menu"))
     kb.adjust(1)
     text = (
-        "🔤 <b>Username канала</b>\n\n"
-        "Введите username (только a-z, 0-9, _, минимум 5 символов)\n"
+        "🔤 <b>Юзернейм канала</b>\n\n"
+        "Введите юзернейм (только a-z, 0-9, _, минимум 5 символов)\n"
         "или пропустите — канал будет приватным:"
     )
     if edit:
@@ -477,7 +477,7 @@ async def _ask_username(msg, edit: bool) -> None:
             return
         except Exception:
             log_exc_swallow(
-                log, "Не удалось отредактировать сообщение при показе username"
+                log, "Не удалось отредактировать сообщение при показе юзернейма"
             )
     await msg.answer(text, parse_mode="HTML", reply_markup=kb.as_markup())
 
@@ -499,12 +499,12 @@ async def fsm_chanf_username(
     if uname and (len(uname) < 5 or not all(c.isalnum() or c == "_" for c in uname)):
         kb = InlineKeyboardBuilder()
         kb.button(
-            text="⏭ Без username", callback_data=ChanFactCb(action="skip_username")
+            text="⏭ Без юзернейма", callback_data=ChanFactCb(action="skip_username")
         )
         kb.button(text="❌ Отмена", callback_data=ChanFactCb(action="menu"))
         kb.adjust(1)
         await message.answer(
-            "⚠️ Username должен быть не менее 5 символов, только a-z, 0-9 и _. Попробуйте ещё раз:",
+            "⚠️ Юзернейм должен быть не менее 5 символов, только a-z, 0-9 и _. Попробуйте ещё раз:",
             reply_markup=kb.as_markup(),
         )
         return
@@ -693,7 +693,7 @@ async def cb_chanf_do_create(
             )
             if not available:
                 uname_result = (
-                    f"\n⚠️ Username @{html.escape(uname)} уже занят — установите вручную"
+                    f"\n⚠️ Юзернейм @{html.escape(uname)} уже занят — установите вручную"
                 )
             else:
                 err_u = await account_manager.set_channel_username(
@@ -702,10 +702,10 @@ async def cb_chanf_do_create(
                 uname_result = (
                     f"\nUsername: @{html.escape(uname)}"
                     if not err_u
-                    else f"\n⚠️ Username не установлен: {html.escape(err_u)}"
+                    else f"\n⚠️ Юзернейм не установлен: {html.escape(err_u)}"
                 )
         except Exception as e:
-            uname_result = f"\n⚠️ Username не установлен: {html.escape(str(e))}"
+            uname_result = f"\n⚠️ Юзернейм не установлен: {html.escape(str(e))}"
 
     # Build t.me/username link if username was set successfully
     tme_link = ""

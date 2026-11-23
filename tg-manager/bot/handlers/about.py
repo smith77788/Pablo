@@ -89,7 +89,7 @@ async def _bot_username(message_or_cb) -> str:
         me = await message_or_cb.bot.get_me()
         return me.username or ""
     except Exception:
-        log_exc_swallow(log, "about: не удалось узнать username бота")
+        log_exc_swallow(log, "about: не удалось узнать юзернейм бота")
         return ""
 
 

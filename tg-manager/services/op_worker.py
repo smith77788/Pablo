@@ -3666,15 +3666,15 @@ async def _finish_poisoned_op(pool: "asyncpg.Pool", row, *, source: str,
     )
     if _by_total:
         summary = (
-            f"⚠️ Успело {ok_n}, операцию воскрешали {_MAX_REVIVES_TOTAL} {plural(_MAX_REVIVES_TOTAL, 'раз', 'раза', 'раз')} "
+            f"⚠️ Успело {ok_n}, операцию воскрешали {_times(_MAX_REVIVES_TOTAL)} "
             f"почти без движения — предел, остановлена"
         )
     else:
         summary = (
-            f"⚠️ Успело {ok_n}, дальше операция {_MAX_REVIVES} {plural(_MAX_REVIVES, 'раз', 'раза', 'раз')} прерывалась "
+            f"⚠️ Успело {ok_n}, дальше операция {_times(_MAX_REVIVES)} прерывалась "
             f"и была остановлена"
             if ok_n else
-            f"❌ Остановлена: {_MAX_REVIVES} {plural(_MAX_REVIVES, 'раз', 'раза', 'раз')} прерывалась, не сделав ни одной цели"
+            f"❌ Остановлена: {_times(_MAX_REVIVES)} прерывалась, не сделав ни одной цели"
         )
     result = _normalize_result(
         {"status": status, "ok": ok_n, "failed": failed_n,
@@ -3714,16 +3714,16 @@ async def _finish_poisoned_op(pool: "asyncpg.Pool", row, *, source: str,
     await _notify_owner_about_op(
         pool, bot, owner_id,
         (f"⚠️ <b>Операция #{op_id}</b> остановлена: её воскрешали "
-         f"{_MAX_REVIVES_TOTAL} {plural(_MAX_REVIVES_TOTAL, 'раз', 'раза', 'раз')}, и за все эти разы она почти не "
+         f"{_times(_MAX_REVIVES_TOTAL)}, и за все эти разы она почти не "
          f"сдвинулась ({ok_n} целей).\n\nЗапустите её заново — уже "
          f"отработанные цели повтор пропустит."
          if _by_total else
          f"⚠️ <b>Операция #{op_id}</b> остановлена: {ok_n} целей успело "
-         f"отработать, дальше она {_MAX_REVIVES} {plural(_MAX_REVIVES, 'раз', 'раза', 'раз')} прерывалась и не "
+         f"отработать, дальше она {_times(_MAX_REVIVES)} прерывалась и не "
          f"продвигалась.\n\nЗапустите её заново — уже отработанные цели "
          f"повтор пропустит."
          if ok_n else
-         f"❌ <b>Операция #{op_id}</b> остановлена: {_MAX_REVIVES} {plural(_MAX_REVIVES, 'раз', 'раза', 'раз')} "
+         f"❌ <b>Операция #{op_id}</b> остановлена: {_times(_MAX_REVIVES)} "
          f"подряд она прерывалась, не сделав ни одной цели.\n\nПроверьте "
          f"аккаунты и прокси — обычно причина там."),
         dedup_key=f"poisoned:{op_id}",

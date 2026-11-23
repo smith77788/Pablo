@@ -192,7 +192,7 @@ async def cb_parser_start(
 
     await callback.message.edit_text(
         f"🔍 <b>Парсинг {type_label}</b>\n\n"
-        "Введите <b>username</b> или ссылку на канал/группу:\n\n"
+        "Введите <b>юзернейм</b> или ссылку на канал/группу:\n\n"
         "<code>@channelname</code>\n"
         "<code>https://t.me/channelname</code>" + extra,
         parse_mode="HTML",
@@ -209,7 +209,7 @@ async def fsm_parser_source(
         kb = InlineKeyboardBuilder()
         kb.button(text="❌ Отмена", callback_data=ParserCb(action="menu"))
         await message.answer(
-            "⚠️ Введите username или ссылку:", reply_markup=kb.as_markup()
+            "⚠️ Введите юзернейм или ссылку:", reply_markup=kb.as_markup()
         )
         return
 
