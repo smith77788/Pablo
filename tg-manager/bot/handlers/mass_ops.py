@@ -1418,7 +1418,7 @@ async def cb_clear_completed(callback: CallbackQuery, pool: asyncpg.Pool) -> Non
             deleted = 0
     except Exception as e:
         log.warning("clear_completed error: %s", e)
-        await callback.answer("Ошибка при очистке.", show_alert=True)
+        await callback.answer("⚠️ Не удалось очистить завершённые. Попробуйте ещё раз через минуту.", show_alert=True)
         return
 
     if deleted == 0:
@@ -2115,7 +2115,7 @@ async def cb_bulk_join_confirm(
         )
     except Exception as e:
         log.error("bulk_join confirm error: %s", e)
-        await callback.answer("Ошибка создания операции", show_alert=True)
+        await callback.answer("⚠️ Не удалось создать операцию. Попробуйте ещё раз через минуту.", show_alert=True)
         return
 
     icon, delay_str, _ = _DELAY_LABELS.get(delay_mode, ("🧠 Умный", "авто", ""))
@@ -2480,7 +2480,7 @@ async def cb_bulk_leave_confirm(
         )
     except Exception as e:
         log.error("bulk_leave confirm error: %s", e)
-        await callback.answer("Ошибка создания операции", show_alert=True)
+        await callback.answer("⚠️ Не удалось создать операцию. Попробуйте ещё раз через минуту.", show_alert=True)
         return
 
     icon, delay_str, _ = _DELAY_LABELS_LEAVE.get(delay_mode, ("🧠 Умный", "авто", ""))

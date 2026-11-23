@@ -44,7 +44,7 @@ async def cb_swarm_menu(
         log_exc_swallow(
             log, "cb_swarm_menu: get_bot failed bot=%s", callback_data.bot_id
         )
-        await callback.answer("Ошибка загрузки бота.", show_alert=True)
+        await callback.answer("⚠️ Не удалось загрузить бота. Попробуйте ещё раз через минуту.", show_alert=True)
         return
     if not row:
         await callback.answer("Бот не найден.", show_alert=True)
@@ -90,7 +90,7 @@ async def cb_swarm_toggle(
         row = await db.get_bot(pool, callback_data.bot_id, callback.from_user.id)
     except Exception:
         log_exc_swallow(log, "cb_swarm_toggle: get_bot failed")
-        await callback.answer("Ошибка.", show_alert=True)
+        await callback.answer("⚠️ Не удалось загрузить бота. Попробуйте ещё раз через минуту.", show_alert=True)
         return
     if not row:
         await callback.answer("Бот не найден.", show_alert=True)
@@ -108,7 +108,7 @@ async def cb_swarm_toggle(
         )
     except Exception:
         log_exc_swallow(log, "cb_swarm_toggle: toggle_swarm failed")
-        await callback.answer("Ошибка сохранения.", show_alert=True)
+        await callback.answer("⚠️ Не удалось сохранить настройку роя. Попробуйте ещё раз через минуту.", show_alert=True)
         return
     try:
         row2 = await db.get_bot(pool, callback_data.bot_id, callback.from_user.id)
@@ -144,7 +144,7 @@ async def cb_swarm_stats(
         row = await db.get_bot(pool, callback_data.bot_id, callback.from_user.id)
     except Exception:
         log_exc_swallow(log, "cb_swarm_stats: get_bot failed")
-        await callback.answer("Ошибка.", show_alert=True)
+        await callback.answer("⚠️ Не удалось загрузить бота. Попробуйте ещё раз через минуту.", show_alert=True)
         return
     if not row:
         await callback.answer("Бот не найден.", show_alert=True)
@@ -237,7 +237,7 @@ async def cb_swarm_role(
         row = await db.get_bot(pool, callback_data.bot_id, callback.from_user.id)
     except Exception:
         log_exc_swallow(log, "cb_swarm_role: DB failed")
-        await callback.answer("Ошибка сохранения роли.", show_alert=True)
+        await callback.answer("⚠️ Не удалось сохранить роль. Попробуйте ещё раз через минуту.", show_alert=True)
         return
     label = (
         f"@{row['username']}"
@@ -341,7 +341,7 @@ async def cb_change_mode(
         row = await db.get_bot(pool, callback_data.bot_id, callback.from_user.id)
     except Exception:
         log_exc_swallow(log, "cb_change_mode: DB failed")
-        await callback.answer("Ошибка сохранения режима.", show_alert=True)
+        await callback.answer("⚠️ Не удалось сохранить режим. Попробуйте ещё раз через минуту.", show_alert=True)
         return
     if not row:
         await callback.answer("Режим изменён.", show_alert=True)

@@ -1802,7 +1802,7 @@ async def cb_acc_export_json(
         return
     except Exception:
         log_exc_swallow(log, "export_json failed")
-        await callback.answer("Ошибка генерации JSON", show_alert=True)
+        await callback.answer("⚠️ Не удалось собрать JSON сессии. Попробуйте ещё раз через минуту.", show_alert=True)
         return
     import io
     buf = io.BytesIO(payload.encode("utf-8"))

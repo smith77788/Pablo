@@ -148,7 +148,7 @@ async def msg_kw_keywords(message: Message, state: FSMContext, pool: asyncpg.Poo
         return
     except Exception:
         log_exc_swallow(log, "kw create_watcher failed")
-        await message.answer("Ошибка создания перехватчика.", reply_markup=terminal_kb())
+        await message.answer("⚠️ Не удалось создать перехватчик. Попробуйте ещё раз через минуту.", reply_markup=terminal_kb())
         return
     await state.clear()
     kb = InlineKeyboardBuilder()
@@ -206,7 +206,7 @@ async def cb_kw_toggle(
         "SELECT status FROM keyword_watchers WHERE id=$1 AND owner_id=$2",
         callback_data.watcher_id, callback.from_user.id)
     if not w:
-        await callback.answer("Не найден", show_alert=True)
+        await callback.answer("Отслеживание не найдено. Уже удалено или недоступно. Откройте список заново.", show_alert=True)
         return
     new_status = "paused" if w["status"] == "active" else "active"
     await kw.set_status(pool, callback.from_user.id, callback_data.watcher_id, new_status)

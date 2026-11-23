@@ -2435,7 +2435,7 @@ async def cb_gp_progress(
         plan = await db.get_global_presence_plan(pool, plan_id, callback.from_user.id)
     except Exception:
         log_exc_swallow(log, "cb_gp_progress: get_global_presence_plan failed")
-        await callback.answer("Ошибка загрузки плана", show_alert=True)
+        await callback.answer("⚠️ Не удалось загрузить план. Попробуйте ещё раз через минуту.", show_alert=True)
         return
     if not plan:
         await callback.answer("План не найден", show_alert=True)
@@ -2581,7 +2581,7 @@ async def cb_gp_retry(
         plan = await db.get_global_presence_plan(pool, plan_id, callback.from_user.id)
     except Exception:
         log_exc_swallow(log, "cb_gp_retry: get_global_presence_plan failed")
-        await callback.answer("Ошибка загрузки плана", show_alert=True)
+        await callback.answer("⚠️ Не удалось загрузить план. Попробуйте ещё раз через минуту.", show_alert=True)
         return
     if not plan:
         await callback.answer("План не найден", show_alert=True)
@@ -2593,7 +2593,7 @@ async def cb_gp_retry(
         )
     except Exception:
         log_exc_swallow(log, "cb_gp_retry: reset_failed_targets failed")
-        await callback.answer("Ошибка сброса целей", show_alert=True)
+        await callback.answer("⚠️ Не удалось вернуть цели в работу. Попробуйте ещё раз через минуту.", show_alert=True)
         return
     if reset_count == 0:
         await callback.answer("Нет повторяемых ошибок", show_alert=True)
@@ -2628,7 +2628,7 @@ async def cb_gp_retry(
         )
     except Exception:
         log_exc_swallow(log, "cb_gp_retry: operation_queue insert failed")
-        await callback.answer("Ошибка постановки в очереди", show_alert=True)
+        await callback.answer("⚠️ Не удалось поставить в очередь. Попробуйте ещё раз через минуту.", show_alert=True)
         return
     await callback.answer(
         f"✅ {reset_count} целей поставлено в очередь на повтор (op #{op_id})",
@@ -2647,7 +2647,7 @@ async def cb_gp_report(
         plan = await db.get_global_presence_plan(pool, plan_id, callback.from_user.id)
     except Exception:
         log_exc_swallow(log, "cb_gp_report: get_global_presence_plan failed")
-        await callback.answer("Ошибка загрузки плана", show_alert=True)
+        await callback.answer("⚠️ Не удалось загрузить план. Попробуйте ещё раз через минуту.", show_alert=True)
         return
     if not plan:
         await callback.answer("План не найден", show_alert=True)
@@ -2803,7 +2803,7 @@ async def cb_gp_export(
         )
     except Exception:
         log_exc_swallow(log, "cb_gp_export: выборка целей не удалась")
-        await callback.answer("Ошибка выгрузки", show_alert=True)
+        await callback.answer("⚠️ Не удалось выгрузить цели. Попробуйте ещё раз через минуту.", show_alert=True)
         return
 
     if not rows:
@@ -2944,7 +2944,7 @@ async def cb_gp_catalog(
         )
     except Exception:
         log_exc_swallow(log, "cb_gp_catalog: выборка не удалась")
-        await callback.answer("Ошибка загрузки каталога", show_alert=True)
+        await callback.answer("⚠️ Не удалось загрузить каталог. Попробуйте ещё раз через минуту.", show_alert=True)
         return
 
     total = total or 0
@@ -3474,7 +3474,7 @@ async def cb_gp_cancel_plan(
         plan = await db.get_global_presence_plan(pool, plan_id, callback.from_user.id)
     except Exception:
         log_exc_swallow(log, "cb_gp_cancel_plan: get_global_presence_plan failed")
-        await callback.answer("Ошибка загрузки плана", show_alert=True)
+        await callback.answer("⚠️ Не удалось загрузить план. Попробуйте ещё раз через минуту.", show_alert=True)
         return
     if not plan:
         await callback.answer("План не найден", show_alert=True)
@@ -3488,7 +3488,7 @@ async def cb_gp_cancel_plan(
         ok = await db.cancel_global_presence_plan(pool, plan_id, callback.from_user.id)
     except Exception:
         log_exc_swallow(log, "cb_gp_cancel_plan: cancel failed")
-        await callback.answer("Ошибка при отмене", show_alert=True)
+        await callback.answer("⚠️ Не удалось отменить план. Попробуйте ещё раз через минуту.", show_alert=True)
         return
 
     if not ok:

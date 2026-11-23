@@ -310,7 +310,7 @@ async def cb_mesh_pick_account(
     try:
         acc_id = int(callback_data.extra)
     except (ValueError, TypeError):
-        await callback.answer("Ошибка ID аккаунта.", show_alert=True)
+        await callback.answer("⚠️ Кнопка устарела. Откройте раздел заново.", show_alert=True)
         return
     await pool.execute(
         "UPDATE content_meshes SET source_account_id=$1, last_post_id=0, updated_at=NOW() WHERE id=$2 AND owner_id=$3",
@@ -425,7 +425,7 @@ async def cb_mesh_del_target(
     try:
         target_id = int(callback_data.extra)
     except (ValueError, TypeError):
-        await callback.answer("Ошибка.", show_alert=True)
+        await callback.answer("⚠️ Кнопка устарела. Откройте раздел заново.", show_alert=True)
         return
     # Проверка владения — ДО удаления. Раньше она стояла ниже, после DELETE:
     # mesh_id приходит из callback_data, и подставив чужой, можно было удалить

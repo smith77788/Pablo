@@ -950,7 +950,7 @@ async def cb_pack_confirm_delete(
         pool, callback_data.pack_id, callback.from_user.id
     )
     if not pack:
-        await callback.answer("Не найден", show_alert=True)
+        await callback.answer("Пакет не найден. Уже удалено или недоступно. Откройте список заново.", show_alert=True)
         return
     await safe_answer(callback)
 

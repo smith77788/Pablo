@@ -306,7 +306,7 @@ async def _set_strike_mode(
     except Exception as exc:
         mark_handled_error(f"set_strike_mode: {exc}")
         log_exc_swallow(log, "set_strike_mode: DB failed")
-        await callback.answer("Ошибка сохранения режима.", show_alert=True)
+        await callback.answer("⚠️ Не удалось сохранить режим. Попробуйте ещё раз через минуту.", show_alert=True)
         return
     mode_labels = {
         "fast": "⚡ Быстрый",
@@ -751,7 +751,7 @@ async def cb_strike_rerun(
         )
     except Exception:
         log_exc_swallow(log, "cb_strike_rerun: fetchrow failed")
-        await callback.answer("Ошибка загрузки записи.", show_alert=True)
+        await callback.answer("⚠️ Не удалось загрузить запись. Попробуйте ещё раз через минуту.", show_alert=True)
         return
     if not row:
         await callback.answer("Запись не найдена.", show_alert=True)
@@ -1367,7 +1367,7 @@ async def cb_email_toggle(
             callback.from_user.id,
         )
         if not row:
-            await callback.answer("Не найдено.", show_alert=True)
+            await callback.answer("Почта не найдена. Уже удалено или недоступно. Откройте список заново.", show_alert=True)
             return
         new_val = not row["is_active"]
         await pool.execute(
@@ -1379,7 +1379,7 @@ async def cb_email_toggle(
     except Exception as exc:
         mark_handled_error(f"email_toggle: {exc}")
         log_exc_swallow(log, "cb_email_toggle: DB failed")
-        await callback.answer("Ошибка.", show_alert=True)
+        await callback.answer("⚠️ Не удалось переключить почту. Попробуйте ещё раз через минуту.", show_alert=True)
         return
     await _show_email_list(callback, pool)
 
@@ -1401,7 +1401,7 @@ async def cb_email_del(
         await callback.answer("🗑 Удалён")
     except Exception:
         log_exc_swallow(log, "cb_email_del: DB failed")
-        await callback.answer("Ошибка.", show_alert=True)
+        await callback.answer("⚠️ Не удалось удалить почту. Попробуйте ещё раз через минуту.", show_alert=True)
         return
     await _show_email_list(callback, pool)
 

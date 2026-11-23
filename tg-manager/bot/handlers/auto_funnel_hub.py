@@ -169,7 +169,7 @@ async def cb_af_pick_bot(
     try:
         bot_id = int(callback_data.extra)
     except (ValueError, TypeError):
-        await callback.answer("Ошибка.", show_alert=True)
+        await callback.answer("⚠️ Кнопка устарела. Откройте раздел заново.", show_alert=True)
         return
     data = await state.get_data()
     name = data.get("name", "Воронка")
@@ -199,7 +199,7 @@ async def cb_af_pick_segment(
         bot_id_str, segment = callback_data.extra.split(":", 1)
         bot_id = int(bot_id_str)
     except (ValueError, TypeError):
-        await callback.answer("Ошибка.", show_alert=True)
+        await callback.answer("⚠️ Кнопка устарела. Откройте раздел заново.", show_alert=True)
         return
     data = await state.get_data()
     name = data.get("name", "Воронка")
@@ -484,7 +484,7 @@ async def cb_af_del_step(
     try:
         step_id = int(callback_data.extra)
     except (ValueError, TypeError):
-        await callback.answer("Ошибка.", show_alert=True)
+        await callback.answer("⚠️ Кнопка устарела. Откройте раздел заново.", show_alert=True)
         return
     # Проверка владения — ДО удаления. Раньше она стояла ниже, после DELETE:
     # funnel_id приходит из callback_data, и подставив чужой, можно было

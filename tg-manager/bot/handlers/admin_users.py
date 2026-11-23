@@ -273,7 +273,7 @@ async def cb_user_actions(
         user = await db.get_user_info(pool, user_id)
     except Exception as e:
         log.warning('handler error in cb_user_actions: %s', e)
-        await callback.answer("Ошибка базы данных.", show_alert=True)
+        await callback.answer("⚠️ Не удалось загрузить пользователя. Попробуйте ещё раз через минуту.", show_alert=True)
         return
     if not user:
         await callback.answer("Пользователь не найден.", show_alert=True)
@@ -438,7 +438,7 @@ async def cb_confirm_grant(
         await db.grant_plan_to_user(pool, user_id, callback.from_user.id, plan, months)
     except Exception:
         log_exc_swallow(log, "cb_confirm_grant: DB write failed", user_id=user_id)
-        await callback.answer("⚠️ Ошибка записи в БД.", show_alert=True)
+        await callback.answer("⚠️ Не удалось сохранить. Попробуйте ещё раз через минуту.", show_alert=True)
         return
     from bot.utils.subscription import invalidate_plan_cache
     invalidate_plan_cache(user_id)
@@ -479,7 +479,7 @@ async def cb_revoke_plan(
         await db.revoke_plan_from_user(pool, user_id, callback.from_user.id)
     except Exception:
         log_exc_swallow(log, "cb_revoke_plan: DB write failed", user_id=user_id)
-        await callback.answer("⚠️ Ошибка записи в БД.", show_alert=True)
+        await callback.answer("⚠️ Не удалось сохранить. Попробуйте ещё раз через минуту.", show_alert=True)
         return
     from bot.utils.subscription import invalidate_plan_cache
     invalidate_plan_cache(user_id)
@@ -529,7 +529,7 @@ async def cb_grant_strike(
         )
     except Exception:
         log_exc_swallow(log, "cb_grant_strike: DB write failed")
-        await callback.answer("⚠️ Ошибка записи в БД.", show_alert=True)
+        await callback.answer("⚠️ Не удалось сохранить. Попробуйте ещё раз через минуту.", show_alert=True)
         return
     await callback.answer("✅ Доступ к жалобам выдан.", show_alert=True)
 
@@ -591,7 +591,7 @@ async def cb_ban(
         await db.ban_user(pool, user_id, callback.from_user.id, "Забанен администратором")
     except Exception:
         log_exc_swallow(log, "cb_ban: DB write failed", user_id=user_id)
-        await callback.answer("⚠️ Ошибка записи в БД.", show_alert=True)
+        await callback.answer("⚠️ Не удалось сохранить. Попробуйте ещё раз через минуту.", show_alert=True)
         return
     await callback.answer(f"✅ Пользователь #{user_id} забанен.", show_alert=True)
 
@@ -655,7 +655,7 @@ async def cb_unban(
         await db.unban_user(pool, user_id, callback.from_user.id)
     except Exception:
         log_exc_swallow(log, "cb_unban: DB write failed", user_id=user_id)
-        await callback.answer("⚠️ Ошибка записи в БД.", show_alert=True)
+        await callback.answer("⚠️ Не удалось сохранить. Попробуйте ещё раз через минуту.", show_alert=True)
         return
     await callback.answer(f"✅ Пользователь #{user_id} разбанен.", show_alert=True)
 
@@ -720,7 +720,7 @@ async def cb_quick_ban(
         await db.ban_user(pool, user_id, callback.from_user.id, "Забанен администратором")
     except Exception:
         log_exc_swallow(log, "cb_quick_ban: DB write failed", user_id=user_id)
-        await callback.answer("⚠️ Ошибка записи в БД.", show_alert=True)
+        await callback.answer("⚠️ Не удалось сохранить. Попробуйте ещё раз через минуту.", show_alert=True)
         return
     await callback.answer(f"🚫 #{user_id} забанен", show_alert=True)
     try:
@@ -785,7 +785,7 @@ async def cb_quick_grant30(
         invalidate_plan_cache(user_id)
     except Exception:
         log_exc_swallow(log, "cb_quick_grant30: DB write failed", user_id=user_id)
-        await callback.answer("⚠️ Ошибка записи в БД.", show_alert=True)
+        await callback.answer("⚠️ Не удалось сохранить. Попробуйте ещё раз через минуту.", show_alert=True)
         return
     await callback.answer(f"✅ #{user_id} +30д подписки", show_alert=True)
     try:

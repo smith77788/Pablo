@@ -87,7 +87,7 @@ async def cb_webhook_disable(
     try:
         row = await db.get_bot(pool, callback_data.bot_id, callback.from_user.id)
     except Exception:
-        await callback.answer("Ошибка БД.", show_alert=True)
+        await callback.answer("⚠️ Не удалось загрузить бота. Попробуйте ещё раз через минуту.", show_alert=True)
         return
     if not row:
         await callback.answer("Бот не найден.", show_alert=True)

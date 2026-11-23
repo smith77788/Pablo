@@ -418,7 +418,7 @@ async def cb_reg_history(
                 callback.from_user.id,
             ) or 0
         except Exception:
-            await callback.answer("Ошибка базы данных", show_alert=True)
+            await callback.answer("⚠️ Не удалось загрузить историю проверок. Попробуйте ещё раз через минуту.", show_alert=True)
             return
 
     if not rows:

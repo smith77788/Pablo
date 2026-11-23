@@ -594,7 +594,7 @@ async def cb_dm_parsed_classify(
         await gc.classify_audience(pool, callback.from_user.id, run_id)
     except Exception:
         log_exc_swallow(log, "dm parsed_classify failed")
-        await callback.answer("Ошибка разметки пола", show_alert=True)
+        await callback.answer("⚠️ Не удалось разметить пол аудитории. Попробуйте ещё раз через минуту.", show_alert=True)
         return
     await _dm_offer_gender(callback, state, pool)
 

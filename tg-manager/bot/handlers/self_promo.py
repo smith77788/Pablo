@@ -270,7 +270,7 @@ async def cb_sp_del_confirm(callback: CallbackQuery, callback_data: SelfPromoCb,
     await safe_answer(callback)
     tpl = await pool.fetchrow("SELECT title FROM self_promo_templates WHERE id=$1", callback_data.item_id)
     if not tpl:
-        await callback.answer("Не найден", show_alert=True)
+        await callback.answer("Шаблон не найден. Уже удалено или недоступно. Откройте список заново.", show_alert=True)
         return
     try:
         await callback.message.edit_text(

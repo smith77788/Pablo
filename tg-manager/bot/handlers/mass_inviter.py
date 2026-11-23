@@ -421,7 +421,7 @@ async def cb_inviter_classify(
         await gc.classify_audience(pool, callback.from_user.id, _pr)
     except Exception:
         log_exc_swallow(log, "invite classify failed")
-        await callback.answer("Ошибка разметки пола", show_alert=True)
+        await callback.answer("⚠️ Не удалось разметить пол аудитории. Попробуйте ещё раз через минуту.", show_alert=True)
         return
     await _inv_offer_gender(callback, state, pool, data.get("total_users", 0))
 
