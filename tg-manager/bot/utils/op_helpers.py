@@ -199,6 +199,30 @@ def no_bots_kb(*, back: object | None = None):
     return kb.as_markup()
 
 
+async def ask_to_confirm(callback, *, question: str, yes, no,
+                         yes_text: str = "🗑 Да, удалить") -> None:
+    """Шаг «вы уверены?» перед необратимым действием.
+
+    Кнопка «🗑 Удалить» у кампании, плана прогрева, ДНК-шаблона, вотчера и
+    очереди операций удаляла с первого нажатия: промах пальцем по соседней
+    «▶️ Запустить» стоил записи целиком. `yes` — исходный callback действия
+    (обычно `callback_data.model_copy(update={"action": ...})`), `no` — куда
+    вернуться.
+    """
+    from aiogram.utils.keyboard import InlineKeyboardBuilder
+
+    await safe_answer(callback)
+    kb = InlineKeyboardBuilder()
+    kb.button(text=yes_text, callback_data=yes)
+    kb.button(text="◀️ Отмена", callback_data=no)
+    kb.adjust(1)
+    await callback.message.edit_text(
+        f"{question}\n\nОтменить это будет нельзя.",
+        parse_mode="HTML",
+        reply_markup=kb.as_markup(),
+    )
+
+
 def terminal_kb(*, back: object | None = None, back_text: str = "◀️ Назад"):
     """Клавиатура для финального экрана — «готово», «ошибка», «отменено».
 

@@ -33,6 +33,7 @@ from bot.utils.op_names import acc_status_short as _acc_short, run_status as _ru
 
 log = logging.getLogger(__name__)
 from bot.utils.owner_error import owner_error  # noqa: E402
+from bot.utils.op_helpers import ask_to_confirm
 
 router = Router()
 
@@ -621,7 +622,7 @@ async def cb_warmup_active_plans(callback: CallbackQuery, pool: asyncpg.Pool) ->
         )
         kb.button(
             text=f"🗑 Удалить {label[:10]}",
-            callback_data=WarmupCb(action="delete_plan", plan_id=plan["id"]),
+            callback_data=WarmupCb(action="delete_plan_ask", plan_id=plan["id"]),
         )
 
     kb.button(text="▶️ Запустить все сейчас", callback_data=WarmupCb(action="run_now"))
@@ -1555,7 +1556,7 @@ async def cb_wu_sess_detail(
         )
     kb.button(
         text="🗑 Удалить",
-        callback_data=WarmupCb(action="sess_delete", session_id=sess_id),
+        callback_data=WarmupCb(action="sess_delete_ask", session_id=sess_id),
     )
     kb.button(text="◀️ Назад", callback_data=WarmupCb(action="session_list"))
     kb.adjust(2)
@@ -2167,7 +2168,7 @@ async def cb_ract_detail(
         )
     kb.button(
         text="🗑 Удалить",
-        callback_data=ResourceActCb(action="delete", session_id=sess_id),
+        callback_data=ResourceActCb(action="delete_ask", session_id=sess_id),
     )
     kb.button(text="◀️ Назад", callback_data=ResourceActCb(action="list"))
     kb.adjust(2)
@@ -2284,4 +2285,37 @@ async def cb_ract_delete(
         "🗑 <b>Сессия удалена</b>",
         parse_mode="HTML",
         reply_markup=_ract_back_kb().as_markup(),
+    )
+
+
+@router.callback_query(ResourceActCb.filter(F.action == "delete_ask"))
+async def cb_resourceactcb_delete_ask(callback: CallbackQuery, callback_data: ResourceActCb) -> None:
+    await ask_to_confirm(
+        callback,
+        question="🗑 <b>Удалить сессию активности?</b>",
+        yes=callback_data.model_copy(update={"action": "delete"}),
+        no=ResourceActCb(action="list"),
+        yes_text="🗑 Да, удалить",
+    )
+
+
+@router.callback_query(WarmupCb.filter(F.action == "delete_plan_ask"))
+async def cb_warmupcb_delete_plan_ask(callback: CallbackQuery, callback_data: WarmupCb) -> None:
+    await ask_to_confirm(
+        callback,
+        question="🗑 <b>Удалить план прогрева?</b>",
+        yes=callback_data.model_copy(update={"action": "delete_plan"}),
+        no=WarmupCb(action="menu"),
+        yes_text="🗑 Да, удалить",
+    )
+
+
+@router.callback_query(WarmupCb.filter(F.action == "sess_delete_ask"))
+async def cb_warmupcb_sess_delete_ask(callback: CallbackQuery, callback_data: WarmupCb) -> None:
+    await ask_to_confirm(
+        callback,
+        question="🗑 <b>Удалить сессию прогрева?</b>",
+        yes=callback_data.model_copy(update={"action": "sess_delete"}),
+        no=WarmupCb(action="session_list"),
+        yes_text="🗑 Да, удалить",
     )

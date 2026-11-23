@@ -23,6 +23,7 @@ from bot.utils.op_helpers import safe_answer, terminal_kb, cancel_kb
 from services.logger import log_exc_swallow
 from services import keyword_watcher as kw
 from bot.utils.owner_error import owner_error
+from bot.utils.op_helpers import ask_to_confirm
 
 log = logging.getLogger(__name__)
 router = Router()
@@ -183,7 +184,7 @@ async def cb_kw_view(
     toggle = "paused" if w["status"] == "active" else "active"
     kb.button(text="⏸ Пауза" if w["status"] == "active" else "▶️ Возобновить",
               callback_data=KwCb(action="toggle", watcher_id=w["id"]))
-    kb.button(text="🗑 Удалить", callback_data=KwCb(action="del", watcher_id=w["id"]))
+    kb.button(text="🗑 Удалить", callback_data=KwCb(action="del_ask", watcher_id=w["id"]))
     kb.button(text="◀️ Назад", callback_data=KwCb(action="menu"))
     kb.adjust(2, 1)
     _ = toggle
@@ -240,3 +241,14 @@ async def cb_kw_leads(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
         lines.append(f"🔑 <b>{html.escape(h['matched_keyword'] or '')}</b> · {who}\n{txt}\n")
     await callback.message.edit_text(
         "\n".join(lines), parse_mode="HTML", reply_markup=_back_kb().as_markup())
+
+
+@router.callback_query(KwCb.filter(F.action == "del_ask"))
+async def cb_kwcb_del_ask(callback: CallbackQuery, callback_data: KwCb) -> None:
+    await ask_to_confirm(
+        callback,
+        question="🗑 <b>Удалить перехватчик ключевых слов?</b>",
+        yes=callback_data.model_copy(update={"action": "del"}),
+        no=KwCb(action="menu"),
+        yes_text="🗑 Да, удалить",
+    )
