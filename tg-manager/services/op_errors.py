@@ -190,3 +190,90 @@ def _is_dead_session_error(error_text: str) -> bool:
         except Exception:
             pass
     return dead
+
+
+# ── Причина провала по-русски ─────────────────────────────────────────────────
+# Владелец не читает по-английски, а текст исключения (Telethon, asyncpg, сеть)
+# уходил ему как есть: «A wait of 300 seconds is required», «The channel
+# specified is private and you lack permission to access it». Пары (паттерн,
+# объяснение) — от частного к общему; первое совпадение выигрывает.
+_RU_EXPLAIN: tuple[tuple[re.Pattern, str], ...] = tuple(
+    (re.compile(p, re.IGNORECASE), ru) for p, ru in (
+        (r"peer.?flood", "Telegram ограничил аккаунт за массовые действия (PeerFlood) — "
+                         "дайте ему отдохнуть 1–2 суток"),
+        (r"a wait of (\d+) seconds|flood.?wait|FloodWait",
+         "Telegram просит подождать {secs} — слишком частые действия"),
+        (r"slowmode", "в чате включён медленный режим — сообщения чаще нельзя"),
+        (r"AUTH_KEY_DUPLICATED|two different IP",
+         "сессия аккаунта одновременно использовалась с двух адресов — повторите позже"),
+        (r"AUTH_KEY_UNREGISTERED|SESSION_REVOKED|authorization key|AuthKey",
+         "сессия аккаунта больше не действует — войдите в аккаунт заново"),
+        (r"USER_DEACTIVATED|PHONE_NUMBER_BANNED|account is banned|permanently banned",
+         "аккаунт заблокирован Telegram"),
+        (r"SESSION_PASSWORD_NEEDED|two-step|2FA", "у аккаунта включён облачный пароль (2FA)"),
+        (r"INVITE_HASH_EXPIRED|invite link .*expired|InviteHashExpired",
+         "пригласительная ссылка просрочена или отозвана — нужна новая"),
+        (r"INVITE_HASH_INVALID|InviteHashInvalid", "пригласительная ссылка недействительна"),
+        (r"INVITE_REQUEST_SENT", "заявка на вступление отправлена — ждёт одобрения админа"),
+        (r"USERNAME_NOT_OCCUPIED|No user has .* as username|Cannot find any entity",
+         "такого @username или ссылки не существует"),
+        (r"USERNAME_INVALID", "недопустимый @username"),
+        (r"USERNAME_OCCUPIED|already taken", "этот @username уже занят"),
+        (r"CHANNEL_PRIVATE|is private and you lack permission",
+         "канал приватный или аккаунт из него удалён — нет доступа"),
+        (r"CHANNELS_TOO_MUCH|too many channels",
+         "аккаунт состоит в слишком многих каналах (лимит Telegram 500)"),
+        (r"CHAT_ADMIN_REQUIRED|admin privileges are required|ChatAdminRequired",
+         "нужны права администратора в этом чате"),
+        (r"CHAT_WRITE_FORBIDDEN|You can't write in this chat|ChatWriteForbidden",
+         "аккаунту запрещено писать в этот чат"),
+        (r"USER_BANNED_IN_CHANNEL|UserBannedInChannel",
+         "аккаунт заблокирован в этом канале или группе"),
+        (r"USER_PRIVACY_RESTRICTED|privacy settings", "настройки приватности пользователя не позволяют"),
+        (r"USER_NOT_MUTUAL_CONTACT", "пользователь не во взаимных контактах — пригласить нельзя"),
+        (r"USER_CHANNELS_TOO_MUCH", "пользователь уже состоит в слишком многих каналах"),
+        (r"USER_ALREADY_PARTICIPANT", "уже участник"),
+        (r"USER_IS_BLOCKED|bot was blocked|blocked by the user", "пользователь заблокировал отправителя"),
+        (r"MESSAGE_ID_INVALID|message to forward not found|MESSAGE_NOT_FOUND",
+         "сообщение не найдено — удалено или неверный номер"),
+        (r"MEDIA_EMPTY|MEDIA_INVALID|file reference", "медиафайл недоступен или повреждён"),
+        (r"MESSAGE_TOO_LONG|message is too long", "сообщение слишком длинное для Telegram"),
+        (r"BOT_TOKEN|Unauthorized.*bot", "токен бота недействителен — обновите его"),
+        (r"socks|proxy", "прокси недоступен — проверьте или замените прокси"),
+        (r"timed? ?out|TimeoutError", "Telegram не ответил вовремя (таймаут) — повторите позже"),
+        (r"connection|network|ConnectionReset|ConnectionRefused|OSError",
+         "нет связи с Telegram — сеть или прокси"),
+        (r"database|asyncpg|relation .* does not exist|column .* does not exist",
+         "сбой базы данных — уже записан в журнал"),
+    )
+)
+
+_CYRILLIC = re.compile(r"[а-яё]", re.IGNORECASE)
+_LATIN_WORD = re.compile(r"[a-z]{3,}", re.IGNORECASE)
+
+
+def explain_error_ru(text: str | None, limit: int = 500) -> str:
+    """Причина сбоя для владельца — по-русски. ЧИСТАЯ, никогда не бросает.
+
+    Уже русский текст (сообщения исполнителей) возвращается как есть.
+    Известная английская ошибка → русское объяснение + «тех.:» исходник
+    (он нужен для разбора). Неизвестная → «Непредвиденная ошибка: …».
+    """
+    t = str(text or "").strip()
+    if not t:
+        return ""
+    if _CYRILLIC.search(t) and len(_CYRILLIC.findall(t)) >= len(_LATIN_WORD.findall(t)):
+        return t[:limit]
+    for pat, ru in _RU_EXPLAIN:
+        m = pat.search(t)
+        if not m:
+            continue
+        if "{secs}" in ru:
+            sec = next((g for g in (m.groups() or ()) if g), None)
+            if sec is None:
+                n = re.search(r"(\d+)", t)
+                sec = n.group(1) if n else None
+            ru = ru.format(secs=f"{sec} с" if sec else "некоторое время")
+        out = f"{ru[0].upper()}{ru[1:]} · тех.: {t}"
+        return out[:limit]
+    return f"Непредвиденная ошибка: {t}"[:limit]

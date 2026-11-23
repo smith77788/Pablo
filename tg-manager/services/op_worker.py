@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+import html as _html_mod
 import logging
 import os
 import random
@@ -1123,6 +1124,7 @@ from services.op_errors import (  # noqa: E402,F401
     _is_session_conflict_error,
     _normalize_result,
     _classify_op_error,
+    explain_error_ru,
     _is_network_or_proxy_error,
     _is_dead_session_error,
 )
@@ -3243,7 +3245,8 @@ async def _run_op_task(pool: asyncpg.Pool, bot: Bot, row: dict) -> None:
             # видел «Ошибка» без причины. Пишем error_msg из reason/summary.
             _err_text = None
             if _final_status in ("failed", op_status.PARTIAL):
-                _err_text = (str(result.get("reason") or result.get("summary") or "").strip()[:300]) or None
+                _err_text = explain_error_ru(
+                    str(result.get("reason") or result.get("summary") or "").strip(), 300) or None
             await _safe_execute(
                 pool,
                 "UPDATE operation_queue SET status=$3, finished_at=now(), result=$1::jsonb, "
@@ -3461,7 +3464,9 @@ async def _run_op_task(pool: asyncpg.Pool, bot: Bot, row: dict) -> None:
                     pool,
                     "UPDATE operation_queue SET status='failed', finished_at=now(), error_msg=$1 "
                     f"WHERE id=$2 AND status NOT IN {op_status.sql_terminal_list()}",
-                    str(e)[:500],
+                    # Причина — по-русски: её показывают карточка операции в
+                    # мини-аппе и уведомление; исходник остаётся после «тех.:».
+                    explain_error_ru(str(e) or type(e).__name__, 500),
                     op_id,
                     log_ctx=f"[run_op_failed op={op_id}]",
                 )
@@ -3542,7 +3547,8 @@ async def _run_op_task(pool: asyncpg.Pool, bot: Bot, row: dict) -> None:
                     owner_id,
                     "op_complete",
                     f"❌ <b>Операция #{op_id}</b> завершилась с ошибкой:\n"
-                    f"<code>{str(e)[:200]}</code>{retry_info}\n\n"
+                    f"{_html_mod.escape(explain_error_ru(str(e) or type(e).__name__, 300))}"
+                    f"{retry_info}\n\n"
                     f"💡 Используйте кнопку «Повторить» или проверьте аккаунты.",
                     reply_markup=kb.as_markup(),
                     dedup_key=f"fail:{op_id}",
