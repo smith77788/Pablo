@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import ast
 import pathlib
+import re
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 HANDLERS = ROOT / "bot" / "handlers"
@@ -91,4 +92,55 @@ def test_every_wrong_input_offers_cancel() -> None:
     assert not found, (
         "Шаг ввода отвечает «попробуйте ещё раз» без выхода — добавьте "
         "reply_markup=cancel_kb():\n" + "\n".join(found)
+    )
+
+
+# ── Запрос ввода без единой кнопки ───────────────────────────────────────────
+# Обход по «`return` следом» не видит запрос, которым обработчик кончается
+# (`handle_import_tdata_wrong_type`: «Отправьте ZIP-файл как документ» — и
+# всё). 23.11.2026 таких нашлось ещё 12. Любой ответ бота со словами
+# «Введите / Отправьте / Пришлите / Укажите / Напишите» несёт клавиатуру.
+
+
+_PROMPT = re.compile(r"Введите|Отправьте|Пришлите|Укажите|Напишите")
+_CB_NAMES = {"callback", "cb", "call", "query", "c"}
+# Модерация группового чата отвечает в группе — там кнопка «Отменить» чужая.
+_GROUP_ONLY = {"chat_guard.py"}
+
+
+def prompts_without_buttons(source: str) -> list[int]:
+    found: list[int] = []
+    for c in ast.walk(ast.parse(source)):
+        if not (isinstance(c, ast.Call) and isinstance(c.func, ast.Attribute)
+                and c.func.attr in ("answer", "edit_text", "reply") and c.args):
+            continue
+        if c.func.attr == "answer" and ast.unparse(c.func.value) in _CB_NAMES:
+            continue  # всплывашка, у неё кнопок не бывает
+        if any(k.arg in ("reply_markup", None) for k in c.keywords):
+            continue
+        if _PROMPT.search(ast.unparse(c.args[0])):
+            found.append(c.lineno)
+    return found
+
+
+def test_prompt_detector_sees_known_case() -> None:
+    src = (
+        "async def h(message):\n"
+        "    await message.answer('⚠️ Отправьте ZIP-файл как документ.')\n"
+        "    await message.answer('Введите имя:', reply_markup=cancel_kb())\n"
+        "    await callback.answer('Введите имя')\n"
+    )
+    assert prompts_without_buttons(src) == [2]
+
+
+def test_every_prompt_has_buttons() -> None:
+    found = []
+    for path in sorted(HANDLERS.rglob("*.py")):
+        if path.name in _GROUP_ONLY:
+            continue
+        for line in prompts_without_buttons(path.read_text(encoding="utf-8")):
+            found.append(f"{path.relative_to(ROOT)}:{line}")
+    assert not found, (
+        "Запрос ввода без кнопок — добавьте reply_markup=cancel_kb():\n"
+        + "\n".join(found)
     )

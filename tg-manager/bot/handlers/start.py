@@ -787,6 +787,7 @@ async def cmd_find(message: Message, pool: asyncpg.Pool | None = None) -> None:
             "<code>/find позиции</code>\n"
             "<code>/find прокси</code>",
             parse_mode="HTML",
+            reply_markup=terminal_kb(),
         )
         return
 

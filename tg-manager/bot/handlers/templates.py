@@ -746,6 +746,7 @@ async def msg_ai_template_name(
         await message.answer(
             f"⚠️ Шаблон с именем <b>«{_html.escape(name)}»</b> уже существует. Введите другое:",
             parse_mode="HTML",
+            reply_markup=cancel_kb(),
         )
         await state.set_state(AiTemplateGenFSM.waiting_name)
         await state.update_data(bot_id=bot_id, generated_text=generated_text)
