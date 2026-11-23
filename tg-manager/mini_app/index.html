@@ -8772,7 +8772,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
   <div class="modal">
     <div class="modal-x" onclick="closeDealModal()" role="button" tabindex="0" aria-label="Закрыть">✕</div>
     <div class="modal-title" id="dealModalTitle">💼 Новая сделка</div>
-    <div class="field"><label>Название</label><input type="text" id="dealTitle" maxlength="200" placeholder="Напр: Продажа подписки"></div>
+    <div class="field"><label>Название</label><input type="text" id="dealTitle" maxlength="200" onkeydown="if(event.key==='Enter'){event.preventDefault();saveDeal()}" placeholder="Напр: Продажа подписки"></div>
     <div class="field"><label>Контакт</label><input type="text" id="dealContact" maxlength="200" placeholder="@username или имя"></div>
     <div class="field">
       <label>Стадия</label>
@@ -30246,8 +30246,10 @@ function showParserRunAudience(id) {
 // (screens/deals_board.js) вместе с воронкой контактов. Окно создания осталось
 // здесь, его зовёт кнопка «➕ Сделка» доски.
 // deal — правка существующей сделки (с доски); без него — новая.
+// preStage — для новой сделки: стадия колонки, из которой нажали «+», чтобы
+// карточка сразу легла в неё, а не в «Лид».
 let _DEAL_EDIT_ID = 0, _DEAL_EDIT_ORIG = null;
-function openDealModal(deal) {
+function openDealModal(deal, preStage) {
   _DEAL_EDIT_ID = deal && deal.deal_id ? Number(deal.deal_id) : 0;
   _DEAL_EDIT_ORIG = deal || null;
   const setv=(id,v)=>{ const el=document.getElementById(id); if(el) el.value=v; };
@@ -30256,7 +30258,7 @@ function openDealModal(deal) {
   setv('dealNotes', deal ? (deal.notes||'') : '');
   setv('dealValue', deal ? String(Number(deal.value)||0) : '0');
   const ds=document.getElementById('dealStage');
-  if(ds) { ds.value=deal ? (deal.stage||'lead') : 'lead'; ds.disabled=!!deal; }
+  if(ds) { ds.value=deal ? (deal.stage||'lead') : (preStage || 'lead'); ds.disabled=!!deal; }
   // Валюта по умолчанию — основная валюта владельца (её знает доска).
   const dc=document.getElementById('dealCurrency');
   if(dc) dc.value=(deal && deal.currency) || (typeof _DK!=='undefined' && _DK && _DK.currency) || dc.value || 'RUB';
