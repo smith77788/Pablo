@@ -773,7 +773,7 @@ async def cb_admin(
     state: FSMContext,
 ) -> None:
     if not _is_admin(callback.from_user.id):
-        await callback.answer("⛔️ Нет доступа.", show_alert=True)
+        await callback.answer("⛔ Только для администраторов платформы.", show_alert=True)
         return
     await safe_answer(callback)
     action = callback.data.removeprefix("adm:")
@@ -3999,7 +3999,7 @@ async def _ai_keys_menu(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
 @router.callback_query(F.data == "adm:ai_keys")
 async def cb_adm_ai_keys(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
     if not _is_admin(callback.from_user.id):
-        await callback.answer("Нет доступа.", show_alert=True)
+        await callback.answer("⛔ Только для администраторов платформы.", show_alert=True)
         return
     await safe_answer(callback)
     await _ai_keys_menu(callback, pool)
@@ -4009,7 +4009,7 @@ async def cb_adm_ai_keys(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
 async def cb_adm_ai_ambient(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
     """Тумблер «Claude без ключа» (ambient): keyless-резолв кредов SDK."""
     if not _is_admin(callback.from_user.id):
-        await callback.answer("Нет доступа.", show_alert=True)
+        await callback.answer("⛔ Только для администраторов платформы.", show_alert=True)
         return
     await safe_answer(callback)
     cur = bool(await db.get_platform_setting(pool, "ai_anthropic_ambient", ""))
@@ -4024,7 +4024,7 @@ async def cb_adm_ai_ambient(callback: CallbackQuery, pool: asyncpg.Pool) -> None
 @router.callback_query(F.data == "adm:budget")
 async def cb_adm_budget(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
     if not _is_admin(callback.from_user.id):
-        await callback.answer("Нет доступа.", show_alert=True)
+        await callback.answer("⛔ Только для администраторов платформы.", show_alert=True)
         return
     await safe_answer(callback)
     from services.account_budget import get_daily_budget, DEFAULT_DAILY_BUDGET
@@ -4051,7 +4051,7 @@ async def cb_adm_budget(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
 @router.callback_query(F.data.startswith("adm:budget_set:"))
 async def cb_adm_budget_set(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
     if not _is_admin(callback.from_user.id):
-        await callback.answer("Нет доступа.", show_alert=True)
+        await callback.answer("⛔ Только для администраторов платформы.", show_alert=True)
         return
     try:
         n = int(callback.data.removeprefix("adm:budget_set:"))
@@ -4071,7 +4071,7 @@ async def cb_adm_budget_set(callback: CallbackQuery, pool: asyncpg.Pool) -> None
 @router.callback_query(F.data.startswith("adm:ai_set:"))
 async def cb_adm_ai_set(callback: CallbackQuery, state: FSMContext) -> None:
     if not _is_admin(callback.from_user.id):
-        await callback.answer("Нет доступа.", show_alert=True)
+        await callback.answer("⛔ Только для администраторов платформы.", show_alert=True)
         return
     pid = callback.data.removeprefix("adm:ai_set:")
     meta = next((p for p in _AI_PROVIDERS if p[0] == pid), None)
@@ -4095,7 +4095,7 @@ async def cb_adm_ai_set(callback: CallbackQuery, state: FSMContext) -> None:
 @router.callback_query(F.data.startswith("adm:ai_del:"))
 async def cb_adm_ai_del(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
     if not _is_admin(callback.from_user.id):
-        await callback.answer("Нет доступа.", show_alert=True)
+        await callback.answer("⛔ Только для администраторов платформы.", show_alert=True)
         return
     pid = callback.data.removeprefix("adm:ai_del:")
     meta = next((p for p in _AI_PROVIDERS if p[0] == pid), None)
@@ -4157,7 +4157,7 @@ async def msg_ai_key(message: Message, state: FSMContext, pool: asyncpg.Pool) ->
 @router.callback_query(F.data == "adm:gate")
 async def cb_adm_gate(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
     if not _is_admin(callback.from_user.id):
-        await callback.answer("Нет доступа.", show_alert=True)
+        await callback.answer("⛔ Только для администраторов платформы.", show_alert=True)
         return
     await safe_answer(callback)
     channels = await db.get_subscription_gate_channels(pool)
@@ -4172,7 +4172,7 @@ async def cb_adm_gate(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
 @router.callback_query(F.data == "adm:gate_toggle")
 async def cb_adm_gate_toggle(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
     if not _is_admin(callback.from_user.id):
-        await callback.answer("Нет доступа.", show_alert=True)
+        await callback.answer("⛔ Только для администраторов платформы.", show_alert=True)
         return
     new_val = not get_gate_enabled()
     set_gate_enabled(new_val)
@@ -4192,7 +4192,7 @@ async def cb_adm_gate_toggle(callback: CallbackQuery, pool: asyncpg.Pool) -> Non
 @router.callback_query(F.data == "adm:gate_add_ask")
 async def cb_adm_gate_add_ask(callback: CallbackQuery, state: FSMContext) -> None:
     if not _is_admin(callback.from_user.id):
-        await callback.answer("Нет доступа.", show_alert=True)
+        await callback.answer("⛔ Только для администраторов платформы.", show_alert=True)
         return
     await safe_answer(callback)
     await state.set_state(GateAddFSM.waiting_username)
@@ -4292,7 +4292,7 @@ async def msg_gate_add(message: Message, state: FSMContext, pool: asyncpg.Pool) 
 @router.callback_query(F.data.startswith("adm:gate_del:"))
 async def cb_adm_gate_del(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
     if not _is_admin(callback.from_user.id):
-        await callback.answer("Нет доступа.", show_alert=True)
+        await callback.answer("⛔ Только для администраторов платформы.", show_alert=True)
         return
     try:
         channel_id = int(callback.data.split(":")[-1])
@@ -4357,7 +4357,7 @@ async def cb_adm_gate_notify_all(
     callback: CallbackQuery, pool: asyncpg.Pool
 ) -> None:
     if not _is_admin(callback.from_user.id):
-        await callback.answer("Нет доступа.", show_alert=True)
+        await callback.answer("⛔ Только для администраторов платформы.", show_alert=True)
         return
 
     channels = get_gate_channels()
@@ -4479,7 +4479,7 @@ async def fsm_bm_write_post(message: Message, state: FSMContext, pool: asyncpg.P
 @router.callback_query(F.data == "adm:bm_post_confirm")
 async def cb_bm_post_confirm(callback: CallbackQuery, state: FSMContext, pool: asyncpg.Pool) -> None:
     if not _is_admin(callback.from_user.id):
-        await callback.answer("⛔️ Нет доступа.", show_alert=True)
+        await callback.answer("⛔ Только для администраторов платформы.", show_alert=True)
         return
     await safe_answer(callback)
     data = await state.get_data()

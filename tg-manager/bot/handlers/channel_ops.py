@@ -3761,7 +3761,7 @@ async def cb_br_mode_single(
     from bot.handlers.strike import _has_access
 
     if not await _has_access(pool, callback.from_user.id):
-        await callback.answer("Нет доступа к модулю «Массовые жалобы».", show_alert=True)
+        await callback.answer("⛔ Модуль «Массовые жалобы» не подключён. Его открывает подписка «Массовые жалобы» или администратор платформы.", show_alert=True)
         return
     await safe_answer(callback)
     await state.set_state(BulkReportFSM.waiting_peer)
@@ -3784,7 +3784,7 @@ async def cb_br_mode_batch(
     from bot.handlers.strike import _has_access
 
     if not await _has_access(pool, callback.from_user.id):
-        await callback.answer("Нет доступа к модулю «Массовые жалобы».", show_alert=True)
+        await callback.answer("⛔ Модуль «Массовые жалобы» не подключён. Его открывает подписка «Массовые жалобы» или администратор платформы.", show_alert=True)
         return
     await safe_answer(callback)
     await state.set_state(BulkReportFSM.waiting_peers_batch)

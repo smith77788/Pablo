@@ -977,7 +977,7 @@ async def cb_fn_step_delete(
     """Удалить шаг из воронки и перенумеровать."""
     funnel_id = callback_data.funnel_id
     if not await _owns_funnel(pool, funnel_id, callback.from_user.id):
-        await callback.answer("⛔ Нет доступа.", show_alert=True)
+        await callback.answer("Воронка не найдена — возможно, она уже удалена. Откройте список заново.", show_alert=True)
         return
     step_to_delete = callback_data.step
     steps = await db.get_funnel_steps(pool, funnel_id)
@@ -1075,7 +1075,7 @@ async def cb_fn_step_up(
 ) -> None:
     """Переместить шаг вверх (обменять содержимое с предыдущим)."""
     if not await _owns_funnel(pool, callback_data.funnel_id, callback.from_user.id):
-        await callback.answer("⛔ Нет доступа.", show_alert=True)
+        await callback.answer("Воронка не найдена — возможно, она уже удалена. Откройте список заново.", show_alert=True)
         return
     if callback_data.step == 0:
         await callback.answer("Шаг уже первый.", show_alert=True)
@@ -1093,7 +1093,7 @@ async def cb_fn_step_down(
 ) -> None:
     """Переместить шаг вниз (обменять содержимое со следующим)."""
     if not await _owns_funnel(pool, callback_data.funnel_id, callback.from_user.id):
-        await callback.answer("⛔ Нет доступа.", show_alert=True)
+        await callback.answer("Воронка не найдена — возможно, она уже удалена. Откройте список заново.", show_alert=True)
         return
     steps = await db.get_funnel_steps(pool, callback_data.funnel_id)
     if callback_data.step >= len(steps) - 1:
