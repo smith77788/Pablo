@@ -41,3 +41,33 @@ def test_other_crm_savers_did_not_swallow_deal_value():
     # сохраняет именно отдельный saveCrmValue, а не они.
     stage = _html_fn("setCrmStage")
     assert "deal_value" not in stage
+
+
+def test_currency_picker_is_present_and_not_hardcoded_dollar():
+    body = _html_fn("openContactCRM")
+    # селектор валюты есть и сохраняет при смене; жёсткого «($)» в подписи нет
+    assert 'id="crm-currency"' in body
+    assert "crmCurrencyOptions(crm.currency)" in body
+    assert "Сумма сделки ($)" not in body
+
+
+def test_save_sends_currency_with_deal_value():
+    body = _html_fn("saveCrmValue")
+    assert "getElementById('crm-currency')" in body
+    assert "currency" in body
+    # валюта из закрытого списка, дефолт — не доллар
+    assert "CRM_CURRENCIES" in body
+    assert "'RUB'" in body
+
+
+def test_currency_list_matches_deal_modal():
+    # Список валют карточки CRM обязан совпадать с модалкой сделки на доске,
+    # иначе одна и та же сделка в двух местах получает разные наборы валют.
+    m = re.search(r"const CRM_CURRENCIES = \[([^\]]+)\]", HTML)
+    assert m, "CRM_CURRENCIES not found"
+    crm_cur = set(re.findall(r"'([A-Z]{3})'", m.group(1)))
+    sel = re.search(r'<select id="dealCurrency"[\s\S]*?</select>', HTML)
+    assert sel, "dealCurrency select not found"
+    modal = set(re.findall(r"<option>([A-Z]{3})</option>", sel.group(0)))
+    assert {"RUB", "USD", "EUR"} <= crm_cur
+    assert crm_cur == modal, (crm_cur ^ modal)
