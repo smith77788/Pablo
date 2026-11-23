@@ -17,7 +17,7 @@ ACTION_MAP = {
     "канал|channel": "channel_manage",
     "бот|bot": "bot_manage",
     "аккаунт|account": "account_manage",
-    " Strike|зачистк|report": "strike",
+    " Strike|жалоб|зачистк|report": "strike",
     "парсер|parser": "parse_audience",
     "прогрев|warmup": "warmup",
     "аналитик|statistics|статистик": "analytics",
@@ -40,7 +40,7 @@ def parse_intent(text: str) -> dict:
         "action": "unknown",
         "original_text": text,
         "confidence": 0.0,
-        "suggestion": "Не удалось определить действие. Попробуйте: 'рассылка', 'канал', 'бот', 'Strike', 'прогрев'.",
+        "suggestion": "Не удалось определить действие. Попробуйте: 'рассылка', 'канал', 'бот', 'жалобы', 'прогрев'.",
     }
 
 
@@ -52,7 +52,7 @@ def get_action_keyboard(intent: dict) -> list:
         "channel_manage": [{"text": "📡 Каналы", "action": "open_channels"}],
         "bot_manage": [{"text": "🤖 Боты", "action": "open_bots"}],
         "account_manage": [{"text": "📱 Аккаунты", "action": "open_accounts"}],
-        "strike": [{"text": "⚔️ Strike", "action": "open_strike"}],
+        "strike": [{"text": "⚔️ Массовые жалобы", "action": "open_strike"}],
         "parse_audience": [{"text": "🔍 Парсер", "action": "open_parser"}],
         "warmup": [{"text": "🌱 Прогрев", "action": "open_warmup"}],
         "analytics": [{"text": "📊 Аналитика", "action": "open_analytics"}],

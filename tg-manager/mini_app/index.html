@@ -35769,7 +35769,7 @@ async function _billingHistory() {
         <div class="row">
           <div class="row-ico" style="background:rgba(52,211,153,.12)">💳</div>
           <div class="row-body">
-            <div class="row-name">${esc(({paid:'Подписка',starter:'Подписка',pro:'Подписка',enterprise:'Подписка',strike:'Массовые жалобы',host_server:'Host-Server'})[p.plan]||p.plan||'—')}${Number(p.period_months)>0?' · '+p.period_months+' мес.':''}</div>
+            <div class="row-name">${esc(({paid:'Подписка',starter:'Подписка',pro:'Подписка',enterprise:'Подписка',strike:'Массовые жалобы',host_server:'Аренда сервера'})[p.plan]||p.plan||'—')}${Number(p.period_months)>0?' · '+p.period_months+' мес.':''}</div>
             <div class="row-val">${p.currency||'—'} · $${p.amount_usd||0}</div>
             <div class="row-val" style="color:var(--hint)">${ago(p.created_at)}</div>
           </div>

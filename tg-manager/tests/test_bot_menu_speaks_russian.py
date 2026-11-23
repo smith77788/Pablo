@@ -291,7 +291,8 @@ def test_username_probe_sees_a_known_example():
 _ENGLISH_LABELS = re.compile(
     r"(?<![\w@/_.-])(trust|Trust score|risk|Mass Ops|Health Dashboard|snippet|"
     r"search authority|authority|invite link|safe pacing|pacing_mode=safe|flood|Join|"
-    r"Free|FREE|User ID|Chat ID|CTA|About|Bio|bio|\[enterprise\]|retention score|freshness score|quality score)(?![\w_-])"
+    r"Free|FREE|User ID|Chat ID|CTA|About|Bio|bio|\[enterprise\]|retention score|freshness score|quality score|"
+    r"Host-Server|Strike Module)(?![\w_-])"
 )
 
 
@@ -318,8 +319,17 @@ def test_english_label_probe_sees_known_examples():
 
 _SERVICE_LABELS = re.compile(
     r"(?<![\w@/_.-])(trust|Trust score|Mass Ops|Health Dashboard|failure rate|"
-    r"success rate|retention|Bulk Join|bio)(?![\w_-])"
+    r"success rate|retention|Bulk Join|bio|Host-Server|Strike Module|Strike)(?![\w_-])"
 )
+
+
+# Модуль в меню бота называется «⚔️ Массовые жалобы», а «🖥️ Аренда сервера» —
+# не «Host-Server» (23.11.2026: «Strike Module активирован! Перейти: /menu →
+# ⚔️ Strike» — такой кнопки в меню нет). Исключения: рекламные посты канала
+# платформы (brand_injection, botmother_channel) — отдельный текст для
+# подписчиков канала, и ручки мини-аппа (mini_app_protection) — их ведёт
+# поток мини-аппа.
+_SERVICE_LABEL_EXEMPT = {"brand_injection.py", "botmother_channel.py", "mini_app_protection.py"}
 
 
 def test_no_english_labels_in_service_texts_for_the_owner():
@@ -330,17 +340,22 @@ def test_no_english_labels_in_service_texts_for_the_owner():
     services = ROOT / "services"
     bad = []
     for p in sorted(services.rglob("*.py")):
+        if p.name in _SERVICE_LABEL_EXEMPT:
+            continue
         src = p.read_text(encoding="utf-8")
         lines = src.split("\n")
         for ln, part in _russian_literal_parts(src):
             if re.search(r"log\.|log_exc|logger|exc_swallow|UPDATE |--", lines[ln - 1] + part):
                 continue
+            if "|" in part:
+                continue  # шаблон распознавания запроса («Strike|жалоб»), не подпись
             if _SERVICE_LABELS.search(re.sub(r"<[^>]*>", "", part)):
                 bad.append(f"{p.relative_to(services)}:{ln}: {part.strip()[:90]}")
     assert not bad, "английские подписи в текстах сервисов:\n" + "\n".join(bad)
 
 
 def test_service_label_probe_sees_known_examples():
-    for s in ('f"Trust score ниже {x}"', '"Высокий failure rate:"', '"Смена bio"'):
+    for s in ('f"Trust score ниже {x}"', '"Высокий failure rate:"', '"Смена bio"',
+              '"Перейти: /menu → ⚔️ Strike"', '"🖥️ <b>Модуль Host-Server активирован!</b>"'):
         assert _SERVICE_LABELS.search(s), s
     assert not _SERVICE_LABELS.search('f"доверие {trust_score:.2f}"')

@@ -99,7 +99,7 @@ _PLAN_NAMES_RU = {
     "free": "Бесплатный",
     "paid": "Подписка",
     "strike": "Массовые жалобы",
-    "host_server": "Host-Server",
+    "host_server": "Аренда сервера",
 }
 
 

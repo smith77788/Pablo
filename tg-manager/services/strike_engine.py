@@ -270,7 +270,7 @@ def build_infra_takedown_kit(target: str, domains: list[str], reason: str) -> di
                 "key": "apwg", "title": "APWG (email — авто)", "priority": 1,
                 "url": "mailto:reportphishing@apwg.org",
                 "how": "Письмо на reportphishing@apwg.org. Если подключён SMTP в "
-                       "настройках Strike — движок шлёт это автоматически при ударе.",
+                       "настройках жалоб — движок шлёт это автоматически при ударе.",
                 "subject": f"Phishing/fraud site report — {d} (via Telegram @{clean})",
                 "body": _build_apwg_report_body(d, clean, ""),
             },
@@ -2978,7 +2978,7 @@ def _build_vector_diagnostics(r: StrikeResult) -> list[str]:
 
 def format_strike_summary(results: list[StrikeResult]) -> str:
     """Форматирует итоговый отчёт об атаке в HTML."""
-    lines = ["⚔️ <b>Strike — Итоговый отчёт</b>\n"]
+    lines = ["⚔️ <b>Массовые жалобы — итоговый отчёт</b>\n"]
     for r in results:
         # Приоритет: если подтверждено удаление → 🟢, иначе оцениваем эффективность удара.
         # 🔴 только если peer_reported=0 (удар вообще не прошёл).
@@ -3123,7 +3123,7 @@ def _strike_effectiveness_verdict(r: "StrikeResult") -> list[str]:
         out.append(
             f"  📧 <b>Юридический вектор НЕ отправлен</b> (<i>{html.escape(_hint)}</i>) — "
             "именно письма в abuse@/dmca@ Telegram и жалоба в App Store/Google Play "
-            "приводят к удалению. Подключите SMTP-ящики в настройках Strike и повторите."
+            "приводят к удалению. Подключите SMTP-ящики в настройках жалоб и повторите."
         )
     else:
         out.append(
@@ -3237,7 +3237,7 @@ def build_takedown_kit(
         "key": "telegram_abuse", "title": "Telegram Abuse (email)", "priority": 4,
         "url": "mailto:abuse@telegram.org",
         "how": "Письмо на abuse@telegram.org и dmca@telegram.org с текстом ниже. Если "
-               "у вас подключён SMTP в настройках Strike — движок шлёт это автоматически "
+               "у вас подключён SMTP в настройках жалоб — движок шлёт это автоматически "
                "при каждом ударе.",
         "subject": cat.get("email_subject", f"Report: illegal content on Telegram — @{clean}"),
         "body": _legal_body("Telegram Trust & Safety (abuse@telegram.org)", "Telegram Terms of Service and Apple/Google store policies"),
@@ -4058,7 +4058,7 @@ async def execute_mini_strike(
                 "to": "abuse@telegram.org",
                 "label": "abuse",
                 "ok": False,
-                "err": "Email не настроены. Добавьте в Strike → ⚙️ Настройки → 📧 Email аккаунты",
+                "err": "Email не настроены. Добавьте в «Массовые жалобы» → ⚙️ Настройки → 📧 Email аккаунты",
             }
         )
 

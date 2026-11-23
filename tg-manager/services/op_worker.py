@@ -7147,7 +7147,7 @@ async def _run_op_task(pool: asyncpg.Pool, bot: Bot, row: dict) -> None:
             # For strike operations add a direct shortcut to strike history
             if op_type == "strike":
                 kb.button(
-                    text="📜 История Strike",
+                    text="📜 История жалоб",
                     callback_data=StrikeCb(action="history"),
                 )
             kb.adjust(1)
@@ -13356,7 +13356,7 @@ async def _exec_strike(
             log.warning("_exec_strike op=%d: invalid mailbox_id=%r, skipped", op_id, _m)
 
     if not target:
-        return {"status": "failed", "summary": "⚠️ Strike: не указана цель (target)"}
+        return {"status": "failed", "summary": "⚠️ Жалобы: не указана цель"}
 
     # ── Anti-detection (3A): не бить одну цель повторно в короткий интервал ────
     # Повторные удары по одной цели за короткое время — детекшн-паттерн и лишний
@@ -13465,8 +13465,8 @@ async def _exec_strike(
             return {
                 "status": "failed",
                 "summary": (
-                    "⚠️ Strike: нет ни пригодных аккаунтов, ни SMTP-ящиков. "
-                    "Подключите SMTP в настройках Strike — юридические письма "
+                    "⚠️ Жалобы: нет ни пригодных аккаунтов, ни SMTP-ящиков. "
+                    "Подключите SMTP в настройках жалоб — юридические письма "
                     "(abuse@/dmca@ Telegram) не требуют аккаунтов и это единственный "
                     "вектор, который реально удаляет канал."
                 ),
@@ -13564,7 +13564,7 @@ async def _exec_strike(
         log.exception("op_worker _exec_strike #%d failed: %s", op_id, e)
         return {
             "status": "failed",
-            "summary": f"❌ Strike завершился с ошибкой: {str(e)[:200]}",
+            "summary": f"❌ Жалобы завершились с ошибкой: {str(e)[:200]}",
         }
 
     await _safe_execute(
@@ -13642,9 +13642,9 @@ async def _exec_strike(
         "total_reported": total_reported,
         "emails_sent": total_emails,
         "summary": (
-            (summary_text or f"⚡ Strike по {target} завершён. Аккаунтов: {len(viable)}")
+            (summary_text or f"⚡ Жалобы на {target} отправлены. Аккаунтов: {len(viable)}")
             if _strike_did_anything else
-            f"⚠️ Strike по {target}: не отправлено ни одной жалобы и ни одного письма (0). "
+            f"⚠️ Жалобы на {target}: не отправлено ни одной жалобы и ни одного письма (0). "
             "Операция не выполнена."
         ),
     }
@@ -25238,7 +25238,7 @@ async def _exec_compliance_scan(
             f"\n✅ Чисто: {clean_count}" + (f"\n⚠️ Ошибок: {err_count}" if err_count else ""))
     if flagged_lines:
         head += "\n\n" + "\n".join(flagged_lines[:20])
-        head += "\n\nℹ️ Досье в журнале операции. Жалобу подавайте адресно (раздел Strike)."
+        head += "\n\nℹ️ Досье в журнале операции. Жалобу подавайте адресно (раздел «Массовые жалобы»)."
     # Успешная единица здесь — ПРОВЕРЕННАЯ цель, и найденное нарушение тоже
     # проверка: досье собрано, работа сделана. Без `ok` скан, наткнувшийся на
     # пару недоступных целей, закрывался полным провалом вместе со всеми
