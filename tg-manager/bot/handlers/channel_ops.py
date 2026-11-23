@@ -382,7 +382,8 @@ def _main_menu_kb() -> InlineKeyboardBuilder:
     kb.button(text="🚨 Жалоба (1 акк)", callback_data=ChanCb(action="report_pick"))
     # ── Нижний ряд
     kb.button(text="⚡ Массовые операции", callback_data=ChanCb(action="bulk_menu"))
-    kb.adjust(2, 2, 2, 2, 2, 2, 1)
+    kb.button(text="🏠 Главное меню", callback_data=BmCb(action="main"))
+    kb.adjust(2, 2, 2, 2, 2, 2, 1, 1)
     return kb
 
 
@@ -562,7 +563,7 @@ async def cmd_ops(message: Message, pool: asyncpg.Pool) -> None:
     kb.button(text="📋 Очередь операций", callback_data=MassOpCb(action="queue", op_type="all", page=0))
     kb.button(text="📊 Отчёты по операциям", callback_data=BmCb(action="op_reports"))
     kb.button(text="📡 Аналитика инфраструктуры", callback_data=InfraCb(action="menu"))
-    kb.button(text="🏠 Infragram OS", callback_data=BmCb(action="main"))
+    kb.button(text="🏠 Главное меню", callback_data=BmCb(action="main"))
     kb.adjust(1)
     await message.answer(
         "⚡ <b>Операции и отчёты</b>\n\n"

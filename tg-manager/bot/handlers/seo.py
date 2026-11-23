@@ -12,7 +12,7 @@ from aiogram.types import CallbackQuery, Message
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 import aiohttp
 import asyncpg
-from bot.callbacks import SeoCb, EditCb, ChanFactCb, BmCb
+from bot.callbacks import BotCb, SeoCb, EditCb, ChanFactCb, BmCb
 from bot.keyboards import subscription_locked_markup
 from bot.utils.subscription import require_plan, locked_text
 from bot.states import SeoFSM
@@ -216,7 +216,9 @@ async def cb_seo_menu(
         text="✏️ Редактировать профиль",
         callback_data=EditCb(action="menu", bot_id=callback_data.bot_id),
     )
-    kb.adjust(1, 2, 2, 2, 1)
+    kb.button(text="◀️ К боту", callback_data=BotCb(action="select", bot_id=callback_data.bot_id))
+    kb.button(text="🏠 Главное меню", callback_data=BmCb(action="main"))
+    kb.adjust(1, 2, 2, 2, 1, 2)
     await callback.message.edit_text(
         f"📈 <b>SEO — {label}</b>\n\n"
         f"{uname_status}\n\n"

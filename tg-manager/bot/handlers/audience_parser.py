@@ -94,6 +94,7 @@ def _menu_kb() -> InlineKeyboardBuilder:
     kb.button(
         text="🗑 Очистить всю аудиторию", callback_data=ParserCb(action="clear_all")
     )
+    kb.button(text="🏠 Главное меню", callback_data=BmCb(action="main"))
     kb.adjust(1)
     return kb
 
