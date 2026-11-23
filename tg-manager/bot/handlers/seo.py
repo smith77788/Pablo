@@ -2428,7 +2428,7 @@ async def cb_seo_content_gap(
         kb = InlineKeyboardBuilder()
         kb.button(text="◀️ Назад", callback_data=SeoCb(action="menu", bot_id=bot_id))
         await callback.message.edit_text(
-            "📊 <b>Нет данных для анализа</b>\n\nНакопите ключевые слова пользователей или добавьте keywords в Visibility.",
+            "📊 <b>Нет данных для анализа</b>\n\nНакопите ключевые слова пользователей или добавьте ключевые слова в разделе «📊 Позиции в поиске».",
             parse_mode="HTML",
             reply_markup=kb.as_markup(),
         )

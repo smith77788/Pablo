@@ -1741,7 +1741,7 @@ async def cb_vis_reports_csv(callback: CallbackQuery, pool: asyncpg.Pool) -> Non
     await callback.message.answer_document(
         file,
         caption="📊 <b>Отчёт по позициям в поиске</b>\n"
-        "<i>keyword, bot, position, checked_at — последние 500 записей</i>",
+        "<i>запрос, бот, позиция, время проверки — последние 500 записей</i>",
         parse_mode="HTML",
     )
 

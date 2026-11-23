@@ -16,10 +16,10 @@ router = Router()
 log = logging.getLogger(__name__)
 
 ROLE_LABELS = {
-    "entry": "🚪 Entry — точка входа трафика",
-    "conversion": "💰 Conversion — конверсионный бот",
-    "retention": "🔄 Retention — удержание пользователей",
-    "general": "⚙️ General — универсальный",
+    "entry": "🚪 Вход — точка входа трафика",
+    "conversion": "💰 Продажа — конверсионный бот",
+    "retention": "🔄 Удержание — удержание пользователей",
+    "general": "⚙️ Общий — универсальный",
 }
 
 
@@ -64,7 +64,7 @@ async def cb_swarm_menu(
         "📌 <b>Что это?</b>\n"
         "Рой — это система умного распределения пользователей между вашими ботами. Когда новый человек приходит в одного бота, система может автоматически перенаправить его в другой бот, который сейчас лучше конвертирует.\n\n"
         "💡 <b>Как работает:</b>\n"
-        "Каждый бот получает роль: Entry (точка входа), Conversion (продаёт), Retention (удерживает). Система сама решает, в какой бот направить пользователя, основываясь на статистике.\n\n"
+        "Каждый бот получает роль: «Вход» (точка входа), «Продажа» (продаёт), «Удержание» (удерживает). Система сама решает, в какой бот направить пользователя, основываясь на статистике.\n\n"
         f"Статус: {swarm_status}\n"
         f"Роль: {role}\n"
         f"Кластер: <code>{cluster}</code>\n"
@@ -187,10 +187,10 @@ async def cb_swarm_stats(
         f"  Перенаправлено: {stats['routed']}\n"
         f"  Оставлено: {stats['kept']}\n\n"
         f"<b>Метрики бота:</b>\n"
-        f"  Score: {round(score, 3)}\n"
+        f"  Оценка: {round(score, 3)}\n"
         f"  CTR: {round(ctr * 100, 1)}%\n"
-        f"  Conversion: {round(conv * 100, 1)}%\n"
-        f"  D1 Retention: {round(ret_d1 * 100, 1)}%"
+        f"  Конверсия: {round(conv * 100, 1)}%\n"
+        f"  Удержание 1-го дня: {round(ret_d1 * 100, 1)}%"
         f"{no_data_hint}",
         parse_mode="HTML",
         reply_markup=back_to_bot(callback_data.bot_id),
@@ -303,9 +303,9 @@ async def cb_set_mode(
         log_exc_swallow(log, "cb_set_mode: get_system_mode failed")
         current = "manual"
     await callback.message.edit_text(
-        f"🌐 <b>Системный режим (текущий: {current.upper()})</b>\n\n"
-        "Режим определяет поведение всего swarm:\n"
-        "как и когда происходит роутинг, тестирование, оптимизация.",
+        f"🌐 <b>Системный режим (текущий: {MODE_DESCRIPTIONS.get(current, current)})</b>\n\n"
+        "Режим определяет поведение всего роя:\n"
+        "как и когда происходит перенаправление, тестирование, оптимизация.",
         parse_mode="HTML",
         reply_markup=kb.as_markup(),
     )
