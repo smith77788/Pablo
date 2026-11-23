@@ -42,7 +42,7 @@ from bot.utils.op_helpers import safe_answer
 
 
 log = logging.getLogger(__name__)
-from bot.utils.fmt import num_ru  # noqa: E402
+from bot.utils.fmt import num_ru, plural  # noqa: E402
 
 router = Router()
 
@@ -293,7 +293,7 @@ async def cb_chanf_import_all_accs(callback: CallbackQuery, pool: asyncpg.Pool) 
     kb.adjust(1)
     await callback.message.edit_text(
         f"✅ <b>Импорт каналов поставлен в очередь</b>\n\n"
-        f"📋 Операция <code>#{op_id}</code> · {len(accounts)} аккаунт(ов)\n"
+        f"📋 Операция <code>#{op_id}</code> · {len(accounts)} {plural(len(accounts), 'аккаунт', 'аккаунта', 'аккаунтов')}\n"
         "Результат и прогресс: /ops",
         parse_mode="HTML",
         reply_markup=kb.as_markup(),

@@ -24,7 +24,7 @@ from bot.utils.op_helpers import safe_answer, terminal_kb
 
 from bot.utils.owner_error import owner_error  # noqa: E402
 
-from bot.utils.fmt import num_ru  # noqa: E402
+from bot.utils.fmt import num_ru, plural  # noqa: E402
 
 router = Router()
 log = logging.getLogger(__name__)
@@ -177,7 +177,7 @@ def _build_bot_pick_kb(bots: list, selected: list[int]) -> object:
     has_selected = bool(selected)
     if has_selected:
         kb.button(
-            text=f"▶️ Продолжить ({len(selected)} бот(ов))",
+            text=f"▶️ Продолжить ({len(selected)} {plural(len(selected), 'бот', 'бота', 'ботов')})",
             callback_data=NetBcCb(action="bots_confirmed"),
         )
     kb.button(text="◀️ Назад", callback_data=NetBcCb(action="choose_target"))
@@ -378,7 +378,7 @@ async def msg_net_bc_text(
         )
         if len(chosen) > 3:
             names += f" +{len(chosen) - 3}"
-        target_desc = f"{len(chosen)} бот(ов): {names} ({num_ru(total)} юз.)"
+        target_desc = f"{len(chosen)} {plural(len(chosen), 'бот', 'бота', 'ботов')}: {names} ({num_ru(total)} юз.)"
     elif segment == "cluster":
         cluster_name = data.get("cluster_name", "")
         try:
@@ -395,7 +395,7 @@ async def msg_net_bc_text(
             log.exception("msg_net_bc_text: cluster_bots fetch failed")
             cluster_bots = []
         total = sum(b["audience_count"] for b in cluster_bots)
-        target_desc = f"кластер «{_html.escape(cluster_name)}» ({len(cluster_bots)} бот(ов), {num_ru(total)} юз.)"
+        target_desc = f"кластер «{_html.escape(cluster_name)}» ({len(cluster_bots)} {plural(len(cluster_bots), 'бот', 'бота', 'ботов')}, {num_ru(total)} юз.)"
     else:
         target_desc = segment
 

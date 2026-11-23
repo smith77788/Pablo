@@ -24,7 +24,7 @@ from bot.utils.subscription import require_plan, locked_text
 from bot.utils.op_helpers import safe_answer
 
 log = logging.getLogger(__name__)
-from bot.utils.fmt import num_ru  # noqa: E402
+from bot.utils.fmt import num_ru, plural  # noqa: E402
 
 router = Router()
 
@@ -115,7 +115,7 @@ async def cb_cluster_list(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
             cluster_name = row["cluster"]
             bot_count = row["bot_count"]
             lines.append(
-                f"🔗 <b>{_html.escape(cluster_name)}</b> — {bot_count} бот(ов)"
+                f"🔗 <b>{_html.escape(cluster_name)}</b> — {bot_count} {plural(bot_count, 'бот', 'бота', 'ботов')}"
             )
             kb.button(
                 text=f"🔗 {cluster_name} ({bot_count})",
@@ -404,7 +404,7 @@ async def cb_cluster_delete_confirm(
     warning = ""
     if bot_count:
         warning = (
-            f"\n\n⚠️ <b>Внимание:</b> в кластере {bot_count} бот(ов). "
+            f"\n\n⚠️ <b>Внимание:</b> в кластере {bot_count} {plural(bot_count, 'бот', 'бота', 'ботов')}. "
             "После удаления они останутся активными, но потеряют привязку к кластеру."
         )
 

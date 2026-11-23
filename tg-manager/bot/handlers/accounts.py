@@ -75,7 +75,7 @@ from services.account_manager import (
 )
 from bot.utils.owner_error import owner_error
 
-from bot.utils.fmt import num_ru  # noqa: E402
+from bot.utils.fmt import num_ru, plural  # noqa: E402
 
 router = Router()
 
@@ -2614,7 +2614,7 @@ async def cb_check_all_accounts(
     kb.adjust(1)
     await callback.message.edit_text(
         f"🔍 <b>Проверка аккаунтов поставлена в очередь</b>\n\n"
-        f"📋 Операция <code>#{op_id}</code> · {len(accounts)} аккаунт(ов)\n"
+        f"📋 Операция <code>#{op_id}</code> · {len(accounts)} {plural(len(accounts), 'аккаунт', 'аккаунта', 'аккаунтов')}\n"
         f"⏱ Ожидаемое время: ~{len(accounts) * 5} сек.\n\n"
         "Уведомление придёт по окончании. Статус: /ops",
         parse_mode="HTML",
@@ -2816,7 +2816,7 @@ async def cb_scan_all_resources(
 
     await callback.message.edit_text(
         f"🔎 <b>Сканирование ресурсов поставлено в очередь</b>\n\n"
-        f"📋 Операция <code>#{op_id}</code> · {len(accounts)} аккаунт(ов)\n"
+        f"📋 Операция <code>#{op_id}</code> · {len(accounts)} {plural(len(accounts), 'аккаунт', 'аккаунта', 'аккаунтов')}\n"
         f"⏱ Ожидаемое время: ~{len(accounts) * 8} сек.\n\n"
         "Уведомление придёт по окончании. Статус: /ops",
         parse_mode="HTML",
@@ -2849,7 +2849,7 @@ async def cb_reauth_list(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
         )
         return
 
-    lines = [f"🔄 <b>Переавторизатор</b> — {len(expired)} аккаунт(ов)\n"]
+    lines = [f"🔄 <b>Переавторизатор</b> — {len(expired)} {plural(len(expired), 'аккаунт', 'аккаунта', 'аккаунтов')}\n"]
     lines.append("Нажмите <b>Релог</b> рядом с нужным аккаунтом:\n")
 
     kb = InlineKeyboardBuilder()
@@ -5316,7 +5316,7 @@ async def cb_account_assets(
         )
     elif channels:
         lines.append(
-            f"\n⚠️ <b>Внимание:</b> при удалении аккаунта {len(channels)} канал(ов) потеряют привязку."
+            f"\n⚠️ <b>Внимание:</b> при удалении аккаунта {len(channels)} {plural(len(channels), 'канал', 'канала', 'каналов')} потеряют привязку."
         )
 
     kb = InlineKeyboardBuilder()

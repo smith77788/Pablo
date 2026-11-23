@@ -16,6 +16,8 @@ from bot.callbacks import ContentClonerCb, BmCb
 from bot.utils.op_helpers import terminal_kb
 
 log = logging.getLogger(__name__)
+from bot.utils.fmt import plural  # noqa: E402
+
 router = Router()
 
 
@@ -296,7 +298,7 @@ async def _do_queue(cb: CallbackQuery, state: FSMContext, pool: asyncpg.Pool, ms
     await cb.message.edit_text(
         f"✅ <b>Клонирование поставлено в очередь</b> (#{op_id})\n\n"
         f"📋 Источник: <code>{html.escape(source_ref)}</code>\n"
-        f"📨 Режим: {mode_label} последние {msg_count} сообщений → {len(targets)} канал(ов)\n\n"
+        f"📨 Режим: {mode_label} последние {msg_count} сообщений → {len(targets)} {plural(len(targets), 'канал', 'канала', 'каналов')}\n\n"
         "<i>Следите за статусом в разделе «Операции».</i>",
         parse_mode="HTML",
         reply_markup=terminal_kb(),
