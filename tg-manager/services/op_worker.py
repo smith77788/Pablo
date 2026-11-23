@@ -2311,75 +2311,197 @@ async def _claim_shared(op_id: int, ids: list[int]) -> list[int]:
     return [a for a in ids if a in granted or a in joined]
 
 
+# ── Захват флота под операцию ────────────────────────────────────────────────
+#
+# Жалоба владельца (23.11.2026): «массовая операция захватывает несколько
+# аккаунтов флота, а работает лишь один/несколько». Причин было три, и все три
+# жили здесь, в общей двери захвата, через которую идут ~30 исполнителей:
+#
+#   1. Честная доля резала ЯВНЫЙ выбор, хотя делить было не с кем. Делитель
+#      считал ВСЕ живые операции владельца, в том числе те, что свои аккаунты
+#      уже держат (или не берут аккаунтов вовсе — рассылка ботом, разбор).
+#      Владелец выбирал 10 аккаунтов, рядом шла любая другая его операция — и
+#      работали 5, а оставшиеся 5 были свободны и не нужны никому. Теперь долю
+#      делят только с операциями, которые ТОЛЬКО ЧТО стартовали и своих
+#      аккаунтов ещё не взяли, и делят СВОБОДНЫЙ остаток, а не весь список.
+#   2. Аккаунт, который в эту секунду держал фоновый цикл (призрак, прогрев,
+#      монитор — их удержание длится секунды), молча выпадал из прогона
+#      насовсем: исполнитель брал то, что свободно в момент старта, и шёл
+#      дальше. Теперь такие аккаунты ждём недолго (_BG_HOLD_WAIT_S) и берём.
+#   3. Об отпавших не говорил никто: итог печатал «✅ 3/3», потому что знаменатель
+#      — уже урезанный список. Теперь захват запоминает, кого просили и кого
+#      дали (_claim_ledger), а _run_op_task дописывает в итог «не пошли в работу»
+#      с причинами и не называет такую операцию выполненной целиком.
+
+# Сколько ждать аккаунты, которые держат фоновые циклы этого процесса.
+_BG_HOLD_WAIT_S = float(_int_env("OP_BG_HOLD_WAIT_SEC", 45, 0, 600))
+_BG_HOLD_POLL_S = 2.0
+# Сколько секунд после старта операция без аккаунтов считается претендентом на
+# долю флота. Дольше — значит, аккаунты ей не нужны (или она их уже получила
+# другим путём), и резать ради неё флот соседу бессмысленно.
+_FAIR_SHARE_FRESH_S = 90.0
+# Когда операция этого процесса стартовала (monotonic). Пишется рядом с
+# _active_op_ids.add; читается только делителем честной доли.
+_op_started_mono: dict[int, float] = {}
+# op_id → {"asked": {id,...}, "got": {id,...}} за весь прогон операции.
+_claim_ledger: dict[int, dict[str, set[int]]] = {}
+
+
+def _note_claim(op_id: int, asked_ids, got_ids) -> None:
+    led = _claim_ledger.setdefault(int(op_id), {"asked": set(), "got": set()})
+    led["asked"].update(int(a) for a in asked_ids)
+    led["got"].update(int(a) for a in got_ids)
+
+
+def _held_by_background_locked(aid: int) -> bool:
+    """Держит ли аккаунт фоновый цикл этого процесса (не операция). Под _accounts_lock."""
+    if aid not in _accounts_in_use or _op_shares.get(aid, 0) > 0:
+        return False
+    return not any(aid in held for held in _operation_account_locks.values())
+
+
+async def _fair_share_rivals(op_id: int, owner_id: int | None) -> int:
+    """Сколько операций владельца реально ждут свою долю флота прямо сейчас.
+
+    Претендент — живая в ЭТОМ процессе операция, стартовавшая не дольше
+    _FAIR_SHARE_FRESH_S назад и ещё не взявшая ни одного аккаунта. Операция,
+    которая свои аккаунты уже держит, долю получила; делить с ней свободный
+    остаток — значит оставить его без работы. Залипшие строки 'running' от
+    упавших процессов в _active_op_ids не попадают вовсе.
+    """
+    if not owner_id or not _db_pool:
+        return 0
+    now = time.monotonic()
+    async with _active_lock:
+        live = {int(i) for i in _active_op_ids}
+    for stale in [i for i in _op_started_mono if i not in live]:
+        _op_started_mono.pop(stale, None)
+    async with _accounts_lock:
+        rivals = [
+            i for i in live
+            if i != int(op_id)
+            and not _operation_account_locks.get(i)
+            and (now - _op_started_mono.get(i, -1e9)) <= _FAIR_SHARE_FRESH_S
+        ]
+    if not rivals:
+        return 0
+    try:
+        n = await _db_pool.fetchval(
+            "SELECT COUNT(*) FROM operation_queue "
+            "WHERE owner_id=$1 AND status='running' AND id = ANY($2::bigint[])",
+            owner_id, rivals,
+        )
+        return max(0, min(int(n or 0), len(rivals)))
+    except Exception:
+        return 0
+
+
 async def _claim_available_accounts(
     op_id: int, accounts: list, owner_id: int | None = None
 ) -> list:
     """Atomically claim free accounts and bind them to operation cleanup.
 
-    Честный дележ флота (fair-share): если у владельца ПАРАЛЛЕЛЬНО идут другие
-    операции — один op не забирает весь свободный флот, а берёт справедливую долю
-    (⌈флот / число параллельных операций⌉), чтобы конкурентные операции реально
-    запускались, а не падали «все аккаунты заняты». В одиночку op берёт весь
-    свободный флот (без потери пропускной способности). Захват дизъюнктен →
-    одна сессия никогда не используется двумя операциями одновременно
-    (защита от AUTH_KEY_DUPLICATED сохраняется)."""
-    # Сколько операций владельца РЕАЛЬНО идут прямо сейчас — считаем ДО блокировки
-    # (это await). Берём только операции, живые в памяти ЭТОГО процесса
-    # (_active_op_ids), а не все строки status='running' в БД: залипшие 'running'
-    # от упавших процессов (сброс сторожем только через 60 мин) иначе раздули бы
-    # делитель, и ОДИНОЧНАЯ операция получила бы лишь долю флота вместо всего
-    # свободного флота (симптом «стартует лишь несколько аккаунтов из N»).
-    if shared_ops_mode(owner_id):
-        # Совместная работа: доля флота не режется — каждая операция берёт
-        # весь доступный флот, а одновременность на аккаунте ограничивает
-        # OP_ACCOUNT_MAX_SHARED_OPS и общий темп подключения.
-        by_id = {int(a["id"]): a for a in accounts}
-        got = set(await _claim_shared(op_id, list(by_id)))
-        return [a for a in accounts if int(a["id"]) in got]
-    concurrency = 1
-    if owner_id and _db_pool:
-        try:
-            async with _active_lock:
-                active_ids = [int(i) for i in _active_op_ids]
-            if active_ids:
-                n = await _db_pool.fetchval(
-                    "SELECT COUNT(*) FROM operation_queue "
-                    "WHERE owner_id=$1 AND status='running' AND id = ANY($2::bigint[])",
-                    owner_id, active_ids,
-                )
-                concurrency = max(1, int(n or 1))
-            else:
-                concurrency = 1
-        except Exception:
-            concurrency = 1
-    async with _accounts_lock:
-        free = [a for a in accounts if int(a["id"]) not in _accounts_in_use]
-        # Доля флота на операцию при конкуренции. В одиночку (concurrency=1) —
-        # весь свободный флот.
-        if concurrency > 1 and accounts:
-            share = max(_MIN_ACCOUNTS_PER_OP,
-                        -(-len(accounts) // concurrency))  # ceil(len/concurrency)
-            free = free[:share]
-        claimed = free
-        acc_ids = [int(a["id"]) for a in claimed]
-        _accounts_in_use.update(acc_ids)
-        if acc_ids:
-            _operation_account_locks.setdefault(op_id, set()).update(acc_ids)
-    if not acc_ids:
-        return []
-    # Межпроцессный арбитр: без него вторая реплика взяла бы те же сессии.
-    granted = set(await _db_claim(acc_ids))
-    if len(granted) != len(acc_ids):
-        lost = set(acc_ids) - granted
+    Честный дележ флота (fair-share): если у владельца одновременно СТАРТУЮТ
+    другие операции, которые своих аккаунтов ещё не взяли, — эта берёт
+    справедливую долю свободного остатка (⌈свободные / (1 + претенденты)⌉),
+    чтобы соседи реально запустились, а не падали «все аккаунты заняты».
+    Иначе — весь свободный выбор: делить его не с кем (см. блок выше).
+
+    Аккаунты, которые в момент захвата держит фоновый цикл этого процесса,
+    ждём до _BG_HOLD_WAIT_S и добираем — иначе они молча выпадали бы из
+    прогона. Захват дизъюнктен → одна сессия никогда не используется двумя
+    операциями одновременно (защита от AUTH_KEY_DUPLICATED сохраняется).
+    Кого просили и кого дали — в _claim_ledger (честный итог операции)."""
+    async def _claim_pass(rows: list, cap: int | None) -> list:
+        """Один проход исключающего захвата: свободные аккаунты (не больше limit)
+        локально + аренда в БД. Возвращает реально выданные строки."""
         async with _accounts_lock:
-            _accounts_in_use.difference_update(lost)
-            held = _operation_account_locks.get(op_id)
-            if held is not None:
-                held.difference_update(lost)
-                if not held:
-                    _operation_account_locks.pop(op_id, None)
-        claimed = [a for a in claimed if int(a["id"]) in granted]
+            free = [a for a in rows if int(a["id"]) not in _accounts_in_use]
+            if cap is not None:
+                free = free[:max(0, cap)]
+            claimed = free
+            acc_ids = [int(a["id"]) for a in claimed]
+            _accounts_in_use.update(acc_ids)
+            if acc_ids:
+                _operation_account_locks.setdefault(op_id, set()).update(acc_ids)
+        if not acc_ids:
+            return []
+        # Межпроцессный арбитр: без него вторая реплика взяла бы те же сессии.
+        granted = set(await _db_claim(acc_ids))
+        if len(granted) != len(acc_ids):
+            lost = set(acc_ids) - granted
+            async with _accounts_lock:
+                _accounts_in_use.difference_update(lost)
+                held = _operation_account_locks.get(op_id)
+                if held is not None:
+                    held.difference_update(lost)
+                    if not held:
+                        _operation_account_locks.pop(op_id, None)
+            claimed = [a for a in claimed if int(a["id"]) in granted]
+        return claimed
+
+    if not accounts:
+        return []
+    shared = shared_ops_mode(owner_id)
+    limit: int | None = None
+    if not shared:
+        rivals = await _fair_share_rivals(op_id, owner_id)
+        if rivals > 0:
+            async with _accounts_lock:
+                n_free = sum(1 for a in accounts if int(a["id"]) not in _accounts_in_use)
+            limit = max(_MIN_ACCOUNTS_PER_OP, -(-n_free // (1 + rivals)))
+
+    async def _pass(rows, lim):
+        if shared:
+            # Совместная работа: доля флота не режется — каждая операция берёт
+            # весь доступный флот, а одновременность на аккаунте ограничивает
+            # OP_ACCOUNT_MAX_SHARED_OPS и общий темп подключения.
+            got = set(await _claim_shared(op_id, [int(a["id"]) for a in rows]))
+            return [a for a in rows if int(a["id"]) in got]
+        return await _claim_pass(rows, lim)
+
+    claimed = await _pass(accounts, limit)
+    got_ids = {int(a["id"]) for a in claimed}
+
+    # Добор аккаунтов, занятых фоновыми циклами: их удержание короткое.
+    deadline = time.monotonic() + _BG_HOLD_WAIT_S
+    while len(got_ids) < len(accounts) and (limit is None or len(got_ids) < limit):
+        async with _accounts_lock:
+            waiting = [a for a in accounts
+                       if int(a["id"]) not in got_ids
+                       and _held_by_background_locked(int(a["id"]))]
+        if not waiting or time.monotonic() >= deadline:
+            break
+        await asyncio.sleep(_BG_HOLD_POLL_S)
+        more = await _pass(waiting, None if limit is None else limit - len(got_ids))
+        got_ids.update(int(a["id"]) for a in more)
+    if len(got_ids) > len(claimed):
+        log.info("op=%d: добрал %d аккаунтов, освобождённых фоновыми циклами",
+                 op_id, len(got_ids) - len(claimed))
+    claimed = [a for a in accounts if int(a["id"]) in got_ids]
+    _note_claim(op_id, [int(a["id"]) for a in accounts], got_ids)
     return claimed
+
+
+async def _claim_shortfall_note(pool, owner_id: int, op_id: int, params: dict) -> str:
+    """Строка итога о ЯВНО выбранных аккаунтах, которые операция просила, но не
+    получила (или '' — если таких нет). Ледгер операции снимается."""
+    led = _claim_ledger.pop(int(op_id), None)
+    if not led:
+        return ""
+    try:
+        chosen = {int(i) for i in (params.get("account_ids") or [])}
+    except (TypeError, ValueError):
+        return ""
+    missed = (chosen & led["asked"]) - led["got"]
+    if not missed:
+        return ""
+    try:
+        frag, _ = await _diagnose_unused_accounts(
+            pool, owner_id, sorted(missed), set(led["got"]))
+    except Exception:
+        frag = ""
+    return frag or f"⚠️ Не пошли в работу {len(missed)}: заняты или недоступны"
 
 
 # Как часто долгий исполнитель пересчитывает свою долю флота. Чаще не нужно:
@@ -5805,6 +5927,7 @@ async def _process_pending(pool: asyncpg.Pool, bot: Bot,
         op_id = row["id"]
         async with _active_lock:
             _active_op_ids.add(op_id)
+        _op_started_mono[int(op_id)] = time.monotonic()
         # Имя задачи — op:<id>: по нему `_fence_lost_ops` находит задачу
         # операции, которую забрал другой исполнитель.
         _op_task = asyncio.create_task(
@@ -6723,6 +6846,16 @@ async def _run_op_task(pool: asyncpg.Pool, bot: Bot, row: dict) -> None:
             elapsed = time.monotonic() - _t_start
             duration_seconds = round(elapsed, 1)
             result = _normalize_result(result, op_type, duration_seconds)
+            # Явно выбранные аккаунты, которые операция просила, но не получила
+            # (заняты, на кулдауне, в карантине). Раньше они выпадали молча, и
+            # итог «✅ 3/3» на выборе из десяти читался как полная работа.
+            _short = await _claim_shortfall_note(pool, owner_id, op_id, params)
+            if _short and "Не пошли в работу" not in str(result.get("summary") or ""):
+                result["summary"] = (
+                    (str(result.get("summary") or "").rstrip() + "\n" + _short).strip())
+                if op_status.normalize(result.get("status")) not in (
+                        op_status.FAILED, op_status.PARTIAL):
+                    result["status"] = op_status.PARTIAL
             # Честный финальный статус — решает services/op_status.classify_final
             # по РЕАЛЬНЫМ счётчикам, а не по слову исполнителя.
             #
@@ -7239,6 +7372,7 @@ async def _run_op_task(pool: asyncpg.Pool, bot: Bot, row: dict) -> None:
             if progress_task and not progress_task.done():
                 progress_task.cancel()
             await release_operation_accounts(op_id)
+            _claim_ledger.pop(int(op_id), None)
             elapsed_total = time.monotonic() - _t_start
             duration_seconds_total = round(elapsed_total, 1)
             log.info(
