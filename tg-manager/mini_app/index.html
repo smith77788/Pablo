@@ -8059,6 +8059,10 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
         <input type="checkbox" id="set-notif-advice" style="width:18px;height:18px;accent-color:var(--accent)" checked>
       </label>
       <div style="font-size:12px;color:var(--hint);line-height:1.4;padding:2px 0 8px">⚡ — нужно действие: приходит сразу, даже в тихие часы.</div>
+      <div onclick="openNotifyRoutes()" role="button" tabindex="0" style="display:flex;align-items:center;justify-content:space-between;cursor:pointer;padding:10px 0;border-top:1px solid var(--sep)">
+        <span style="font-size:14px">📡 Каналы уведомлений о ботах<div style="font-size:12px;color:var(--hint);line-height:1.35">Запуски ботов и заявки — в свой канал на каждую сеть проектов</div></span>
+        <span class="chev">›</span>
+      </div>
       <label style="display:flex;align-items:center;justify-content:space-between;cursor:pointer;padding:8px 0;border-top:1px solid var(--sep)">
         <span style="font-size:14px">🗞 Несрочное — одной сводкой в день (в 09:00)</span>
         <input type="checkbox" id="set-digest-only" style="width:18px;height:18px;accent-color:var(--accent)">
@@ -14749,6 +14753,7 @@ function buildChDetail(d) {
       <button class="btn btn-p" onclick="openChPostModal(${c.channel_id})" style="flex:1 1 auto;min-width:88px">📝 Опубликовать</button>
       ${pinChannelId ? `<button class="btn btn-s" onclick="pinLastPost('${escJs(pinChannelId)}')" style="flex:1 1 auto;min-width:88px">📌 Закрепить пост</button>` : ''}
       <button class="btn btn-s" onclick="openChanEdit(${c.channel_id})" style="flex:1 1 auto;min-width:88px">✏️ Изменить</button>
+      ${c.role==='member' ? '' : `<button class="btn btn-s" onclick="openChSettings('${escJs(String(c.channel_id))}')" style="flex:1 1 auto;min-width:88px" title="Тип, обсуждение, реакции, автоудаление, заявки, разрешения">⚙️ Настройки</button>`}
       <button class="btn btn-s" onclick="getChannelInviteLink(${c.channel_id})" style="flex:1 1 auto;min-width:88px">🔗 Ссылка</button>
       <button class="btn btn-s" onclick="promoteChannel(${c.channel_id})" style="flex:1 1 auto;min-width:88px">👑 Админы</button>
       <button class="btn btn-s" onclick="openMassInviteForChannel(${c.channel_id})" style="flex:1 1 auto;min-width:88px">👥 Инвайтинг</button>
@@ -38121,6 +38126,8 @@ function renderAudSegChart(segments) {
 <script src="screens/va_workspace.js"></script>
 <script src="screens/va_admin.js"></script>
 <script src="screens/channel_manage.js"></script>
+<script src="screens/channel_settings.js"></script>
+<script src="screens/notify_routes.js"></script>
 <script src="screens/shield_check.js"></script>
 <script src="screens/op_cleanup.js"></script>
 <script src="screens/ad_intel.js"></script>

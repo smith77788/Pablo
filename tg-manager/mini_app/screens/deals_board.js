@@ -429,12 +429,62 @@ function dkOpenCard(cid) {
       ' onclick="closeModal(\'mo-dk-card\');dkMove(\'' + cid + '\',\'' + esc(col.stage) + '\')">' +
       (cur ? '✓ ' : '→ ') + esc(col.label) + '</button>';
   }).join('');
+  // Сумму сделки раньше можно было задать только внутри карточки контакта
+  // (CRM → «Сумма сделки»). На доску, где владелец и работает со сделками
+  // каждый день, она не редактировалась — только показывалась. Правим прямо
+  // здесь: тот же эндпойнт и тот же список валют, что в карточке контакта
+  // (crmCurrencyOptions объявлен в index.html).
+  const curOpts = typeof crmCurrencyOptions === 'function'
+    ? crmCurrencyOptions(c.currency)
+    : '<option selected>' + esc(c.currency || 'RUB') + '</option>';
+  const inpCss = 'padding:10px;border-radius:var(--radius);border:1.5px solid var(--border-input);background:var(--bg-input);color:var(--text);font-size:14px';
   document.getElementById('dkCardBody').innerHTML =
     '<button class="btn btn-p" style="width:100%;margin-bottom:12px" ' +
       'onclick="closeModal(\'mo-dk-card\');openContactDetail(\'' + cid + '\')">👤 Открыть карточку клиента</button>' +
+    '<div style="font-size:12px;font-weight:600;color:var(--hint);margin:0 0 6px">Сумма сделки</div>' +
+    '<div style="display:flex;gap:6px;margin-bottom:12px">' +
+      '<input id="dk-card-value" type="number" min="0" value="' + (Number(c.deal_value) || 0) + '" style="flex:1;min-width:0;' + inpCss + '">' +
+      '<select id="dk-card-cur" style="flex:0 0 auto;' + inpCss + '">' + curOpts + '</select>' +
+      '<button class="btn btn-p" id="dk-card-valbtn" style="flex:0 0 auto" aria-label="Сохранить сумму" onclick="dkSaveCardValue(\'' + cid + '\')">💾</button>' +
+    '</div>' +
     '<div style="font-size:12px;font-weight:600;color:var(--hint);margin:0 0 6px">Перевести на стадию</div>' +
     stages;
   document.getElementById('mo-dk-card').classList.add('show');
+}
+
+// Сохранение суммы и валюты прямо с доски. Обновляем по месту: суммы колонки
+// считаются по валютам (dk-sum → by_currency), поэтому старую сумму в старой
+// валюте вычитаем, новую в новой — прибавляем, иначе шапка колонки соврёт до
+// перезагрузки. Эндпойнт тот же, что у карточки контакта.
+async function dkSaveCardValue(cid) {
+  if (!DK_UUID.test(cid)) return;
+  const f = _dkFind(cid);
+  if (!f) return;
+  const card = f.card, col = f.col;
+  const vEl = document.getElementById('dk-card-value');
+  if (!vEl) return;
+  const v = parseFloat(vEl.value);
+  const deal_value = isFinite(v) && v >= 0 ? v : 0;
+  const cEl = document.getElementById('dk-card-cur');
+  const currency = cEl && cEl.value ? cEl.value : (card.currency || 'RUB');
+  const btn = document.getElementById('dk-card-valbtn');
+  if (btn) { btn.disabled = true; btn.textContent = '…'; }
+  try {
+    await api('/api/miniapp/uch/contacts/' + cid + '/crm', {method: 'POST', body: JSON.stringify({deal_value: deal_value, currency: currency})});
+    const oldAmt = Number(card.deal_value) || 0, oldCur = card.currency;
+    col.by_currency = col.by_currency || {};
+    if (oldAmt) col.by_currency[oldCur] = Math.max(0, (col.by_currency[oldCur] || 0) - oldAmt);
+    if (deal_value) col.by_currency[currency] = (col.by_currency[currency] || 0) + deal_value;
+    card.deal_value = deal_value;
+    card.currency = currency;
+    try { tg.HapticFeedback?.notificationOccurred('success'); } catch (_) {}
+    toast('💰 Сумма сохранена');
+    closeModal('mo-dk-card');
+    _dkRender();
+  } catch (e) {
+    toast('⚠️ ' + errRu(e, 'Не сохранилось'));
+    if (btn) { btn.disabled = false; btn.textContent = '💾'; }
+  }
 }
 
 // Перенос карточки. Сразу на экране (иначе тап казался бы несработавшим),

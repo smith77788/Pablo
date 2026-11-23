@@ -798,7 +798,7 @@
 "test_network_template_is_applied.py": 2.3,
 "test_network_workflow_screens_wired.py": 0.0,
 "test_new_features.py": 0.0,
-"test_new_user_notify_throttle.py": 0.0,
+"test_bot_event_notify_never_loses.py": 0.0,
 "test_next_actions.py": 0.0,
 "test_next_actions_apply.py": 1.0,
 "test_next_actions_apply_coverage.py": 0.0,
