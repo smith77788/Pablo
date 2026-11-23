@@ -13179,7 +13179,7 @@ async def _exec_strike(
     )
     import time as _time
 
-    target = params.get("target", "").strip()
+    target = (params.get("target") or "").strip()
     reason = params.get("reason", "spam")
     preset = params.get("preset") or None
     label = params.get("label") or f"queued_strike_{op_id}"

@@ -121,7 +121,7 @@ def _decrypt_keys() -> list[bytes]:
     правдоподобный мусор.
     """
     keys = [_key()]
-    for raw in os.environ.get("TOKEN_ENCRYPTION_KEYS_PREVIOUS", "").split(","):
+    for raw in (os.environ.get("TOKEN_ENCRYPTION_KEYS_PREVIOUS") or "").split(","):
         raw = raw.strip()
         if raw:
             keys.append(hashlib.sha256(raw.encode()).digest())

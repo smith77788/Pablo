@@ -1733,7 +1733,7 @@ async def _process_bot(
                             )
                     elif arule["action_type"] == "webhook":
                         # action_value = URL to POST to
-                        url = arule.get("action_value", "").strip()
+                        url = (arule.get("action_value") or "").strip()
                         if url:
                             try:
                                 payload = {
@@ -1807,7 +1807,7 @@ async def _process_bot(
                                 action_value=arule.get("action_value"),
                             )
                     elif arule["action_type"] == "webhook":
-                        url = arule.get("action_value", "").strip()
+                        url = (arule.get("action_value") or "").strip()
                         if url:
                             try:
                                 payload = {

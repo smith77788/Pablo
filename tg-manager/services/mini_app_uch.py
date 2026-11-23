@@ -874,7 +874,7 @@ def setup_routes(app: web.Application, pool) -> None:
         """
         uid = _get_uid(request)
         if not uid: return _err("Unauthorized", 401)
-        q = request.query.get('q', '').strip()
+        q = (request.query.get('q') or '').strip()
         if not q: return _json_resp({'results': []})
         try:
             from services.contacts_hub.search_engine import search_contacts_spotlight
@@ -2103,7 +2103,7 @@ def setup_routes(app: web.Application, pool) -> None:
         if not uid: return _err("Unauthorized", 401)
         try:
             data = await request.json()
-            query = data.get('query', '').strip()
+            query = (data.get('query') or '').strip()
             if not query: return _err("Нужен поисковый запрос", 400)
             from services.contacts_hub.ai_assistant import process_ai_query
             result = await process_ai_query(pool, uid, query)

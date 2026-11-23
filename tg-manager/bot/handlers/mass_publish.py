@@ -141,7 +141,7 @@ async def cb_mpub_start(
     # Check for template prefill from asset_templates apply
     sd = await state.get_data()
     prefill = sd.get("tpl_prefill") or {}
-    prefill_text = prefill.get("text", "").strip() if isinstance(prefill, dict) else ""
+    prefill_text = (prefill.get("text") or "").strip() if isinstance(prefill, dict) else ""
     # {{DATE}}/{{DATE_SHORT}} не зависят от канала — подставляем сразу. Остальные
     # (CITY/COUNTRY/USERNAME/CHANNEL/BOT_NAME — см. asset_templates.py) здесь
     # подставить некем: у публикации в каналы нет получателя-пользователя. Раньше
@@ -223,7 +223,7 @@ async def cb_mpub_pick_account(
     await safe_answer(callback)
     sd = await state.get_data()
     prefill = sd.get("tpl_prefill") or {}
-    prefill_text = prefill.get("text", "").strip() if isinstance(prefill, dict) else ""
+    prefill_text = (prefill.get("text") or "").strip() if isinstance(prefill, dict) else ""
     # {{DATE}}/{{DATE_SHORT}} не зависят от канала — подставляем сразу. Остальные
     # (CITY/COUNTRY/USERNAME/CHANNEL/BOT_NAME — см. asset_templates.py) здесь
     # подставить некем: у публикации в каналы нет получателя-пользователя. Раньше
