@@ -3696,6 +3696,7 @@ async def resolve_user_peer(client: Any, peer_id: int,
        и с чужим аккаунтом не работает.
     3. Прогрев последних диалогов — человек, с которым аккаунт переписывался.
     4. Прогрев адресной книги — человек в контактах аккаунта.
+       (Между 2 и 3 — один дешёвый запрос без ключа, access_hash=0.)
     5. Только с `deep` (адресная работа по ОДНОМУ человеку, не рассылка):
        поиск среди участников групп — сперва тех, откуда человек пришёл
        (`deep["chats"]`: @ник или id чата из парсинга), затем групп самого
@@ -3728,6 +3729,24 @@ async def resolve_user_peer(client: Any, peer_id: int,
         except Exception:
             # Чужой/устаревший хэш (PEER_ID_INVALID и т.п.) — идём дальше.
             log_exc_swallow(log, "resolve_user_peer: access_hash не подошёл")
+
+    # Запрос без ключа (access_hash=0). Документация Telegram гарантирует его
+    # пользователям только для служебных ID, но запрос один и дешёвый, а если
+    # Telegram отдаст пользователя — вместе с ним приходит полный ключ.
+    if peer_id > 0:
+        try:
+            from telethon.tl.functions.users import GetUsersRequest
+            from telethon.tl.types import InputUser
+            got = await asyncio.wait_for(
+                client(GetUsersRequest([InputUser(peer_id, 0)])), timeout=_OP_TIMEOUT)
+            u = (got or [None])[0]
+            if u is not None and getattr(u, "id", None) == peer_id \
+                    and getattr(u, "access_hash", None) \
+                    and not getattr(u, "min", False):
+                from telethon.tl.types import InputPeerUser
+                return InputPeerUser(peer_id, int(u.access_hash))
+        except Exception:
+            log_exc_swallow(log, "resolve_user_peer: без ключа не отдали")
 
     dialogs: list = []
     try:
@@ -3762,6 +3781,10 @@ _DEEP_MAX_OWN_GROUPS = 15
 # Без имени ищем перебором только в небольших группах: перебор большой группы
 # — десятки запросов и прямой путь к FloodWait.
 _DEEP_FULL_SCAN_MAX_MEMBERS = 1500
+# Сколько последних сообщений чата смотреть в поиске сообщения человека
+# (автор/пересылка/упоминание): исходный чат — глубже, свои группы — мельче.
+_DEEP_SOURCE_HISTORY = 1000
+_DEEP_OWN_HISTORY = 200
 
 PEER_UNRESOLVED_DEEP_TEXT = (
     "нет доступа по ID: этот аккаунт не знает пользователя и не нашёл его ни "
@@ -3803,6 +3826,61 @@ async def _find_in_groups(client: Any, peer_id: int, deep: dict,
                 continue
         return None
 
+    async def _from_messages(entity, limit: int) -> Any:
+        """Ключ из сообщения: человек — автор, автор пересланного или
+        упомянут по имени (messageEntityMentionName). Такое сообщение даёт
+        inputPeerUserFromMessage — Telegram принимает его вместо ключа, а
+        users.getUsers по нему отдаёт и полный ключ для следующих сессий."""
+        try:
+            msgs = await asyncio.wait_for(client.get_messages(entity, limit=limit),
+                                          timeout=max(_OP_TIMEOUT, 60))
+        except FloodWaitError:
+            raise
+        except Exception:
+            log_exc_swallow(log, "resolve_user_peer: история чата недоступна")
+            return None
+        for m in msgs or []:
+            hit = getattr(m, "sender_id", None) == peer_id
+            if not hit:
+                fwd = getattr(m, "fwd_from", None)
+                hit = getattr(getattr(fwd, "from_id", None), "user_id", None) == peer_id
+            if not hit:
+                hit = any(getattr(e, "user_id", None) == peer_id
+                          for e in (getattr(m, "entities", None) or []))
+            if not hit:
+                continue
+            try:
+                return await cached()
+            except (ValueError, TypeError):
+                pass
+            try:
+                from telethon.tl.functions.users import GetUsersRequest
+                from telethon.tl.types import (InputPeerUserFromMessage,
+                                               InputUserFromMessage)
+                chat_peer = await asyncio.wait_for(client.get_input_entity(entity),
+                                                   timeout=_OP_TIMEOUT)
+                try:
+                    await asyncio.wait_for(client(GetUsersRequest(
+                        [InputUserFromMessage(chat_peer, m.id, peer_id)])),
+                        timeout=_OP_TIMEOUT)
+                    return await cached()
+                except FloodWaitError:
+                    raise
+                except Exception:
+                    pass
+                return InputPeerUserFromMessage(chat_peer, m.id, peer_id)
+            except FloodWaitError:
+                raise
+            except Exception:
+                log_exc_swallow(log, "resolve_user_peer: ключ из сообщения не собран")
+        return None
+
+    async def _scan_all(entity, members, history: int) -> Any:
+        got = await _scan(entity, members)
+        if got is None and history:
+            got = await _from_messages(entity, history)
+        return got
+
     seen: set = set()
     for ref in list(deep.get("chats") or [])[:_DEEP_MAX_SOURCE_CHATS]:
         if isinstance(ref, str):
@@ -3824,7 +3902,8 @@ async def _find_in_groups(client: Any, peer_id: int, deep: dict,
         except Exception:
             continue
         seen.add(getattr(entity, "id", None))
-        got = await _scan(entity, getattr(entity, "participants_count", None))
+        got = await _scan_all(entity, getattr(entity, "participants_count", None),
+                              _DEEP_SOURCE_HISTORY)
         if got is not None:
             return got
 
@@ -3834,7 +3913,8 @@ async def _find_in_groups(client: Any, peer_id: int, deep: dict,
             ent = getattr(d, "entity", None)
             if ent is None or getattr(ent, "id", None) in seen:
                 continue
-            got = await _scan(ent, getattr(ent, "participants_count", None))
+            got = await _scan_all(ent, getattr(ent, "participants_count", None),
+                                  _DEEP_OWN_HISTORY)
             if got is not None:
                 return got
     return None
