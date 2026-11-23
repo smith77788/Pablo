@@ -523,6 +523,10 @@ body.wide .ib-row.on{background:var(--accent-soft)}
 .sec{padding:16px 16px 6px;font-size:11px;font-weight:700;color:var(--hint);text-transform:uppercase;letter-spacing:.08em;display:flex;align-items:center;gap:6px}
 .sec-row{display:flex;align-items:center;justify-content:space-between;padding:12px 16px 6px}
 .sec-row .sec{padding:0}
+/* Строка «что здесь делают» под заголовком раздела каталога. Отступ слева —
+   как у .sec (16px): с прежним «padding:0 2px» подпись прилипала к краю экрана
+   и не стояла под своим заголовком. */
+.sec-desc[data-section]{font-size:12px;line-height:1.4;color:var(--hint);margin:-2px 0 10px;padding:0 16px}
 /* Ссылка раздела («Подробнее →», «Все →») — строка высотой 18px, попасть в неё
    пальцем трудно. Отрицательные поля гасят добавленный паддинг, поэтому
    область нажатия вырастает до 32px, а вёрстка не сдвигается ни на пиксель. */
@@ -2447,7 +2451,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 
     <!-- 📊 Итоги — состав раздела: services/task_sections.py -->
     <div class="sec" data-section="overview">📊 Итоги</div>
-    <div class="sec-desc" data-section="overview" style="font-size:11px;opacity:.6;margin:-6px 0 8px;padding:0 2px">Результат за неделю, операции, аудитория и конкуренты.</div>
+    <div class="sec-desc" data-section="overview">Результат за неделю, операции, аудитория и конкуренты.</div>
     <div class="mgmt-grid" data-section="overview">
       <!-- «Дашборд» и «Сводка» — вкладки одного модуля (SCREEN_MODULES.overview). -->
       <div class="mgmt-tile" onclick="openUnifiedDashboard()">
@@ -2475,7 +2479,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 
     <!-- 👥 Аудитория — состав раздела: services/task_sections.py -->
     <div class="sec" data-section="audience">👥 Аудитория</div>
-    <div class="sec-desc" data-section="audience" style="font-size:11px;opacity:.6;margin:-6px 0 8px;padding:0 2px">Собрать людей, вести базу контактов и приглашать в свои каналы.</div>
+    <div class="sec-desc" data-section="audience">Собрать людей, вести базу контактов и приглашать в свои каналы.</div>
     <div class="mgmt-grid" data-section="audience">
       <div class="mgmt-tile" onclick="openNewUsers()">
         <div class="mgmt-tile-ico">🆕</div>
@@ -2530,7 +2534,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 
     <!-- ✉️ Сообщения — состав раздела: services/task_sections.py -->
     <div class="sec" data-section="messages">✉️ Сообщения</div>
-    <div class="sec-desc" data-section="messages" style="font-size:11px;opacity:.6;margin:-6px 0 8px;padding:0 2px">Рассылки, публикации, расписание, воронки и шаблоны текста.</div>
+    <div class="sec-desc" data-section="messages">Рассылки, публикации, расписание, воронки и шаблоны текста.</div>
     <div class="mgmt-grid" data-section="messages">
       <!-- «Рассылки» — один модуль. «Публикация / рассылка», «Единая кампания»,
            «Рассылка по сети ботов», «Расписание» и «A/B Тесты» были отдельными
@@ -2570,7 +2574,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 
     <!-- 📡 Каналы и боты — состав раздела: services/task_sections.py -->
     <div class="sec" data-section="channels">📡 Каналы и боты</div>
-    <div class="sec-desc" data-section="channels" style="font-size:11px;opacity:.6;margin:-6px 0 8px;padding:0 2px">Свои каналы, группы и боты: создать, оформить, продвинуть в поиске.</div>
+    <div class="sec-desc" data-section="channels">Свои каналы, группы и боты: создать, оформить, продвинуть в поиске.</div>
     <div class="mgmt-grid" data-section="channels">
       <div class="mgmt-tile" onclick="goTab('bots')">
         <div class="mgmt-tile-ico">🤖</div>
@@ -2647,7 +2651,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 
     <!-- 💰 Продажи — состав раздела: services/task_sections.py -->
     <div class="sec" data-section="sales">💰 Продажи</div>
-    <div class="sec-desc" data-section="sales" style="font-size:11px;opacity:.6;margin:-6px 0 8px;padding:0 2px">Клиенты, сделки, ИИ-менеджер продаж и оплаты.</div>
+    <div class="sec-desc" data-section="sales">Клиенты, сделки, ИИ-менеджер продаж и оплаты.</div>
     <div class="mgmt-grid" data-section="sales">
       <!-- Один «CRM»: клиенты, сделки, воронка денег, когорты (SCREEN_MODULES.crm). -->
       <div class="mgmt-tile" onclick="openCrmHub()">
@@ -2684,7 +2688,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 
     <!-- 📱 Аккаунты — состав раздела: services/task_sections.py -->
     <div class="sec" data-section="accounts">📱 Аккаунты</div>
-    <div class="sec-desc" data-section="accounts" style="font-size:11px;opacity:.6;margin:-6px 0 8px;padding:0 2px">Telegram-аккаунты, прокси, прогрев и защита от бана.</div>
+    <div class="sec-desc" data-section="accounts">Telegram-аккаунты, прокси, прогрев и защита от бана.</div>
     <div class="mgmt-grid" data-section="accounts">
       <div class="mgmt-tile" onclick="goTab('accounts')">
         <div class="mgmt-tile-ico">📱</div>
@@ -2753,7 +2757,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 
     <!-- ⚙️ Настройки — состав раздела: services/task_sections.py -->
     <div class="sec" data-section="settings">⚙️ Настройки</div>
-    <div class="sec-desc" data-section="settings" style="font-size:11px;opacity:.6;margin:-6px 0 8px;padding:0 2px">Тариф, интеграции, ключи API и рабочие пространства.</div>
+    <div class="sec-desc" data-section="settings">Тариф, интеграции, ключи API и рабочие пространства.</div>
     <div class="mgmt-grid" data-section="settings">
       <div class="mgmt-tile" onclick="openSettings()">
         <div class="mgmt-tile-ico">⚙️</div>
@@ -2780,7 +2784,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 
     <!-- 🧪 Лаборатория — состав раздела: services/task_sections.py -->
     <div class="sec" data-section="lab" data-lab="1">🧪 Лаборатория</div>
-    <div class="sec-desc" data-section="lab" style="font-size:11px;opacity:.6;margin:-6px 0 8px;padding:0 2px">Экспериментальные инструменты. Работают, но ещё не стали частью основных разделов.</div>
+    <div class="sec-desc" data-section="lab">Экспериментальные инструменты. Работают, но ещё не стали частью основных разделов.</div>
     <div class="mgmt-grid" data-section="lab">
       <div class="mgmt-tile" onclick="openGhost()">
         <div class="mgmt-tile-ico">👻</div>

@@ -73,7 +73,7 @@ def test_qr_login_enforces_the_account_limit():
 
     Кнопка QR теперь видна всегда; без этой проверки free-пользователь заводил
     бы аккаунты в обход платного лимита. Гейт тот же, что у входа по номеру:
-    limit==0 и len(accounts) >= limit.
+    limit==0 и n_accounts >= limit (COUNT по базе).
     """
     body = _func_body_text(_src(), "cb_qr_login")
     # проверка ДО фактического старта QR
@@ -94,6 +94,6 @@ def test_add_and_qr_gate_the_same_way():
     add = _func_body_text(src, "cb_add_account")
     qr = _func_body_text(src, "cb_qr_login")
     for marker in ("_get_account_limit", "limit == 0",
-                   "len(accounts) >= limit", "subscription_locked_markup"):
+                   "n_accounts >= limit", "subscription_locked_markup"):
         assert marker in add, f"cb_add_account потерял гейт: {marker}"
         assert marker in qr, f"cb_qr_login не повторяет гейт входа по номеру: {marker}"

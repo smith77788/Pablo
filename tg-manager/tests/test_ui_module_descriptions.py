@@ -23,8 +23,11 @@ def test_section_descriptions_present():
     for sec in SECTIONS:
         assert f'data-section="{sec.key}"' in ui, sec.key
         assert f'>{sec.emoji} {sec.title}</div>' in ui, sec.title
-        assert f'padding:0 2px">{sec.desc}</div>' in ui, sec.title
-    assert ui.count('margin:-6px 0 8px') >= len(SECTIONS)
+        assert f'class="sec-desc" data-section="{sec.key}">{sec.desc}</div>' in ui, sec.title
+    # Подпись стоит под заголовком раздела: тот же левый отступ, что у .sec.
+    rule = re.search(r"\.sec-desc\[data-section\]\{([^}]*)\}", ui)
+    assert rule and "padding:0 16px" in rule.group(1), "подпись раздела снова прилипла к краю"
+    assert re.search(r"\n\.sec\{padding:16px 16px", ui)
 
 
 def test_module_descriptions_wired():

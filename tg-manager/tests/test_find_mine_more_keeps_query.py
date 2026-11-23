@@ -54,7 +54,8 @@ async function api() { return {total: 50, groups: [
     h = out["html"]
     assert "Ещё 39 — открыть с поиском «Иван»" in h
     assert "onclick=\"fmOpenMore('contacts')\"" in h or "onclick=\"fmOpenMore(&#39;contacts&#39;)\"" in h
-    # У сделок поля поиска нет — кнопка ведёт в раздел, как раньше.
-    assert 'onclick="openDeals()"' in h and "Ещё 8 — открыть раздел" in h
+    # У доски сделок своя строка поиска (#dkQ) — запрос переносится и туда.
+    assert "Ещё 8 — открыть с поиском «Иван»" in h
+    assert "onclick=\"fmOpenMore('deals')\"" in h or "onclick=\"fmOpenMore(&#39;deals&#39;)\"" in h
     assert out["calls"] == [["contacts", "Иван"], ["tab", "bots"], ["botSearch", "Иван"]]
     assert out["bot"] == "Иван"

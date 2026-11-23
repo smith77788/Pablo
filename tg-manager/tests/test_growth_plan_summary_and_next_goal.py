@@ -38,7 +38,10 @@ const goals = [
   {status: 'active', progress: {state: 'behind'}},
   {status: 'done', progress: {state: 'done'}},
 ];
-console.log(JSON.stringify(_gpSummary(goals).replace(/<[^>]+>/g, '')));
+// Кнопка «📋 Отчёт» живёт в той же строке сводки (test_growth_plan_copy_report),
+// здесь сверяем только счётчики.
+console.log(JSON.stringify(_gpSummary(goals)
+  .replace(/<span class="sec-btn"[\s\S]*?<\/span>/g, '').replace(/<[^>]+>/g, '')));
 """
     assert _run(src) == "в работе: 5 · успеваете: 2 · отстают: 3 · выполнено: 1"
 
