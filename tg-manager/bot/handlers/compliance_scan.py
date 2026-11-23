@@ -109,7 +109,7 @@ async def msg_scan_resources(message: Message, state: FSMContext, pool: asyncpg.
         )
     except Exception as exc:
         log.exception("compliance_scan submit uid=%s", message.from_user.id)
-        await message.answer(f"⚠️ Не удалось поставить в очередь: {owner_error(exc)}")
+        await message.answer(f"⚠️ Не удалось поставить в очередь: {owner_error(exc)}", reply_markup=terminal_kb())
         return
 
     kb = InlineKeyboardBuilder()

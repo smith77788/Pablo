@@ -222,7 +222,7 @@ async def msg_reactions_channel(message: Message, state: FSMContext) -> None:
     from services.boost_engine import parse_channel_ref
     channel = parse_channel_ref(message.text or "")
     if not channel:
-        await message.answer("⚠️ Не удалось распознать канал.")
+        await message.answer("⚠️ Не удалось распознать канал.", reply_markup=terminal_kb())
         return
     await state.update_data(channel=channel)
     await state.set_state(BoostReactions.msg_id)
@@ -283,7 +283,7 @@ async def msg_reactions_acc_count(
     total = await _get_acc_count(pool, message.from_user.id)
     use = min(n, total) if n > 0 else total
     if use == 0:
-        await message.answer("⚠️ Нет доступных аккаунтов.")
+        await message.answer("⚠️ Нет доступных аккаунтов.", reply_markup=terminal_kb())
         return
     await state.update_data(acc_count=use)
     channel = data["channel"]
@@ -350,7 +350,7 @@ async def msg_stories_acc_count(
     total = await _get_acc_count(pool, message.from_user.id)
     use = min(n, total) if n > 0 else total
     if use == 0:
-        await message.answer("⚠️ Нет доступных аккаунтов.")
+        await message.answer("⚠️ Нет доступных аккаунтов.", reply_markup=terminal_kb())
         return
     await state.update_data(acc_count=use)
     target = data["target"]
@@ -493,7 +493,7 @@ async def msg_bot_starts_acc_count(
     total = await _get_acc_count(pool, message.from_user.id)
     use = min(n, total) if n > 0 else total
     if use == 0:
-        await message.answer("⚠️ Нет доступных аккаунтов.")
+        await message.answer("⚠️ Нет доступных аккаунтов.", reply_markup=terminal_kb())
         return
     await state.update_data(acc_count=use)
     kb = InlineKeyboardBuilder()

@@ -15,7 +15,7 @@ import asyncpg
 from bot.callbacks import BmCb, MemCb
 from database import db
 from services import semantic_memory
-from bot.utils.op_helpers import safe_answer
+from bot.utils.op_helpers import safe_answer, terminal_kb
 
 router = Router()
 log = logging.getLogger(__name__)
@@ -204,7 +204,7 @@ async def msg_mem_search_id(
     await state.clear()
     bot_id = data.get("bot_id", 0)
     if not bot_id or not await _resolve_bot(pool, bot_id, message.from_user.id):
-        await message.answer("❌ Бот не найден.")
+        await message.answer("❌ Бот не найден.", reply_markup=terminal_kb())
         return
 
     raw = message.text.strip()
@@ -511,7 +511,7 @@ async def msg_mem_set_days(
     await state.clear()
     bot_id = data.get("bot_id", 0)
     if not bot_id or not await _resolve_bot(pool, bot_id, message.from_user.id):
-        await message.answer("❌ Бот не найден.")
+        await message.answer("❌ Бот не найден.", reply_markup=terminal_kb())
         return
 
     raw = message.text.strip()

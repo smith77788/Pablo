@@ -472,7 +472,7 @@ async def msg_send_user_text(
 
     row = await db.get_bot(pool, bot_id, message.from_user.id)
     if not row:
-        await message.answer("Бот не найден.")
+        await message.answer("Бот не найден.", reply_markup=terminal_kb())
         return
 
     ok, retry = await bot_api.send_message(
