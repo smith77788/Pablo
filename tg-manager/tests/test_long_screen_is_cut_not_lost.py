@@ -86,3 +86,32 @@ def test_install_is_idempotent() -> None:
     g.install(bot)
     g.install(bot)
     assert sum(isinstance(m, g.LongTextGuard) for m in bot.session.middleware) == 1
+
+
+def test_screen_with_broken_markup_is_resent_as_plain_text() -> None:
+    """«can't parse entities» — тот же текст уходит простым, а не теряется."""
+    calls = []
+
+    async def make_request(bot, m):
+        calls.append(m)
+        if m.parse_mode == "HTML":
+            raise RuntimeError("Telegram server says - Bad Request: can't parse entities: "
+                               "Unsupported start tag \"x\" at byte offset 10")
+        return True
+
+    method = SendMessage(chat_id=1, text="<b>Канал</b> «a <x> & b»", parse_mode="HTML",
+                         reply_markup=None)
+    assert asyncio.run(g.LongTextGuard()(make_request, None, method)) is True
+    assert len(calls) == 2
+    assert calls[1].parse_mode is None
+    assert calls[1].text == "Канал «a <x> & b»"
+
+
+def test_other_errors_are_not_swallowed() -> None:
+    async def make_request(bot, m):
+        raise RuntimeError("Bad Request: chat not found")
+
+    import pytest
+    with pytest.raises(RuntimeError):
+        asyncio.run(g.LongTextGuard()(make_request, None,
+                                      SendMessage(chat_id=1, text="x", parse_mode="HTML")))
