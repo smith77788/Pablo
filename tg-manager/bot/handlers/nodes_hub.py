@@ -42,6 +42,8 @@ from services.nodes_engine import ENTITY_LABELS, NODE_TYPE_LABELS
 from bot.utils.op_helpers import safe_answer
 
 log = logging.getLogger(__name__)
+from bot.utils.owner_error import owner_error  # noqa: E402
+
 router = Router()
 
 _NODE_TYPES = list(NODE_TYPE_LABELS.keys())
@@ -193,7 +195,7 @@ async def cb_nodes_add_type(
         )
     except ValueError as exc:
         await callback.message.edit_text(
-            f"❌ Ошибка: {html.escape(str(exc))}",
+            f"❌ Ошибка: {owner_error(exc)}",
             parse_mode="HTML",
             reply_markup=_cancel_kb(),
         )

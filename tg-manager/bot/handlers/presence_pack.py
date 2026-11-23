@@ -24,6 +24,8 @@ from services.logger import log_exc_swallow
 from bot.utils.op_helpers import safe_answer, terminal_kb
 
 log = logging.getLogger(__name__)
+from bot.utils.owner_error import owner_error  # noqa: E402
+
 router = Router()
 
 
@@ -656,7 +658,7 @@ async def cb_pack_view(
             pool, callback_data.pack_id, callback.from_user.id
         )
     except Exception as _e:
-        await callback.answer(f"Ошибка загрузки пакета: {_e}", show_alert=True)
+        await callback.answer(f"Ошибка загрузки пакета: {owner_error(_e, html_escape=False)}", show_alert=True)
         return
     if not pack:
         await callback.answer("Пакет не найден", show_alert=True)
@@ -867,7 +869,7 @@ async def cb_pack_promote(
         )
     except Exception as exc:
         await callback.message.edit_text(
-            f"❌ Не удалось поставить операцию в очередь: {escape(str(exc)[:120])}",
+            f"❌ Не удалось поставить операцию в очередь: {owner_error(exc)}",
             parse_mode="HTML",
             reply_markup=terminal_kb(),
         )
@@ -901,7 +903,7 @@ async def cb_pack_mirror(
     try:
         pack = await db.get_presence_pack(pool, callback_data.pack_id, owner_id)
     except Exception as _e:
-        await callback.answer(f"Ошибка загрузки пакета: {_e}", show_alert=True)
+        await callback.answer(f"Ошибка загрузки пакета: {owner_error(_e, html_escape=False)}", show_alert=True)
         return
     if not pack or not pack.get("bot_id"):
         await callback.answer("Нет бота в пакете", show_alert=True)
@@ -1114,7 +1116,7 @@ async def cb_bot_regen_token(
             pool, callback_data.bot_id, callback.from_user.id, new_token
         )
     except Exception as _e:
-        await callback.answer(f"❌ Ошибка сохранения токена: {_e}", show_alert=True)
+        await callback.answer(f"❌ Ошибка сохранения токена: {owner_error(_e, html_escape=False)}", show_alert=True)
         return
     # Show alert with new token, then refresh the panel.
     # cb_bot_admin_panel will call callback.answer() — skip it here to avoid double answer.

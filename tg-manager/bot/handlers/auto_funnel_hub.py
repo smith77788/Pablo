@@ -17,6 +17,8 @@ from services import auto_funnel as af_service
 from bot.utils.op_helpers import safe_answer, terminal_kb
 
 log = logging.getLogger(__name__)
+from bot.utils.owner_error import owner_error  # noqa: E402
+
 router = Router()
 
 _SEGMENTS = {
@@ -567,7 +569,7 @@ async def cb_af_launch_confirm(
         )
     except Exception as e:
         await callback.message.edit_text(
-            f"❌ Ошибка запуска: {html.escape(str(e)[:200])}",
+            f"❌ Ошибка запуска: {owner_error(e)}",
             parse_mode="HTML",
             reply_markup=_back_to_menu(),
         )

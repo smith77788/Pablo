@@ -22,6 +22,8 @@ from services import bot_api
 from bot.utils.op_helpers import safe_answer
 
 log = logging.getLogger(__name__)
+from bot.utils.owner_error import owner_error  # noqa: E402
+
 router = Router()
 
 _ALL_FIELDS = ["name", "desc", "short", "photo", "commands"]
@@ -536,7 +538,7 @@ async def cb_ca_run(
     except PermissionError as exc:
         kb.button(text="◀️ К меню", callback_data=CloneAdaptCb(action="menu"))
         await callback.message.edit_text(
-            f"🔒 {html.escape(str(exc) or 'Клон доступен на платном тарифе')}",
+            f"🔒 {owner_error(exc)}",
             parse_mode="HTML", reply_markup=kb.as_markup())
         return
     except Exception:

@@ -26,6 +26,8 @@ from database import db
 from services import bot_api
 from bot.utils.op_helpers import safe_answer, terminal_kb
 
+from bot.utils.owner_error import owner_error  # noqa: E402
+
 router = Router()
 
 
@@ -76,7 +78,7 @@ async def cb_refresh(
         updates = await bot_api.fetch_updates(http, row["token"])
     except bot_api.UpdatesUnavailable as exc:
         await callback.message.edit_text(
-            f"ℹ️ <b>Сбор аудитории недоступен</b>\n\n{exc}",
+            f"ℹ️ <b>Сбор аудитории недоступен</b>\n\n{owner_error(exc)}",
             parse_mode="HTML",
             reply_markup=audience_menu(row["bot_id"]),
         )
@@ -343,7 +345,7 @@ async def cb_scan(
         )
     except _api.UpdatesUnavailable as exc:
         await callback.message.edit_text(
-            f"ℹ️ <b>Сканирование недоступно</b>\n\n{exc}",
+            f"ℹ️ <b>Сканирование недоступно</b>\n\n{owner_error(exc)}",
             parse_mode="HTML",
             reply_markup=audience_menu(row["bot_id"]),
         )

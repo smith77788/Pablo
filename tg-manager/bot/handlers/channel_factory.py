@@ -217,7 +217,7 @@ async def cb_chanf_import_acc(
     except Exception as e:
         log.warning("import_acc get_dialogs error: %s", e)
         await callback.message.edit_text(
-            f"❌ Ошибка при получении диалогов: <code>{html.escape(str(e)[:100])}</code>",
+            f"❌ Ошибка при получении диалогов: <code>{owner_error(e)}</code>",
             parse_mode="HTML",
             reply_markup=_back_menu_kb().as_markup(),
         )
@@ -1221,7 +1221,7 @@ async def fsm_be_value(
         except channel_change_approval.ApprovalError as exc:
             await state.clear()
             await message.answer(
-                f"⚠️ {html.escape(str(exc))}",
+                f"⚠️ {owner_error(exc)}",
                 parse_mode="HTML",
                 reply_markup=_back_menu_kb().as_markup(),
             )
@@ -1309,7 +1309,7 @@ async def cb_chanf_be_confirm(
                 callback.from_user.id, value, params["channel_acc_pairs"])
         except channel_change_approval.ApprovalError as exc:
             await callback.message.edit_text(
-                f"⚠️ {html.escape(str(exc))}\n\n"
+                f"⚠️ {owner_error(exc)}\n\n"
                 "Откройте редактирование заново — список покажется ещё раз.",
                 parse_mode="HTML",
                 reply_markup=_back_menu_kb().as_markup(),
@@ -1328,7 +1328,7 @@ async def cb_chanf_be_confirm(
         )
     except PermissionError as exc:
         await callback.message.edit_text(
-            f"🔒 {html.escape(str(exc) or 'Требуется подписка')}",
+            f"🔒 {owner_error(exc)}",
             parse_mode="HTML",
             reply_markup=_back_menu_kb().as_markup(),
         )
@@ -1403,7 +1403,7 @@ async def cb_chanf_gen_links_acc(
     except Exception as _e:
         log.warning("gen_links get_dialogs failed acc=%s: %s", acc.get("id"), _e)
         await callback.message.edit_text(
-            f"❌ Не удалось получить список каналов: <code>{html.escape(str(_e)[:150])}</code>",
+            f"❌ Не удалось получить список каналов: <code>{owner_error(_e)}</code>",
             parse_mode="HTML",
             reply_markup=_back_menu_kb().as_markup(),
         )
@@ -1552,7 +1552,7 @@ async def cb_chanf_stats_acc(
     except Exception as _e:
         log.warning("stats_acc get_dialogs failed acc=%s: %s", acc.get("id"), _e)
         await callback.message.edit_text(
-            f"❌ Не удалось получить список каналов: <code>{html.escape(str(_e)[:150])}</code>",
+            f"❌ Не удалось получить список каналов: <code>{owner_error(_e)}</code>",
             parse_mode="HTML",
             reply_markup=_back_menu_kb().as_markup(),
         )
@@ -1624,7 +1624,7 @@ async def cb_chanf_stats_chan(
     except Exception as _e:
         log.warning("stats_channel get_dialogs failed acc=%s: %s", acc.get("id"), _e)
         await callback.message.edit_text(
-            f"❌ Не удалось получить данные канала: <code>{html.escape(str(_e)[:150])}</code>",
+            f"❌ Не удалось получить данные канала: <code>{owner_error(_e)}</code>",
             parse_mode="HTML",
             reply_markup=_back_menu_kb().as_markup(),
         )

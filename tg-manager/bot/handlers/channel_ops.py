@@ -1191,7 +1191,7 @@ async def cb_do_bulk_create(
     except Exception as exc:
         mark_handled_error(f"bulk_create_confirm accounts: {exc}")
         await callback.message.edit_text(
-            f"❌ Ошибка загрузки аккаунтов: <code>{html.escape(str(exc)[:200])}</code>",
+            f"❌ Ошибка загрузки аккаунтов: <code>{owner_error(exc)}</code>",
             parse_mode="HTML",
             reply_markup=_back_kb().as_markup(),
         )
@@ -1381,7 +1381,7 @@ async def cb_bulk_post_chans_acc(
     except Exception as _e:
         log.warning("bpchans get_dialogs failed acc=%s: %s", acc.get("id"), _e)
         await callback.message.edit_text(
-            f"❌ Не удалось получить каналы аккаунта: <code>{html.escape(str(_e)[:150])}</code>",
+            f"❌ Не удалось получить каналы аккаунта: <code>{owner_error(_e)}</code>",
             parse_mode="HTML",
             reply_markup=_back_kb().as_markup(),
         )
@@ -1714,7 +1714,7 @@ async def cb_leave_show_dialogs(
     except Exception as _e:
         log.warning("leave get_dialogs failed acc=%s: %s", acc.get("id"), _e)
         await callback.message.edit_text(
-            f"❌ Не удалось получить список каналов: <code>{html.escape(str(_e)[:150])}</code>",
+            f"❌ Не удалось получить список каналов: <code>{owner_error(_e)}</code>",
             parse_mode="HTML",
             reply_markup=_back_kb().as_markup(),
         )
@@ -2509,7 +2509,7 @@ async def cb_members_dialogs(
     except Exception as _e:
         log.warning("members get_dialogs failed acc=%s: %s", acc.get("id"), _e)
         await callback.message.edit_text(
-            f"❌ Не удалось получить список каналов: <code>{html.escape(str(_e)[:150])}</code>",
+            f"❌ Не удалось получить список каналов: <code>{owner_error(_e)}</code>",
             parse_mode="HTML",
             reply_markup=_back_kb().as_markup(),
         )
@@ -3060,7 +3060,7 @@ async def _run_invite_bg(
         return
     except ImmunityBlockedError as exc:
         await msg_obj.answer(
-            f"🌩 <b>Инвайт временно приостановлен</b>\n\n{html.escape(str(exc))}",
+            f"🌩 <b>Инвайт временно приостановлен</b>\n\n{owner_error(exc)}",
             parse_mode="HTML",
             reply_markup=_back_kb().as_markup(),
         )
@@ -3070,7 +3070,7 @@ async def _run_invite_bg(
         mark_handled_error(f"invite_bg submit: {exc}")
         await msg_obj.answer(
             f"⚠️ Не удалось поставить инвайт в очередь: "
-            f"<code>{html.escape(str(exc)[:150])}</code>",
+            f"<code>{owner_error(exc)}</code>",
             parse_mode="HTML",
             reply_markup=_back_kb().as_markup(),
         )
@@ -3318,7 +3318,7 @@ async def fsm_botfather_username(
     except Exception as exc:
         mark_handled_error(f"botfather_create accounts: {exc}")
         await message.answer(
-            f"❌ Ошибка загрузки аккаунтов: <code>{html.escape(str(exc)[:200])}</code>",
+            f"❌ Ошибка загрузки аккаунтов: <code>{owner_error(exc)}</code>",
             reply_markup=terminal_kb(),
         )
         return
@@ -3451,7 +3451,7 @@ async def cb_react_dialogs(
     except Exception as _e:
         log.warning("react_dialogs get_dialogs failed acc=%s: %s", acc.get("id"), _e)
         await callback.message.edit_text(
-            f"❌ Не удалось получить список каналов: <code>{html.escape(str(_e)[:150])}</code>",
+            f"❌ Не удалось получить список каналов: <code>{owner_error(_e)}</code>",
             parse_mode="HTML",
             reply_markup=_back_kb().as_markup(),
         )
@@ -5312,7 +5312,7 @@ async def cb_bulk_chan_exec(
     except Exception as exc:
         mark_handled_error(f"bulk_chan_exec accounts: {exc}")
         await callback.message.edit_text(
-            f"❌ Ошибка загрузки аккаунтов: <code>{html.escape(str(exc)[:200])}</code>",
+            f"❌ Ошибка загрузки аккаунтов: <code>{owner_error(exc)}</code>",
             reply_markup=_back_kb().as_markup(),
         )
         return
@@ -5579,7 +5579,7 @@ async def _show_my_chans_page(
             kb = _back_kb()
             try:
                 await msg.edit_text(
-                    f"❌ Не удалось загрузить каналы: {html.escape(str(e)[:80])}",
+                    f"❌ Не удалось загрузить каналы: {owner_error(e)}",
                     parse_mode="HTML",
                     reply_markup=kb.as_markup(),
                 )
@@ -6358,7 +6358,7 @@ async def _cinv_bg(
         try:
             await bot.send_message(
                 user_id,
-                f"⚠️ <b>Ошибка инвайта</b>\n\n<code>{html.escape(str(exc)[:200])}</code>",
+                f"⚠️ <b>Ошибка инвайта</b>\n\n<code>{owner_error(exc)}</code>",
                 parse_mode="HTML",
             )
         except Exception:

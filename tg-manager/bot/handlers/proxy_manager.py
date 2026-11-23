@@ -33,6 +33,8 @@ from services.proxy_hygiene import (delete_proxy_safely, delete_refusal_text,
 from bot.utils.op_helpers import safe_answer
 
 log = logging.getLogger(__name__)
+from bot.utils.owner_error import owner_error  # noqa: E402
+
 router = Router()
 
 _PROXY_RE = re.compile(
@@ -818,7 +820,7 @@ async def cb_proxy_delete(
     except Exception as exc:
         mark_handled_error(f"proxy_delete execute: {exc}")
         await callback.message.edit_text(
-            f"❌ Не удалось удалить прокси: <code>{html.escape(str(exc)[:200])}</code>",
+            f"❌ Не удалось удалить прокси: <code>{owner_error(exc)}</code>",
             parse_mode="HTML",
             reply_markup=_menu_kb().as_markup(),
         )
@@ -889,7 +891,7 @@ async def cb_proxy_rotate(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
     except Exception as exc:
         mark_handled_error(f"proxy_rotate: {exc}")
         await callback.message.edit_text(
-            f"❌ Ошибка ротации: <code>{html.escape(str(exc)[:200])}</code>",
+            f"❌ Ошибка ротации: <code>{owner_error(exc)}</code>",
             parse_mode="HTML", reply_markup=_menu_kb().as_markup(),
         )
         return
@@ -923,7 +925,7 @@ async def cb_proxy_failover(callback: CallbackQuery, pool: asyncpg.Pool) -> None
     except Exception as exc:
         mark_handled_error(f"proxy_failover: {exc}")
         await callback.message.edit_text(
-            f"❌ Ошибка failover: <code>{html.escape(str(exc)[:200])}</code>",
+            f"❌ Ошибка failover: <code>{owner_error(exc)}</code>",
             parse_mode="HTML", reply_markup=_menu_kb().as_markup(),
         )
         return
@@ -1015,7 +1017,7 @@ async def cb_proxy_cleanup_dead_do(callback: CallbackQuery, pool: asyncpg.Pool) 
     except Exception as exc:
         mark_handled_error(f"proxy_cleanup_dead: {exc}")
         await callback.message.edit_text(
-            f"❌ Ошибка очистки: <code>{html.escape(str(exc)[:200])}</code>",
+            f"❌ Ошибка очистки: <code>{owner_error(exc)}</code>",
             parse_mode="HTML", reply_markup=_menu_kb().as_markup(),
         )
         return

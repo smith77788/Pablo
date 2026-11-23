@@ -448,7 +448,7 @@ async def cb_strike_buy(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
         )
     except usdt_invoice.NoFreeAmountError as exc:
         await callback.message.edit_text(
-            f"⏳ <b>Счёт не создан.</b>\n\n{exc}", parse_mode="HTML",
+            f"⏳ <b>Счёт не создан.</b>\n\n{owner_error(exc)}", parse_mode="HTML",
             reply_markup=kb.as_markup(),
         )
         return
@@ -1242,7 +1242,7 @@ async def cb_mini_strike_run(
         _err_kb.button(text="◀️ Меню жалоб", callback_data=StrikeCb(action="menu"))
         _err_kb.adjust(1)
         await msg.edit_text(
-            f"❌ <b>Ошибка выполнения страйка</b>\n\n<code>{str(e)[:200]}</code>",
+            f"❌ <b>Ошибка выполнения страйка</b>\n\n<code>{owner_error(e)}</code>",
             parse_mode="HTML",
             reply_markup=_err_kb.as_markup(),
         )
