@@ -481,7 +481,7 @@ async def cb_hc_back(callback: CallbackQuery) -> None:
     from bot.callbacks import BmCb
 
     kb = InlineKeyboardBuilder()
-    kb.button(text="🏠 Infragram OS", callback_data=BmCb(action="main"))
+    kb.button(text="🏠 Главное меню", callback_data=BmCb(action="main"))
     await safe_edit(callback, "Выберите раздел:", reply_markup=kb.as_markup())
 
 

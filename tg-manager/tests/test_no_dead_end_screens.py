@@ -264,3 +264,32 @@ def test_message_detector_sees_planted_dead_end(tmp_path):
     )
     found = _message_dead_ends(tmp_path)
     assert len(found) == 1 and found[0].startswith("planted.py:2"), found
+
+
+# ── Меню разделов ───────────────────────────────────────────────────────────
+# Шесть разделов открывались своим меню, в котором не было ни «Назад», ни
+# «Главное меню»: из «Парсера аудитории», «Операций с аккаунтами», «Звёзд»,
+# SEO бота, «Аналитики инфраструктуры» и /referral выйти можно было только
+# командой.
+_SECTION_MENUS = {
+    "audience_parser.py": "_menu_kb",
+    "channel_ops.py": "_main_menu_kb",
+    "stars_hub.py": "_main_kb",
+    "seo.py": "cb_seo_menu",
+    "infra_analytics.py": "cb_infra_menu",
+    "referral.py": "cmd_referral",
+}
+
+
+def test_section_menus_have_a_way_out():
+    missing = []
+    for fname, fn in _SECTION_MENUS.items():
+        src = (HANDLERS / fname).read_text(encoding="utf-8")
+        node = next(
+            n for n in ast.walk(ast.parse(src))
+            if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)) and n.name == fn
+        )
+        body = ast.get_source_segment(src, node) or ""
+        if 'BmCb(action="main")' not in body and "Назад" not in body:
+            missing.append(f"{fname}::{fn}")
+    assert not missing, f"меню раздела без выхода: {missing}"

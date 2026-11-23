@@ -3585,10 +3585,10 @@ async def cb_import_menu(
 
     kb = InlineKeyboardBuilder()
     kb.button(
-        text="🔑 String Session (Telethon)", callback_data=AccCb(action="import_string")
+        text="🔑 Строка сессии (Telethon)", callback_data=AccCb(action="import_string")
     )
     kb.button(
-        text="📄 Session JSON (Pyrogram)", callback_data=AccCb(action="import_pyrogram")
+        text="📄 Сессия JSON (Pyrogram)", callback_data=AccCb(action="import_pyrogram")
     )
     kb.button(text="📦 tdata (ZIP-архив)", callback_data=AccCb(action="import_tdata"))
     kb.button(

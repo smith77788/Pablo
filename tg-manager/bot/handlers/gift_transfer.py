@@ -660,7 +660,7 @@ async def cb_select_payment(callback: CallbackQuery, state: FSMContext, pool):
 @router.callback_query(F.data == "gt:preview_confirm", GiftTransferFSM.preview)
 async def cb_confirm_transfer(callback: CallbackQuery, state: FSMContext, pool):
     """Confirm and queue the transfer."""
-    await callback.answer("⏳ Starting transfer...")
+    await callback.answer("⏳ Запускаю передачу…")
 
     user_id = callback.from_user.id
     data = await state.get_data()

@@ -162,6 +162,7 @@ async def cb_infra_menu(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
     kb.button(
         text="🔍 Проверить аккаунты", callback_data=InfraCb(action="health_check")
     )
+    kb.button(text="🏠 Главное меню", callback_data=BmCb(action="main"))
     kb.adjust(1)
 
     await callback.message.edit_text(

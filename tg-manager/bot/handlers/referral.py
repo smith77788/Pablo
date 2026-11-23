@@ -96,6 +96,7 @@ async def cmd_referral(message: Message) -> None:
     kb = InlineKeyboardBuilder()
     kb.button(text="🔗 Моя ссылка и доход", callback_data=RefCb(action="menu"))
     kb.button(text="🏆 Топ рефереров", callback_data=RefCb(action="leaderboard"))
+    kb.button(text="🏠 Главное меню", callback_data=BmCb(action="main"))
     kb.adjust(1)
     await message.answer(
         "👥 <b>Реферальная программа</b>\n\n"
