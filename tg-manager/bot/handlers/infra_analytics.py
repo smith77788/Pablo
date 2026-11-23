@@ -41,6 +41,7 @@ _ADVISOR_ACTION_BUTTONS: dict[str, tuple[str, object]] = {
 
 log = logging.getLogger(__name__)
 from bot.utils.fmt import num_ru  # noqa: E402
+from bot.utils.op_helpers import no_accounts_kb
 
 router = Router()
 
@@ -848,7 +849,7 @@ async def cb_rebalance_preview(callback: CallbackQuery, pool: asyncpg.Pool) -> N
     if not accounts:
         await callback.message.edit_text(
             "⚠️ Нет активных аккаунтов для балансировки.",
-            reply_markup=_back_kb().as_markup(),
+            reply_markup=no_accounts_kb(back=InfraCb(action="menu")),
         )
         return
 
@@ -1210,7 +1211,7 @@ async def cb_infra_deploy(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
             "⚠️ <b>Нет активных аккаунтов для развёртки</b>\n\n"
             "Добавьте аккаунты через 📱 Аккаунты.",
             parse_mode="HTML",
-            reply_markup=_back_kb().as_markup(),
+            reply_markup=no_accounts_kb(back=InfraCb(action="menu")),
         )
         return
 
@@ -1353,7 +1354,7 @@ async def cb_infra_health_check(callback: CallbackQuery, pool: asyncpg.Pool) -> 
         await callback.message.edit_text(
             "⚠️ Нет активных аккаунтов для проверки.",
             parse_mode="HTML",
-            reply_markup=_back_kb().as_markup(),
+            reply_markup=no_accounts_kb(back=InfraCb(action="menu")),
         )
         return
 

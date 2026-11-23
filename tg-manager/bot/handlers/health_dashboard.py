@@ -40,6 +40,7 @@ from bot.utils.op_helpers import safe_answer
 
 log = logging.getLogger(__name__)
 from bot.utils.fmt import num_ru, plural  # noqa: E402
+from bot.utils.op_helpers import no_accounts_kb
 
 router = Router()
 
@@ -657,7 +658,7 @@ async def cb_health_real_check(
         await safe_edit(
             callback,
             "📱 Нет активных аккаунтов для проверки.",
-            reply_markup=_back_kb().as_markup(),
+            reply_markup=no_accounts_kb(back=HealthCb(action="menu")),
         )
         return
 
@@ -1712,7 +1713,7 @@ async def cb_reconnect_menu(callback: CallbackQuery, pool: asyncpg.Pool) -> None
     if not rows:
         kb = _back_kb()
         await safe_edit(
-            callback, "📱 Нет подключённых аккаунтов.", reply_markup=kb.as_markup()
+            callback, "📱 Нет подключённых аккаунтов.", reply_markup=no_accounts_kb(back=HealthCb(action="menu"))
         )
         return
 
@@ -1770,7 +1771,7 @@ async def cb_set_cooldown_menu(callback: CallbackQuery, pool: asyncpg.Pool) -> N
     if not rows:
         kb = _back_kb()
         await safe_edit(
-            callback, "📱 Нет активных аккаунтов.", reply_markup=kb.as_markup()
+            callback, "📱 Нет активных аккаунтов.", reply_markup=no_accounts_kb(back=HealthCb(action="menu"))
         )
         return
 

@@ -22,6 +22,7 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 from bot.callbacks import AiCommentCb, BmCb
 from bot.utils.op_helpers import safe_answer, terminal_kb
 from services import operation_bus
+from bot.utils.op_helpers import no_accounts_kb
 
 log = logging.getLogger(__name__)
 router = Router()
@@ -147,7 +148,7 @@ async def cb_ai_comment_tone(
     if not has_acc:
         await callback.message.edit_text(
             "⚠️ Нет активных аккаунтов — добавьте аккаунт в «📱 Аккаунты».",
-            reply_markup=terminal_kb(),
+            reply_markup=no_accounts_kb(),
         )
         return
 

@@ -42,6 +42,7 @@ from bot.utils.template_validator import (
 
 log = logging.getLogger(__name__)
 from bot.utils.owner_error import owner_error  # noqa: E402
+from bot.utils.op_helpers import no_accounts_kb
 
 router = Router()
 
@@ -160,7 +161,7 @@ async def cb_mpub_start(
             await callback.message.edit_text(
                 "⚠️ Нет активных аккаунтов. Подключите через /accounts",
                 parse_mode="HTML",
-                reply_markup=_back_menu_kb().as_markup(),
+                reply_markup=no_accounts_kb(back=MassPubCb(action="menu")),
             )
             return
         await state.update_data(
@@ -196,7 +197,7 @@ async def cb_mpub_start(
             await callback.message.edit_text(
                 "⚠️ Нет активных аккаунтов.",
                 parse_mode="HTML",
-                reply_markup=_back_menu_kb().as_markup(),
+                reply_markup=no_accounts_kb(back=MassPubCb(action="menu")),
             )
             return
         kb = InlineKeyboardBuilder()
@@ -787,7 +788,7 @@ async def cb_mpub_dry_run(
         await callback.message.edit_text(
             "⚠️ Нет активных аккаунтов.",
             parse_mode="HTML",
-            reply_markup=_back_menu_kb().as_markup(),
+            reply_markup=no_accounts_kb(back=MassPubCb(action="menu")),
         )
         return
     await state.update_data(

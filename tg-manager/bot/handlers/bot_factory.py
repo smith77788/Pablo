@@ -23,6 +23,7 @@ from bot.utils.op_helpers import safe_answer, terminal_kb
 
 log = logging.getLogger(__name__)
 from bot.utils.fmt import num_ru, plural  # noqa: E402
+from bot.utils.op_helpers import no_accounts_kb
 
 router = Router()
 
@@ -117,7 +118,7 @@ async def cb_factory_create(
             "Telegram-аккаунт.\n\n"
             "Добавьте аккаунт в разделе 📱 Аккаунты.",
             parse_mode="HTML",
-            reply_markup=kb.as_markup(),
+            reply_markup=no_accounts_kb(back=BotFactCb(action="menu")),
         )
         return
 
