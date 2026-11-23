@@ -119,7 +119,7 @@ async def cb_nodes_add(callback: CallbackQuery, state: FSMContext) -> None:
     await state.set_state(NodesAddFSM.waiting_chat_id)
     await callback.message.edit_text(
         "<b>📡 Новый воркспейс — шаг 1/3</b>\n\n"
-        "Отправьте <b>Chat ID</b> форум-суперgroup'ы.\n\n"
+        "Отправьте <b>Chat ID</b> форум-супергруппы.\n\n"
         "Как получить ID:\n"
         "• Добавьте @userinfobot в группу\n"
         "• Или используйте <code>getUpdates</code> в Bot API\n\n"
@@ -1032,7 +1032,7 @@ async def handle_node_thread_message(
     elif command == "info":
         entity_label = ENTITY_LABELS.get(entity_type, entity_type)
         await message.reply(
-            f"<b>ℹ️ Node Thread Info</b>\n\n"
+            f"<b>ℹ️ Тред узла</b>\n\n"
             f"Сущность: {html.escape(entity_label)} #{entity_id}\n"
             f"Thread ID: <code>{thread_id}</code>\n"
             f"Chat ID: <code>{tg_chat_id}</code>\n"
@@ -1042,7 +1042,7 @@ async def handle_node_thread_message(
 
     elif command == "help":
         await message.reply(
-            "<b>📋 Node Thread Commands</b>\n\n"
+            "<b>📋 Команды треда узла</b>\n\n"
             "/status — статус сущности\n"
             "/info — информация о треде\n"
             "/close — архивировать топик\n"

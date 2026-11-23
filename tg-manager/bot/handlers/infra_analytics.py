@@ -167,7 +167,7 @@ async def cb_infra_menu(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
     await callback.message.edit_text(
         "📊 <b>Аналитика инфраструктуры</b>\n\n"
         f"🤖 Активных аккаунтов: <b>{acc_total}</b>\n"
-        f"⚡ Flood событий (24ч): <b>{floods_24h}</b>\n"
+        f"⚡ Флуд-событий (24ч): <b>{floods_24h}</b>\n"
         f"⚙️ Операций сегодня: <b>{ops_today}</b>\n"
         f"🌡 Разогревается: <b>{warmup_active}</b>\n"
         f"🏊 Пулов: <b>{pool_count}</b>\n\n"

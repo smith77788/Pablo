@@ -134,7 +134,7 @@ async def cb_narr_menu(callback: CallbackQuery, pool: asyncpg.Pool, state: FSMCo
         kb = InlineKeyboardBuilder()
         kb.button(text="◀️ Назад", callback_data=BmCb(action="growth"))
         await callback.message.edit_text(
-            "📖 <b>Narrative Engine</b>\n\n"
+            "📖 <b>Нарратив</b>\n\n"
             "⚠️ Модуль недоступен — таблицы не созданы в базе данных.\n\n"
             "Администратору необходимо применить миграцию <code>schema_v121.sql</code>.",
             parse_mode="HTML",
@@ -170,7 +170,7 @@ async def cb_narr_menu(callback: CallbackQuery, pool: asyncpg.Pool, state: FSMCo
     total_cnt = len(campaigns)
 
     text = (
-        "🌊 <b>Narrative Engine</b>\n\n"
+        "🌊 <b>Нарратив</b>\n\n"
         "Координированное создание трендов: несколько каналов подхватывают одну тему\n"
         "с разных углов в течение 2–6 часов, создавая эффект органического тренда.\n\n"
         f"Кампаний: <b>{total_cnt}</b>  |  Активных: <b>{active_cnt}</b>"

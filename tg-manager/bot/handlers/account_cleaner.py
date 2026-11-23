@@ -83,7 +83,7 @@ async def cb_cleaner_menu(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
     kb.adjust(1)
 
     await callback.message.edit_text(
-        "🧹 <b>Account Cleaner — очистка аккаунтов</b>\n\n"
+        "🧹 <b>Очистка аккаунтов</b>\n\n"
         "Инструменты для сброса аккаунта перед новым назначением:\n"
         "• <b>Выйти из всех чатов</b> — покинуть все группы и каналы\n"
         "• <b>Удалить контакты</b> — очистить список контактов\n"

@@ -72,7 +72,7 @@ async def cb_growth_menu(callback: CallbackQuery, state: FSMContext) -> None:
     await safe_answer(callback)
     await state.clear()
     await callback.message.edit_text(
-        "🌱 <b>Growth Agent</b>\n\n"
+        "🌱 <b>Агент роста</b>\n\n"
         "Автоматически находит группы по вашей нише и публикует "
         "рекламный текст, привлекая подписчиков в ваш канал.\n\n"
         "<b>Как работает:</b>\n"
@@ -81,7 +81,7 @@ async def cb_growth_menu(callback: CallbackQuery, state: FSMContext) -> None:
         "3. Вы пишете рекламный текст для чужих групп\n"
         "4. Выбираете сколько аккаунтов задействовать\n"
         "5. Агент ищет подходящие группы → вступает → публикует\n\n"
-        "⚠️ Используйте аккаунты с хорошим trust score — постинг в группах "
+        "⚠️ Используйте аккаунты с высоким доверием — постинг в группах "
         "требует прогретых аккаунтов.",
         reply_markup=_menu_kb(),
     )
@@ -102,7 +102,7 @@ async def cb_growth_create(
 
     await state.set_state(GrowthAgentFSM.waiting_niche)
     await callback.message.edit_text(
-        "🌱 <b>Growth Agent — шаг 1/5</b>\n\n"
+        "🌱 <b>Агент роста — шаг 1/5</b>\n\n"
         "Опишите вашу нишу или целевую аудиторию.\n"
         "<i>Примеры:</i>\n"
         "• <code>криптовалюта трейдинг</code>\n"
@@ -132,7 +132,7 @@ async def on_niche_input(message: Message, state: FSMContext) -> None:
     kb.adjust(1)
     await message.answer(
         f"✅ Ниша: <b>{html.escape(niche)}</b>\n\n"
-        "🌱 <b>Growth Agent — шаг 2/5</b>\n\n"
+        "🌱 <b>Агент роста — шаг 2/5</b>\n\n"
         "Хотите ограничить поиск конкретным городом/регионом?\n"
         "Введите его (например: <code>Москва</code>, <code>СПб</code>) "
         "или нажмите «Без гео-таргетинга»:",
@@ -162,7 +162,7 @@ async def _go_to_promo_step(
 ) -> None:
     await state.set_state(GrowthAgentFSM.waiting_promo_text)
     text = (
-        "🌱 <b>Growth Agent — шаг 3/5</b>\n\n"
+        "🌱 <b>Агент роста — шаг 3/5</b>\n\n"
         "Теперь введите рекламный текст, который будет опубликован "
         "в найденных группах.\n\n"
         "<i>Хороший текст:</i>\n"
@@ -211,7 +211,7 @@ async def on_promo_text_input(
     await state.set_state(GrowthAgentFSM.waiting_acc_count)
     total = await _get_acc_count(pool, message.from_user.id)
     await message.answer(
-        f"🌱 <b>Growth Agent — шаг 4/5</b>\n\n"
+        f"🌱 <b>Агент роста — шаг 4/5</b>\n\n"
         f"Доступно прогретых аккаунтов: <b>{total}</b>\n"
         "Сколько задействовать для поиска и постинга?\n"
         "Введите число или <code>0</code> — использовать до 3 (безопасный режим по умолчанию):",
@@ -259,7 +259,7 @@ async def on_acc_count_input(
 
     geo_line = f"<b>Гео:</b> {html.escape(geo)}\n" if geo else ""
     await message.answer(
-        "🌱 <b>Growth Agent — подтверждение</b>\n\n"
+        "🌱 <b>Агент роста — подтверждение</b>\n\n"
         f"<b>Ниша:</b> {html.escape(niche)}\n"
         f"{geo_line}"
         f"<b>Аккаунтов:</b> {use}\n\n"
@@ -310,7 +310,7 @@ async def _launch_campaign(
         return
 
     await callback.message.edit_text(
-        f"✅ <b>Growth Agent запущен</b> (#{op_id})\n\n"
+        f"✅ <b>Агент роста запущен</b> (#{op_id})\n\n"
         f"<b>Ниша:</b> {html.escape(niche)}\n\n"
         "Агент ищет группы → вступает → публикует ваш рекламный текст.\n"
         "Результат придёт уведомлением когда кампания завершится.",
@@ -336,12 +336,12 @@ async def cb_growth_history(
     )
     if not rows:
         await callback.message.edit_text(
-            "🌱 <b>История Growth Agent</b>\n\nКампаний ещё не запускалось.",
+            "🌱 <b>История агента роста</b>\n\nКампаний ещё не запускалось.",
             reply_markup=_back_kb(),
         )
         return
 
-    lines = ["🌱 <b>История Growth Agent</b>\n"]
+    lines = ["🌱 <b>История агента роста</b>\n"]
     status_icons = {
         "done": "✅", "partial": "⚠️", "failed": "❌", "cancelled": "🚫",
         "pending": "⏳", "running": "🔄", "skipped": "⏭",

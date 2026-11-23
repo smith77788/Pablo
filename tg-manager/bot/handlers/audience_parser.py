@@ -894,7 +894,7 @@ async def cb_parser_geo_start(
     kb = InlineKeyboardBuilder()
     kb.button(text="❌ Отмена", callback_data=ParserCb(action="menu"))
     await callback.message.edit_text(
-        "📍 <b>Гео-парсинг (Nearby People)</b>\n\n"
+        "📍 <b>Гео-парсинг («Люди рядом»)</b>\n\n"
         "Собирает пользователей Telegram, находящихся поблизости.\n\n"
         "Введите координаты через запятую:\n"
         "<code>55.7558, 37.6173</code>\n\n"
@@ -973,7 +973,7 @@ async def cb_parser_geo_radius(
 
     if not results:
         await callback.message.edit_text(
-            "📍 Рядом никого не найдено (Nearby People отключён у пользователей).",
+            "📍 Рядом никого не найдено (у людей поблизости выключена функция «Люди рядом»).",
             reply_markup=_back_kb().as_markup(),
         )
         return

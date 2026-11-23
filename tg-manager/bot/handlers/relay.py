@@ -41,7 +41,7 @@ async def cb_relay_menu(
     if not await require_plan(pool, callback.from_user.id, "starter"):
         await safe_answer(callback)
         await callback.message.edit_text(
-            locked_text("Диалоги / Relay", "starter"),
+            locked_text("Диалоги", "starter"),
             parse_mode="HTML",
             reply_markup=subscription_locked_markup("starter", back_callback=BmCb(action="comms")),
         )
@@ -63,7 +63,7 @@ async def cb_relay_toggle(
     if not await require_plan(pool, callback.from_user.id, "starter"):
         await safe_answer(callback)
         await callback.message.edit_text(
-            locked_text("Диалоги / Relay", "starter"),
+            locked_text("Диалоги", "starter"),
             parse_mode="HTML",
             reply_markup=subscription_locked_markup("starter", back_callback=BmCb(action="comms")),
         )

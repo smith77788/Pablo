@@ -925,7 +925,7 @@ async def cb_proxy_failover(callback: CallbackQuery, pool: asyncpg.Pool) -> None
     except Exception as exc:
         mark_handled_error(f"proxy_failover: {exc}")
         await callback.message.edit_text(
-            f"❌ Ошибка failover: <code>{owner_error(exc)}</code>",
+            f"❌ Ошибка переключения на резерв: <code>{owner_error(exc)}</code>",
             parse_mode="HTML", reply_markup=_menu_kb().as_markup(),
         )
         return

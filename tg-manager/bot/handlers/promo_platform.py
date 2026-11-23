@@ -887,7 +887,7 @@ async def cb_bot_setstatus(
         me = await bot_api.get_me(http, token)
         if not me:
             await callback.answer(
-                "❌ Бот всё ещё недоступен (getMe не отвечает) — статус не изменён.",
+                "❌ Бот всё ещё недоступен (Telegram не отвечает на проверку) — статус не изменён.",
                 show_alert=True,
             )
             return
@@ -1237,7 +1237,7 @@ async def fsm_transfer_new_owner(message: Message, state: FSMContext, pool: asyn
             f"Возможные причины:\n"
             f"• @{new_owner} не существует\n"
             f"• Новый владелец не принял условия BotFather\n"
-            f"• FloodWait — попробуйте позже",
+            f"• Флуд-лимит Telegram — попробуйте позже",
             reply_markup=terminal_kb(),
         )
         return

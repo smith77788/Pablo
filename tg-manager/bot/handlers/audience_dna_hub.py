@@ -1,4 +1,4 @@
-"""Audience DNA Hub — deep behavioral profiling UI for bot owners."""
+"""ДНК аудитории Hub — deep behavioral profiling UI for bot owners."""
 
 from __future__ import annotations
 
@@ -64,7 +64,7 @@ def _format_dna_report(dna: AudienceDNA, bot_name: str) -> str:
     )
 
     return (
-        f"🧬 <b>Audience DNA — {bot_name}</b>\n\n"
+        f"🧬 <b>ДНК аудитории — {bot_name}</b>\n\n"
         f"⏰ <b>Пик активности (часы):</b> {peak_h}\n"
         f"📆 <b>Пик активности (дни):</b> {peak_d}\n\n"
         f"📝 <b>Лучшие форматы контента:</b>\n{content_types}\n\n"
@@ -106,7 +106,7 @@ async def cb_dna_menu(
     kb.adjust(1)
 
     await callback.message.edit_text(
-        "🧬 <b>Audience DNA</b>\n\n"
+        "🧬 <b>ДНК аудитории</b>\n\n"
         "Выберите бота для просмотра поведенческого профиля аудитории:",
         parse_mode="HTML",
         reply_markup=kb.as_markup(),
@@ -132,7 +132,7 @@ async def cb_dna_report(
     except Exception as e:
         log.error("audience_dna_hub cb_dna_report: %s", e)
         await callback.message.edit_text(
-            "🧬 <b>Audience DNA</b>\n\n"
+            "🧬 <b>ДНК аудитории</b>\n\n"
             "⚠️ Модуль недоступен — таблицы не созданы в базе данных.\n\n"
             "Администратору необходимо применить миграцию <code>schema_v119.sql</code>.",
             parse_mode="HTML",
@@ -159,9 +159,9 @@ async def cb_dna_report(
 
     if not dna:
         await callback.message.edit_text(
-            f"🧬 <b>Audience DNA — {bot_name}</b>\n\n"
-            "📭 DNA-профиль ещё не вычислен.\n\n"
-            "Нажмите <b>«Пересчитать DNA»</b> для первичного анализа аудитории.",
+            f"🧬 <b>ДНК аудитории — {bot_name}</b>\n\n"
+            "📭 ДНК аудитории ещё не посчитана.\n\n"
+            "Нажмите <b>«Пересчитать ДНК»</b> для первичного анализа аудитории.",
             parse_mode="HTML",
             reply_markup=kb.as_markup(),
         )
@@ -188,7 +188,7 @@ async def cb_dna_recs(
     dna = await dna_svc.get_dna(pool, callback_data.bot_id)
     if not dna:
         await callback.message.edit_text(
-            "❌ DNA не найден. Сначала запустите пересчёт.",
+            "❌ ДНК ещё не посчитана. Сначала запустите пересчёт.",
             parse_mode="HTML",
             reply_markup=_back_to_dna(callback_data.bot_id),
         )
@@ -227,7 +227,7 @@ async def cb_dna_compute(
     bot_name = _bot_label(bot_row)
 
     await callback.message.edit_text(
-        f"⏳ <b>Вычисляю Audience DNA — {bot_name}…</b>\n\n"
+        f"⏳ <b>Считаю ДНК аудитории — {bot_name}…</b>\n\n"
         "Анализирую активность аудитории, вовлечённость и паттерны контента.",
         parse_mode="HTML",
     )
@@ -237,7 +237,7 @@ async def cb_dna_compute(
     except Exception as exc:
         log.error("cb_dna_compute: error for bot_id=%s: %s", callback_data.bot_id, exc)
         await callback.message.edit_text(
-            "❌ Ошибка при вычислении DNA. Попробуйте позже.",
+            "❌ Ошибка при расчёте ДНК. Попробуйте позже.",
             parse_mode="HTML",
             reply_markup=_back_to_dna(callback_data.bot_id),
         )
@@ -261,13 +261,13 @@ async def cb_dna_compute(
     kb.adjust(1)
 
     await callback.message.edit_text(
-        f"✅ <b>DNA обновлён!</b>\n\n{text}",
+        f"✅ <b>ДНК обновлена!</b>\n\n{text}",
         parse_mode="HTML",
         reply_markup=kb.as_markup(),
     )
 
 
-# ── История DNA-отчётов ───────────────────────────────────────────────────────
+# ── История ДНК-отчётов ───────────────────────────────────────────────────────
 
 
 @router.callback_query(DnaCb.filter(F.action == "history"))
@@ -285,14 +285,14 @@ async def cb_dna_history(
 
     if not history:
         await callback.message.edit_text(
-            f"📊 <b>История DNA — {bot_name}</b>\n\n"
+            f"📊 <b>История ДНК — {bot_name}</b>\n\n"
             "Нет исторических данных.",
             parse_mode="HTML",
             reply_markup=_back_to_dna(callback_data.bot_id),
         )
         return
 
-    lines: list[str] = [f"📊 <b>История DNA — {bot_name}</b>\n"]
+    lines: list[str] = [f"📊 <b>История ДНК — {bot_name}</b>\n"]
 
     for i, snap in enumerate(history):
         ts = (

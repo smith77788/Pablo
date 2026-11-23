@@ -1766,7 +1766,7 @@ async def cb_bulk_join_start(
     if not await require_plan(pool, callback.from_user.id, "pro"):
         await safe_edit(
             callback,
-            locked_text("Массовый join", "pro"),
+            locked_text("Массовое вступление", "pro"),
             reply_markup=_back_menu_kb().as_markup(),
         )
         return
@@ -1776,7 +1776,7 @@ async def cb_bulk_join_start(
     kb.button(text="❌ Отмена", callback_data=MassOpCb(action="menu"))
     await safe_edit(
         callback,
-        "🔗 <b>Массовый join — Шаг 1/4</b>\n\n"
+        "🔗 <b>Массовое вступление — шаг 1/4</b>\n\n"
         "Введите ссылки или юзернеймы каналов/групп — <b>по одному на строку</b>:\n\n"
         "<code>@channel_name\n"
         "https://t.me/channel_name\n"
@@ -1803,7 +1803,7 @@ async def _process_bj_links(
         kb.adjust(1)
         await message.answer(
             "⚠️ <b>Нет активных аккаунтов</b>\n\n"
-            "Для массового join нужен хотя бы один активный Telegram-аккаунт.\n\n"
+            "Для массового вступления нужен хотя бы один активный Telegram-аккаунт.\n\n"
             "💡 Добавьте аккаунт в разделе <b>📱 Аккаунты</b>, затем повторите операцию.",
             parse_mode="HTML",
             reply_markup=kb.as_markup(),
@@ -1822,7 +1822,7 @@ async def _process_bj_links(
     kb.button(text="❌ Отмена", callback_data=MassOpCb(action="menu"))
     kb.adjust(1)
     await message.answer(
-        f"🔗 <b>Массовый join — Шаг 2/4</b>\n\n"
+        f"🔗 <b>Массовое вступление — шаг 2/4</b>\n\n"
         f"Каналов/групп: <b>{len(links)}</b>\n\n"
         "Выберите аккаунты для вступления:",
         parse_mode="HTML",
@@ -1968,7 +1968,7 @@ async def cb_bulk_join_accs(
     acc_section = f"\n<b>Аккаунты:</b>\n{acc_list_preview}" if acc_list_preview else ""
     await safe_edit(
         callback,
-        f"🔗 <b>Массовый join — Шаг 3/4</b>\n\n"
+        f"🔗 <b>Массовое вступление — шаг 3/4</b>\n\n"
         f"Аккаунты: <b>{acc_label}</b>{acc_section}\n"
         f"Каналов/групп: <b>{len(links)}</b>\n\n"
         f"<b>Список каналов:</b>\n{link_preview}\n\n"
@@ -2018,7 +2018,7 @@ async def cb_bulk_join_redelay(callback: CallbackQuery, state: FSMContext) -> No
     kb.adjust(2, 2, 1)
     await safe_edit(
         callback,
-        f"🔗 <b>Массовый join — Шаг 3/4</b>\n\n"
+        f"🔗 <b>Массовое вступление — шаг 3/4</b>\n\n"
         f"Аккаунты: <b>{acc_label}</b>\n"
         f"Каналов/групп: <b>{len(links)}</b>\n\n"
         f"<b>Список:</b>\n{link_preview}\n\n"
@@ -2063,7 +2063,7 @@ async def cb_bulk_join_delay(
     kb.adjust(1)
     await safe_edit(
         callback,
-        f"🔗 <b>Массовый join — Шаг 4/4 (Подтверждение)</b>\n\n"
+        f"🔗 <b>Массовое вступление — шаг 4/4 (Подтверждение)</b>\n\n"
         f"Аккаунты: <b>{acc_label}</b>\n"
         f"Каналов/групп: <b>{len(links)}</b>\n"
         f"Задержка: <b>{icon} {delay_str}</b>\n"
@@ -2125,7 +2125,7 @@ async def cb_bulk_join_confirm(
     await safe_edit(
         callback,
         f"✅ <b>Операция #{op_id} поставлена в очередь</b>\n\n"
-        f"Тип: 🔗 Массовый join\n"
+        f"Тип: 🔗 Массовое вступление\n"
         f"Аккаунтов: <b>{len(acc_ids)}</b>\n"
         f"Каналов: <b>{len(links)}</b>\n"
         f"Задержка: <b>{icon} {delay_str}</b>\n\n"
@@ -2149,7 +2149,7 @@ async def cb_bulk_leave_start(
     if not await require_plan(pool, callback.from_user.id, "pro"):
         await safe_edit(
             callback,
-            locked_text("Массовый leave", "pro"),
+            locked_text("Массовый выход", "pro"),
             reply_markup=_back_menu_kb().as_markup(),
         )
         return
@@ -2159,7 +2159,7 @@ async def cb_bulk_leave_start(
     kb.button(text="❌ Отмена", callback_data=MassOpCb(action="menu"))
     await safe_edit(
         callback,
-        "🚪 <b>Массовый leave — Шаг 1/4</b>\n\n"
+        "🚪 <b>Массовый выход — шаг 1/4</b>\n\n"
         "Введите юзернеймы или ID каналов/групп — <b>по одному на строку</b>:\n\n"
         "<code>@channel_name\n"
         "-1001234567890\n"
@@ -2186,7 +2186,7 @@ async def _process_bl_channels(
         kb.adjust(1)
         await message.answer(
             "⚠️ <b>Нет активных аккаунтов</b>\n\n"
-            "Для массового leave нужен хотя бы один активный Telegram-аккаунт.\n\n"
+            "Для массового выхода нужен хотя бы один активный Telegram-аккаунт.\n\n"
             "💡 Добавьте аккаунт в разделе <b>📱 Аккаунты</b>, затем повторите операцию.",
             parse_mode="HTML",
             reply_markup=kb.as_markup(),
@@ -2205,7 +2205,7 @@ async def _process_bl_channels(
     kb.button(text="❌ Отмена", callback_data=MassOpCb(action="menu"))
     kb.adjust(1)
     await message.answer(
-        f"🚪 <b>Массовый leave — Шаг 2/4</b>\n\n"
+        f"🚪 <b>Массовый выход — шаг 2/4</b>\n\n"
         f"Каналов/групп: <b>{len(channels)}</b>\n\n"
         "Выберите аккаунты для выхода:",
         parse_mode="HTML",
@@ -2333,7 +2333,7 @@ async def cb_bulk_leave_accs(
     )
     await safe_edit(
         callback,
-        f"🚪 <b>Массовый leave — Шаг 3/4</b>\n\n"
+        f"🚪 <b>Массовый выход — шаг 3/4</b>\n\n"
         f"Аккаунты: <b>{acc_label}</b>{bl_acc_section}\n"
         f"Каналов/групп: <b>{len(channels)}</b>\n\n"
         f"<b>Список каналов:</b>\n{ch_preview}\n\n"
@@ -2383,7 +2383,7 @@ async def cb_bulk_leave_redelay(callback: CallbackQuery, state: FSMContext) -> N
     kb.adjust(2, 2, 1)
     await safe_edit(
         callback,
-        f"🚪 <b>Массовый leave — Шаг 3/4</b>\n\n"
+        f"🚪 <b>Массовый выход — шаг 3/4</b>\n\n"
         f"Аккаунты: <b>{acc_label}</b>\n"
         f"Каналов/групп: <b>{len(channels)}</b>\n\n"
         f"<b>Список:</b>\n{ch_preview}\n\n"
@@ -2428,7 +2428,7 @@ async def cb_bulk_leave_delay(
     kb.adjust(1)
     await safe_edit(
         callback,
-        f"🚪 <b>Массовый leave — Шаг 4/4 (Подтверждение)</b>\n\n"
+        f"🚪 <b>Массовый выход — шаг 4/4 (Подтверждение)</b>\n\n"
         f"Аккаунты: <b>{acc_label}</b>\n"
         f"Каналов/групп: <b>{len(channels)}</b>\n"
         f"Задержка: <b>{icon} {delay_str}</b>\n"
@@ -2490,7 +2490,7 @@ async def cb_bulk_leave_confirm(
     await safe_edit(
         callback,
         f"✅ <b>Операция #{op_id} поставлена в очередь</b>\n\n"
-        f"Тип: 🚪 Массовый leave\n"
+        f"Тип: 🚪 Массовый выход\n"
         f"Аккаунтов: <b>{len(acc_ids)}</b>\n"
         f"Каналов: <b>{len(channels)}</b>\n"
         f"Задержка: <b>{icon} {delay_str}</b>\n\n"
@@ -2513,13 +2513,13 @@ _OP_TYPE_META = {
     },
     "bulk_join": {
         "icon": "🔗",
-        "label": "Массовый join",
+        "label": "Массовое вступление",
         "desc": "Вступить в каналы/группы несколькими аккаунтами",
         "plan": "starter",
     },
     "bulk_leave": {
         "icon": "🚪",
-        "label": "Массовый leave",
+        "label": "Массовый выход",
         "desc": "Выйти из каналов/групп несколькими аккаунтами",
         "plan": "starter",
     },

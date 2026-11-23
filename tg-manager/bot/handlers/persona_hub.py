@@ -132,7 +132,7 @@ async def cb_persona_menu(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
         kb = InlineKeyboardBuilder()
         kb.button(text="◀️ Назад", callback_data=BmCb(action="settings"))
         await callback.message.edit_text(
-            "🎭 <b>Persona Ecosystem</b>\n\n"
+            "🎭 <b>Персоны</b>\n\n"
             "⚠️ Модуль недоступен — таблицы не созданы в базе данных.\n\n"
             "Администратору необходимо применить миграцию <code>schema_v117.sql</code>.",
             parse_mode="HTML",
@@ -143,7 +143,7 @@ async def cb_persona_menu(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
 
     if not personas:
         text = (
-            "🎭 <b>Persona Ecosystem</b>\n\n"
+            "🎭 <b>Персоны</b>\n\n"
             "AI-персоны — это виртуальные личности с уникальным характером, "
             "стилем речи и персистентной памятью действий.\n\n"
             "Каждая персона привязана к аккаунту Telegram и действует "
@@ -153,7 +153,7 @@ async def cb_persona_menu(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
     else:
         active = sum(1 for p in personas if p["is_active"])
         text = (
-            f"🎭 <b>Persona Ecosystem</b>\n\n"
+            f"🎭 <b>Персоны</b>\n\n"
             f"Персон: <b>{len(personas)}</b>  |  Активных: <b>{active}</b>\n\n"
         )
         for p in personas[:10]:
@@ -606,7 +606,7 @@ async def cb_persona_do_create(
     name = html.escape(sd.get("persona_name", ""))
     await callback.message.edit_text(
         f"✅ <b>Персона «{name}» создана!</b>\n\n"
-        f"Persona ID: <code>{persona_id}</code>",
+        f"ID персоны: <code>{persona_id}</code>",
         parse_mode="HTML",
         reply_markup=kb.as_markup(),
     )

@@ -104,7 +104,7 @@ async def cb_pack_menu(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
     else:
         count_text = (
             "Пакетов пока нет.\n\n"
-            "💡 <b>Что такое Связка (Presence Pack)?</b>\n"
+            "💡 <b>Что такое связка?</b>\n"
             "Это объединение ВАШИХ уже существующих бота + каналов + групп "
             "в единую воронку. Назначаете бота администратором, публикуете "
             "посевные посты — и вся инфраструктура работает синхронно.\n\n"
@@ -129,7 +129,7 @@ async def cb_pack_create(callback: CallbackQuery, state: FSMContext) -> None:
     kb.button(text="❌ Отмена", callback_data=PackCb(action="cancel_fsm"))
     await _edit(
         callback,
-        "🗂 <b>Presence Pack</b> — Шаг 1/6\n\n"
+        "🗂 <b>Связка</b> — шаг 1/6\n\n"
         "Введите <b>название пакета</b> (например: «Магазин Москва», «Support Pack EU»):",
         markup=kb.as_markup(),
     )
@@ -155,7 +155,7 @@ async def fsm_pack_name(
     kb.button(text="❌ Отмена", callback_data=PackCb(action="cancel_fsm"))
     kb.adjust(1)
     await message.answer(
-        "🗂 <b>Presence Pack</b> — Шаг 2/6\n\n"
+        "🗂 <b>Связка</b> — шаг 2/6\n\n"
         "Введите <b>описание пакета</b> (будет добавлено в посевные посты):\n"
         "Например: «Всё о криптовалютах и DeFi — новости, обзоры, сигналы»\n\n"
         "Или нажмите «⏭ Пропустить»",
@@ -213,7 +213,7 @@ async def _go_to_bot_step(
     kb.button(text="❌ Отмена", callback_data=PackCb(action="cancel_fsm"))
     kb.adjust(1)
     text = (
-        "🗂 <b>Presence Pack</b> — Шаг 3/6\n\n"
+        "🗂 <b>Связка</b> — шаг 3/6\n\n"
         "Выберите <b>бот</b> для управления пользователями в пакете:"
     )
     if is_msg:
@@ -283,7 +283,7 @@ async def _render_channel_step(
         kb.adjust(1)
         await _edit(
             callback,
-            "🗂 <b>Presence Pack</b> — Шаг 4/6\n\n"
+            "🗂 <b>Связка</b> — шаг 4/6\n\n"
             "⚠️ У вас нет импортированных каналов.\n\n"
             "💡 Добавьте каналы через <b>/menu → 🏗 Активы & Сети → 📡 Каналы → Импорт</b>, "
             "затем вернитесь сюда.\n\n"
@@ -311,7 +311,7 @@ async def _render_channel_step(
     kb.attach(nav)
     await _edit(
         callback,
-        f"🗂 <b>Presence Pack</b> — Шаг 4/6\n\n"
+        f"🗂 <b>Связка</b> — шаг 4/6\n\n"
         f"Выберите <b>каналы</b> для пакета (выбрано: {len(selected)}):\n"
         f"<i>Нажмите на канал чтобы добавить/убрать из пакета</i>",
         markup=kb.as_markup(),
@@ -380,7 +380,7 @@ async def _render_group_step(
         kb.adjust(1)
         await _edit(
             callback,
-            "🗂 <b>Presence Pack</b> — Шаг 5/6\n\n"
+            "🗂 <b>Связка</b> — шаг 5/6\n\n"
             "ℹ️ У вас нет импортированных групп.\n\n"
             "💡 Добавьте группы через <b>/menu → 🏗 Активы & Сети → 👥 Группы → Импорт</b>, "
             "или продолжите без групп:",
@@ -408,7 +408,7 @@ async def _render_group_step(
     kb.attach(nav)
     await _edit(
         callback,
-        f"🗂 <b>Presence Pack</b> — Шаг 5/6\n\n"
+        f"🗂 <b>Связка</b> — шаг 5/6\n\n"
         f"Выберите <b>группы/чаты</b> для пакета (выбрано: {len(selected)}):\n"
         f"<i>Нажмите на группу чтобы добавить/убрать из пакета</i>",
         markup=kb.as_markup(),
@@ -451,7 +451,7 @@ async def cb_pack_groups_done(callback: CallbackQuery, state: FSMContext) -> Non
     kb.adjust(1)
     await _edit(
         callback,
-        "🗂 <b>Presence Pack</b> — Шаг 6/6\n\n"
+        "🗂 <b>Связка</b> — шаг 6/6\n\n"
         "Введите <b>целевой ресурс</b> — ссылку или @username главного канала/бота/сайта.\n\n"
         "Формат — две строки:\n"
         "<code>@my_channel\nГлавный магазин</code>\n\n"
@@ -492,7 +492,7 @@ async def _build_preview_text(sd: dict, pool: asyncpg.Pool | None = None) -> str
     target_url = sd.get("pack_target_url") or "—"
     target_label = sd.get("pack_target_label") or ""
     lines = [
-        "🗂 <b>Presence Pack — Предпросмотр</b>\n",
+        "🗂 <b>Связка — предпросмотр</b>\n",
         f"<b>Название:</b> {escape(name)}",
     ]
     if description:
@@ -638,7 +638,7 @@ async def cb_pack_confirm_create(
     kb.adjust(1)
     await _edit(
         callback,
-        f"✅ <b>Presence Pack «{escape(name)}» создан!</b>\n\n"
+        f"✅ <b>Связка «{escape(name)}» создана!</b>\n\n"
         f"🤖 Бот: @{escape(str(bot_username))}\n"
         f"📡 Каналов: {len(ch_ids)} | 👥 Групп: {len(gr_ids)}\n\n"
         f"Что дальше:",
