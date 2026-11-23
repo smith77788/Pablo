@@ -34,6 +34,13 @@ class _FakePool:
         self.executed.append((query, args))
         return "INSERT 1"
 
+    async def fetch(self, query, *args):
+        return []  # контактов ещё нет → ветка вставки
+
+    async def executemany(self, query, rows):
+        for args in rows:
+            self.executed.append((query, tuple(args)))
+
 
 def test_sync_account_imports_get_account_for_telethon_from_database_db():
     src = inspect.getsource(sync_service.sync_account)

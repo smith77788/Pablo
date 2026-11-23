@@ -113,3 +113,21 @@ def test_contact_exports(monkeypatch):
         seen = _spy(monkeypatch, ex, f"_{fmt}_text", None)
         _run(getattr(ex, f"export_{fmt}")(_Pool(), 1))
         _off_main(seen)
+
+
+def test_contact_trust_recalc(monkeypatch):
+    """Пересчёт доверия контактов: 30 000 контактов держали цикл 168 мс, в потоке — 61."""
+    from services.contacts_hub import trust_engine as te
+
+    class _P(_Pool):
+        async def fetch(self, q, *a):
+            if "FROM unified_contacts" in q and "contact_sources" not in q:
+                return [{"id": "x", "phones": "[]"}]
+            return []
+
+        async def execute(self, q, *a):
+            return "UPDATE 1"
+
+    seen = _spy(monkeypatch, te, "compute_trust_score", None)
+    _run(te.update_trust_scores(_P(), 1))
+    _off_main(seen)

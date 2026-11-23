@@ -585,7 +585,9 @@ async def cb_discover_capabilities(callback: CallbackQuery, pool: asyncpg.Pool) 
         log.warning('handler error in cb_discover_capabilities: %s', e)
         accounts = []
 
-    updated = 0
+    # Одной пачкой: поштучный upsert на флоте в тысячи аккаунтов держал
+    # ответ на кнопку секунды.
+    caps = []
     for acc in accounts:
         status = acc.get("acc_status") or "active"
         trust = float(acc.get("trust_score") or 1.0)
@@ -595,9 +597,12 @@ async def cb_discover_capabilities(callback: CallbackQuery, pool: asyncpg.Pool) 
         can_invite = status in ("active",) and trust >= 0.5
         can_create = status in ("active",) and trust >= 0.2
         dm_limit = 50 if trust >= 0.7 else (20 if trust >= 0.4 else 5)
+        caps.append((acc["id"], uid, can_invite, can_dm, can_create, dm_limit))
 
+    updated = 0
+    if caps:
         try:
-            await pool.execute(
+            await pool.executemany(
                 """INSERT INTO account_capabilities(
                        account_id, owner_id, can_invite, can_dm,
                        can_create_channel, daily_dm_limit, last_discovery
@@ -605,16 +610,11 @@ async def cb_discover_capabilities(callback: CallbackQuery, pool: asyncpg.Pool) 
                    ON CONFLICT(account_id) DO UPDATE
                    SET can_invite=$3, can_dm=$4, can_create_channel=$5,
                        daily_dm_limit=$6, last_discovery=NOW()""",
-                acc["id"],
-                uid,
-                can_invite,
-                can_dm,
-                can_create,
-                dm_limit,
+                caps,
             )
-            updated += 1
+            updated = len(caps)
         except Exception as e:
-            log.debug("discover_caps acc=%d: %s", acc["id"], e)
+            log.warning("discover_caps uid=%d: %s", uid, e)
 
     await callback.message.edit_text(
         f"✅ <b>Возможности обновлены</b>\n\n"
@@ -1087,20 +1087,19 @@ async def cb_rebalance_apply(callback: CallbackQuery, pool: asyncpg.Pool) -> Non
         log.warning('handler error in cb_rebalance_apply: %s', e)
         accounts = []
 
-    changed = 0
+    moves = []
     for acc in accounts:
         target_pool = _classify_account(dict(acc))
         if target_pool and acc["pool"] != target_pool:
-            try:
-                await pool.execute(
-                    "UPDATE tg_accounts SET pool=$1 WHERE id=$2 AND owner_id=$3",
-                    target_pool,
-                    acc["id"],
-                    uid,
-                )
-                changed += 1
-            except Exception:
-                log.warning("rebalance_apply: failed to update pool for acc=%d uid=%d", acc["id"], uid)
+            moves.append((target_pool, acc["id"], uid))
+    changed = 0
+    if moves:
+        try:
+            await pool.executemany(
+                "UPDATE tg_accounts SET pool=$1 WHERE id=$2 AND owner_id=$3", moves)
+            changed = len(moves)
+        except Exception:
+            log.warning("rebalance_apply: failed to update pools uid=%d", uid)
 
     kb = InlineKeyboardBuilder()
     kb.button(text="◀️ К аналитике", callback_data=InfraCb(action="menu"))

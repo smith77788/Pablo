@@ -1,4 +1,5 @@
 from __future__ import annotations
+import asyncio
 import json
 import logging
 from typing import Optional
@@ -6,6 +7,8 @@ from typing import Optional
 import asyncpg
 
 log = logging.getLogger(__name__)
+
+_SAVE_CHUNK = 5000
 
 RELATIONSHIP_TYPES = {
     'mutual_group': 'Общая группа',
@@ -18,18 +21,8 @@ RELATIONSHIP_TYPES = {
 }
 
 
-async def compute_relationships(pool, owner_id: int, contact_id: str = None) -> dict:
-    if contact_id:
-        contacts = await pool.fetch(
-            'SELECT id, telegram_user_id, username, phones, company FROM unified_contacts WHERE owner_id=$1 AND id=$2',
-            owner_id, contact_id)
-    else:
-        contacts = await pool.fetch(
-            'SELECT id, telegram_user_id, username, phones, company FROM unified_contacts WHERE owner_id=$1',
-            owner_id)
-    if len(contacts) < 2:
-        return {'relationships': [], 'count': 0}
-
+def _pairs(contacts, sources) -> list:
+    """Чистая часть: связи по общим телефонам, никам, компаниям и аккаунтам."""
     phone_map = {}
     username_map = {}
     company_map = {}
@@ -50,9 +43,6 @@ async def compute_relationships(pool, owner_id: int, contact_id: str = None) -> 
             company_map.setdefault(c['company'].lower(), []).append(cid)
 
     account_map = {}
-    sources = await pool.fetch(
-        'SELECT contact_id, account_id FROM contact_sources WHERE contact_id IN (SELECT id FROM unified_contacts WHERE owner_id=$1)',
-        owner_id)
     for s in sources:
         account_map.setdefault(s['account_id'], set()).add(s['contact_id'])
 
@@ -107,21 +97,56 @@ async def compute_relationships(pool, owner_id: int, contact_id: str = None) -> 
                         'relationship_type': 'mutual_account', 'strength': 0.3,
                         'metadata': {'account_id': acc_id}})
 
+    return relationships
+
+
+async def compute_relationships(pool, owner_id: int, contact_id: str = None) -> dict:
+    if contact_id:
+        contacts = await pool.fetch(
+            'SELECT id, telegram_user_id, username, phones, company FROM unified_contacts WHERE owner_id=$1 AND id=$2',
+            owner_id, contact_id)
+    else:
+        contacts = await pool.fetch(
+            'SELECT id, telegram_user_id, username, phones, company FROM unified_contacts WHERE owner_id=$1',
+            owner_id)
+    if len(contacts) < 2:
+        return {'relationships': [], 'count': 0}
+
+    sources = await pool.fetch(
+        'SELECT contact_id, account_id FROM contact_sources WHERE contact_id IN (SELECT id FROM unified_contacts WHERE owner_id=$1)',
+        owner_id)
+    # Разбор — в потоке: на десятках тысяч контактов это секунды чистого
+    # Python, и бот с мини-аппом всё это время стояли бы.
+    relationships = await asyncio.to_thread(_pairs, contacts, sources)
+
+    # Пачками: поштучно 30 000 контактов одного аккаунта давали ~200 000
+    # связей и столько же запросов (~25 с, кнопка «Пересчитать» падала в
+    # таймаут). Кусок — одна команда; упал кусок — его связи не считаются
+    # сохранёнными, остальные идут дальше.
     saved = 0
-    for rel in relationships:
+    for i in range(0, len(relationships), _SAVE_CHUNK):
+        chunk = relationships[i:i + _SAVE_CHUNK]
         try:
+            # unnest, а не executemany: одна команда на кусок. Внутри куска
+            # пары уникальны (`seen` выше), так что ON CONFLICT не встретит
+            # одну строку дважды.
             await pool.execute(
                 '''INSERT INTO contact_relationships
                    (owner_id, contact_a_id, contact_b_id, relationship_type, strength, metadata)
-                   VALUES ($1,$2,$3,$4,$5,$6::jsonb)
+                   SELECT $1, v.a, v.b, v.t, v.s, v.m::jsonb
+                   FROM unnest($2::uuid[], $3::uuid[], $4::text[], $5::real[], $6::text[])
+                        AS v(a, b, t, s, m)
                    ON CONFLICT (owner_id, contact_a_id, contact_b_id, relationship_type)
                    DO UPDATE SET strength=EXCLUDED.strength, metadata=EXCLUDED.metadata, updated_at=NOW()''',
-                owner_id, rel['contact_a_id'], rel['contact_b_id'],
-                rel['relationship_type'], rel['strength'],
-                json.dumps(rel.get('metadata', {})))
-            saved += 1
+                owner_id,
+                [rel['contact_a_id'] for rel in chunk],
+                [rel['contact_b_id'] for rel in chunk],
+                [rel['relationship_type'] for rel in chunk],
+                [rel['strength'] for rel in chunk],
+                [json.dumps(rel.get('metadata', {})) for rel in chunk])
+            saved += len(chunk)
         except Exception as e:
-            log.warning("save_relationship error: %s", e)
+            log.warning("save_relationship error (%d связей): %s", len(chunk), e)
 
     return {'relationships': relationships, 'count': saved}
 
