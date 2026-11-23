@@ -447,7 +447,7 @@ OP_REGISTRY: dict[str, dict] = {
         "icon": "🌍",
     },
     "strike": {
-        "description": "Strike — эшелонированная жалоба",
+        "description": "Массовые жалобы — эшелонированная жалоба",
         "min_plan": "pro",
         "max_retries": 1,
         "icon": "⚡",

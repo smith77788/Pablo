@@ -81,14 +81,14 @@ async def cb_menu(callback: CallbackQuery, pool: asyncpg.Pool, state: FSMContext
     admin = is_platform_admin(uid)
     if access:
         text = (
-            "🖥️ <b>Host-Server</b> — активен\n\n"
+            "🖥️ <b>Аренда сервера</b> — активен\n\n"
             "Аренда инфраструктуры: сдавайте свою, берите чужую, "
             "или (по согласию) зарабатывайте на мощностях своего устройства.\n\n"
             "Выберите действие:"
         )
     else:
         text = (
-            "🖥️ <b>Host-Server</b>\n\n"
+            "🖥️ <b>Аренда сервера</b>\n\n"
             "Маркетплейс инфраструктуры внутри платформы:\n"
             "• 🏷 <b>Сдавайте</b> свои прокси, серверы или мощности устройства\n"
             "• 🛒 <b>Берите в аренду</b> чужие ресурсы под свои операции\n"
@@ -131,14 +131,14 @@ async def cb_buy(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
         nkb.button(text="◀️ Назад", callback_data=HostCb(action="menu"))
         nkb.adjust(1)
         await callback.message.edit_text(
-            f"🖥️ <b>Host-Server — ${price} USDT</b>\n\n"
+            f"🖥️ <b>Аренда сервера — ${price} USDT</b>\n\n"
             "⚠️ Автоматическая оплата не настроена.\n\n"
             "Нажмите <b>«📩 Запросить доступ»</b> — администратор активирует "
             "модуль вручную после оплаты.",
             parse_mode="HTML", reply_markup=nkb.as_markup())
         return
     await callback.message.edit_text(
-        f"🖥️ <b>Host-Server — оплата</b>\n\n"
+        f"🖥️ <b>Аренда сервера — оплата</b>\n\n"
         f"Сумма: <b>{res['amount_usdt']:.2f} USDT</b>\n"
         f"Сеть: <b>TRC-20 (TRON)</b>\n\n"
         f"Кошелёк:\n<code>{html.escape(wallet)}</code>\n\n"
@@ -169,7 +169,7 @@ async def cb_request(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
         price = None
     price_line = f"Сумма: <b>${price}</b>\n\n" if price is not None else "\n"
     notify = (
-        "🖥️ <b>Запрос доступа: Host-Server</b>\n\n"
+        "🖥️ <b>Запрос доступа: Аренда сервера</b>\n\n"
         f"Пользователь: {user_label(callback)} (<code>{uid}</code>)\n"
         f"{price_line}"
         "После получения оплаты нажмите кнопку ниже."
@@ -185,7 +185,7 @@ async def cb_request(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
         return
     await callback.message.edit_text(
         "✅ <b>Запрос отправлен!</b>\n\n"
-        "Администратор получил заявку на модуль «Host-Server».\n"
+        "Администратор получил заявку на модуль «Аренда сервера».\n"
         "Модуль будет активирован после подтверждения оплаты.",
         parse_mode="HTML", reply_markup=kb.as_markup())
 
@@ -209,14 +209,14 @@ async def cb_grant(callback: CallbackQuery, callback_data: HostCb, pool: asyncpg
     await safe_answer(callback)
     try:
         await callback.message.edit_text(
-            f"✅ <b>Доступ к Host-Server выдан</b> пользователю <code>{target}</code>.",
+            f"✅ <b>Доступ к «Аренде сервера» выдан</b> пользователю <code>{target}</code>.",
             parse_mode="HTML", reply_markup=terminal_kb())
     except Exception:
         log_exc_swallow(log, "host cb_grant: edit")
     try:
         await callback.bot.send_message(
             target,
-            "🖥️ <b>Модуль «Host-Server» активирован!</b>\n\n"
+            "🖥️ <b>Модуль «Аренда сервера» активирован!</b>\n\n"
             "Администратор предоставил вам доступ. Откройте меню для использования.",
             parse_mode="HTML")
     except Exception:
@@ -231,7 +231,7 @@ async def cb_check_pay(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
         kb = InlineKeyboardBuilder()
         kb.button(text="🖥️ Открыть аренду сервера", callback_data=HostCb(action="menu"))
         await callback.message.edit_text(
-            "✅ <b>Модуль Host-Server активирован!</b>\n\nДоступ открыт.",
+            "✅ <b>Модуль «Аренда сервера» активирован!</b>\n\nДоступ открыт.",
             parse_mode="HTML", reply_markup=kb.as_markup())
         return
     try:
@@ -544,7 +544,7 @@ async def cb_setprice(callback: CallbackQuery, state: FSMContext) -> None:
     await safe_answer(callback)
     await state.set_state(HostPriceFSM.waiting_price)
     await callback.message.edit_text(
-        "💲 <b>Цена модуля Host-Server</b>\n\nВведите новую цену в USD (1–100000):",
+        "💲 <b>Цена модуля «Аренда сервера»</b>\n\nВведите новую цену в USD (1–100000):",
         parse_mode="HTML", reply_markup=cancel_kb())
 
 
