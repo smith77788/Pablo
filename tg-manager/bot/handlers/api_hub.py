@@ -16,7 +16,7 @@ from bot.callbacks import ApiHubCb, BmCb
 from bot.utils.picker_cap import cap_text as _cap_text, cap_text_append as _cap_text_note
 from bot.utils.picker_cap import cap_slice as _cap, cap_note_button as _cap_note
 from bot.states import ApiKeyFSM
-from bot.utils.op_helpers import safe_answer
+from bot.utils.op_helpers import safe_answer, terminal_kb
 
 log = logging.getLogger(__name__)
 router = Router()
@@ -156,7 +156,7 @@ async def msg_api_key_name(
         return
     except Exception as e:
         log.warning("api_hub: key create error: %s", e)
-        await message.answer("❌ Ошибка создания ключа. Попробуйте позже.")
+        await message.answer("❌ Ошибка создания ключа. Попробуйте позже.", reply_markup=terminal_kb())
         return
     raw_key = created["key"]
 

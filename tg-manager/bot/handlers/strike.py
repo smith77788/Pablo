@@ -1545,7 +1545,7 @@ async def msg_password_input(
     await state.clear()
 
     if not email or not smtp_host:
-        await message.answer("⚠️ Сессия истекла. Начните заново.")
+        await message.answer("⚠️ Сессия истекла. Начните заново.", reply_markup=terminal_kb())
         return
 
     # Тест подключения

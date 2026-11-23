@@ -686,7 +686,7 @@ _PERMANENT_TARGET_MARKERS = (
 def classify_send_result(result: dict) -> str:
     """Свести ответ account_manager.send_dm к исходу.
 
-    Возвращает 'sent' | 'flood' | 'peer_flood' | 'auth' | 'skip' | 'retry'.
+    Возвращает 'sent' | 'flood' | 'peer_flood' | 'unresolved' | 'auth' | 'skip' | 'retry'.
 
     Нужна потому, что разовая рассылка складывала ВСЁ в «ошибку»: флуд-вейт,
     флаг PeerFlood (аккаунт помечен за спам) и мёртвую сессию было не отличить
@@ -704,6 +704,10 @@ def classify_send_result(result: dict) -> str:
         return "flood"
     if result.get("peer_flood"):
         return "peer_flood"
+    if result.get("peer_unresolved"):
+        # Аккаунт не знает получателя по голому ID (нет access_hash). Сообщение
+        # не уходило; другой аккаунт флота может его знать.
+        return "unresolved"
     err = str(result.get("error") or "")
     low = err.lower()
     if "peer_flood" in low or "peerflood" in low:

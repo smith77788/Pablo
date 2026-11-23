@@ -708,7 +708,7 @@ async def _call_ai_providers(
             log.exception("AI provider %s model %s error: %s", provider.name, model, e)
             return (
                 f"⚠️ Ошибка AI-ассистента ({provider.name}/{model}): "
-                f"{type(e).__name__}: {str(e)[:120]}"
+                f"{owner_error(e)}"
             )
 
     return (
@@ -979,7 +979,7 @@ async def cmd_remember(message: Message, pool: asyncpg.Pool) -> None:
         )
     except Exception:
         log.exception("Failed to save AI memory")
-        await message.answer("❌ Не удалось сохранить запись. Проверьте логи.")
+        await message.answer("❌ Не удалось сохранить запись. Попробуйте ещё раз.", reply_markup=terminal_kb())
         return
 
     await message.answer(
@@ -996,7 +996,7 @@ async def cmd_memory(message: Message, pool: asyncpg.Pool) -> None:
         items = await ai_memory.search(pool, message.from_user.id, query, limit=10)
     except Exception:
         log.exception("Failed to read AI memory")
-        await message.answer("❌ Не удалось прочитать память. Проверьте логи.")
+        await message.answer("❌ Не удалось прочитать память. Попробуйте ещё раз.", reply_markup=terminal_kb())
         return
 
     await message.answer(ai_memory.format_for_user(items), parse_mode="HTML")
@@ -1018,7 +1018,7 @@ async def cmd_forget(message: Message, pool: asyncpg.Pool) -> None:
         deleted = await ai_memory.delete(pool, message.from_user.id, int(raw_id))
     except Exception:
         log.exception("Failed to delete AI memory")
-        await message.answer("❌ Не удалось удалить запись памяти. Проверьте логи.")
+        await message.answer("❌ Не удалось удалить запись памяти. Попробуйте ещё раз.", reply_markup=terminal_kb())
         return
 
     await message.answer(

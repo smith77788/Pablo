@@ -20,7 +20,7 @@ from aiogram.types import CallbackQuery, ManagedBotUpdated, Message
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from bot.callbacks import ManagedBotCb, BotFactCb
-from bot.utils.op_helpers import safe_answer
+from bot.utils.op_helpers import safe_answer, terminal_kb
 from services import managed_bots as mb
 from services.logger import log_exc_swallow
 
@@ -116,7 +116,7 @@ async def msg_username(message: Message, state: FSMContext, bot: Bot) -> None:
     try:
         link = mb.build_creation_link(me.username or "", norm, name)
     except ValueError as e:
-        await message.answer(f"⚠️ Не удалось собрать ссылку: {owner_error(e)}")
+        await message.answer(f"⚠️ Не удалось собрать ссылку: {owner_error(e)}", reply_markup=terminal_kb())
         return
     kb = InlineKeyboardBuilder()
     kb.button(text="🪄 Создать бота в Telegram", url=link)

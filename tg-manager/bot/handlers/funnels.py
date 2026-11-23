@@ -25,7 +25,7 @@ from bot.utils.subscription import require_plan, locked_text
 from database import db
 from services import broadcaster
 from aiogram.utils.keyboard import InlineKeyboardBuilder
-from bot.utils.op_helpers import safe_answer
+from bot.utils.op_helpers import safe_answer, terminal_kb
 
 router = Router()
 
@@ -70,7 +70,7 @@ async def _show_funnel_view(
     funnels = await db.get_funnels(pool, bot_id)
     funnel = next((f for f in funnels if f["id"] == funnel_id), None)
     if not funnel:
-        await message.answer("Цепочка не найдена.")
+        await message.answer("Цепочка не найдена.", reply_markup=terminal_kb())
         return
     steps = await db.get_funnel_steps(pool, funnel_id)
     if funnel["trigger_type"] == "start":
@@ -487,7 +487,7 @@ async def msg_fn_step_delay(
     bot_id = data["bot_id"]
     step_order = data["current_step"]
     if not await _owns_funnel(pool, funnel_id, message.from_user.id):
-        await message.answer("❌ Воронка не найдена.")
+        await message.answer("❌ Воронка не найдена.", reply_markup=terminal_kb())
         return
 
     await db.add_funnel_step(pool, funnel_id, step_order, data["step_text"], delay)
@@ -645,7 +645,7 @@ async def msg_fn_broadcast(
 
     row = await db.get_bot(pool, data["bot_id"], message.from_user.id)
     if not row:
-        await message.answer("Бот не найден.")
+        await message.answer("Бот не найден.", reply_markup=terminal_kb())
         return
 
     user_ids = data["subscriber_ids"]

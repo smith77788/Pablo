@@ -19,7 +19,7 @@ from bot.states import AddAutoReply
 from bot.utils.subscription import get_plan
 from bot.utils import tariffs
 from database import db
-from bot.utils.op_helpers import safe_answer
+from bot.utils.op_helpers import safe_answer, terminal_kb
 
 # Лимит правил авто-ответа на план — из единого источника (tariffs).
 # Раньше словарь ключевался старыми именами (starter/pro/enterprise), а get_plan
@@ -192,7 +192,7 @@ async def msg_ar_text(message: Message, state: FSMContext, pool: asyncpg.Pool) -
     # правило вставало в чужой бот, и тот отвечал подписчикам чужим текстом.
     if not await db.get_bot(pool, bot_id, message.from_user.id):
         await state.clear()
-        await message.answer("❌ Бот не найден.")
+        await message.answer("❌ Бот не найден.", reply_markup=terminal_kb())
         return
     # Check subscription rule limit
     plan = await get_plan(pool, message.from_user.id)
@@ -569,7 +569,7 @@ async def msg_ext_rule_name(
     # правило вставало в чужой бот, и тот отвечал подписчикам чужим текстом.
     if not await db.get_bot(pool, bot_id, message.from_user.id):
         await state.clear()
-        await message.answer("❌ Бот не найден.")
+        await message.answer("❌ Бот не найден.", reply_markup=terminal_kb())
         return
     await state.clear()
     trigger_type = data["trigger_type"]

@@ -20,6 +20,8 @@ from bot.callbacks import ReporterCb, BmCb
 from services.reporter_engine import REPORT_REASONS
 
 log = logging.getLogger(__name__)
+from bot.utils.op_helpers import terminal_kb  # noqa: E402
+
 router = Router()
 
 
@@ -104,7 +106,7 @@ async def msg_reporter_target(message: Message, state: FSMContext) -> None:
     from services.reporter_engine import parse_target_ref
     target = parse_target_ref(message.text or "")
     if not target:
-        await message.answer("⚠️ Не удалось распознать цель.")
+        await message.answer("⚠️ Не удалось распознать цель.", reply_markup=terminal_kb())
         return
     data = await state.get_data()
     mode = data.get("mode", "peer")
@@ -205,7 +207,7 @@ async def msg_reporter_acc_count(
     total = await _acc_count(pool, owner_id)
     use = min(n, total) if n > 0 else total
     if use == 0:
-        await message.answer("⚠️ Нет доступных аккаунтов.")
+        await message.answer("⚠️ Нет доступных аккаунтов.", reply_markup=terminal_kb())
         return
     await state.update_data(acc_count=use)
     data = await state.get_data()

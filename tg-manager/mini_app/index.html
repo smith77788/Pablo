@@ -1964,6 +1964,19 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
   </div>
 </div>
 
+<div class="mbg" id="mo-contact-tgadd" onclick="if(event.target===this)closeModal('mo-contact-tgadd')">
+  <div class="modal">
+    <div class="modal-x" onclick="closeModal('mo-contact-tgadd')" role="button" tabindex="0" aria-label="Закрыть">✕</div>
+    <div class="modal-title">📇 В контакты Telegram</div>
+    <div style="font-size:12px;color:var(--hint);margin-bottom:8px;line-height:1.4">Аккаунт найдёт человека по Telegram ID (диалоги, общие и исходные группы) и добавит в свою адресную книгу. После этого ему можно писать без @username, телефона и переписки.</div>
+    <div style="font-size:12px;font-weight:600;margin:6px 0 4px">Какими аккаунтами (до пяти):</div>
+    <div id="ctaAccts" style="max-height:150px;overflow-y:auto;background:var(--bg2);border-radius:10px;padding:6px 10px;margin-bottom:8px"></div>
+    <label class="chk-row" style="display:flex;align-items:center;gap:8px;font-size:14px;margin-bottom:6px"><input type="checkbox" id="ctaCrm" checked> Добавить в CRM как лид</label>
+    <div id="ctaErr" style="color:var(--red);font-size:13px;margin-top:6px;min-height:16px"></div>
+    <button class="btn btn-p" data-main id="ctaBtn" style="width:100%;margin-top:8px" onclick="submitContactTgAdd()">📇 Добавить</button>
+  </div>
+</div>
+
 <!-- ══════════════════════ ХРАНИЛИЩЕ (Echo Vault) ══════════════════════ -->
 <style>
 .vfilter{flex:0 0 auto;font-size:12px;padding:8px 12px;border-radius:14px;background:var(--bg2);color:var(--hint);border:1px solid var(--sep);cursor:pointer;white-space:nowrap}
@@ -21750,7 +21763,8 @@ async function openContactDetail(id) {
       <button class="btn btn-s" onclick="openContactInvite()" style="flex:0 0 auto">➕ Пригласить</button>
       ${c.telegram_user_id?`<button class="btn btn-s" onclick="openContactHistory()" style="flex:0 0 auto">🕓 История</button>`:''}
       ${c.username?`<a class="btn btn-s" href="https://t.me/${esc(c.username)}" target="_blank" style="flex:0 0 auto;text-decoration:none">↗ В Telegram</a>`:''}
-      ${c.telegram_user_id?`<a class="btn btn-s" href="tg://user?id=${c.telegram_user_id}" target="_blank" style="flex:0 0 auto;text-decoration:none">👤 Профиль</a>`:''}
+      ${c.telegram_user_id||c.username?`<button class="btn btn-s" onclick="openContactProfile()" style="flex:0 0 auto">👤 Профиль</button>`:''}
+      ${c.telegram_user_id?`<button class="btn btn-s" onclick="openContactTgAdd()" style="flex:0 0 auto">📇 В контакты TG</button>`:''}
     </div>`;
     if (sources.length) {
       html += `<div class="sec" style="margin-top:4px">📡 Найден в (${sources.length})</div><div class="lst" style="margin:0 16px">`;
@@ -22243,6 +22257,90 @@ function openContactHistory() {
   const name = [c.first_name,c.last_name].filter(Boolean).join(' ') || c.username || ('#'+c.telegram_user_id);
   VAULT_NAMES[c.telegram_user_id] = name;   // VAULT_NAMES — глобальная (let), инициализирована {}
   openVaultChat(c.telegram_user_id);
+}
+// Профиль контакта. Раньше кнопка была ссылкой tg://user?id=…: из мини-аппа
+// она не открывается, а Telegram владельца показывает профиль только тех, кого
+// сам уже видел, — у контакта без @username и телефона профиль не открывался
+// никак. Есть ник — открываем t.me; нет — профиль читает аккаунт флота,
+// который человека видел (ручка /tg_profile), и найденный ник дописывается.
+async function openContactProfile() {
+  const c = window._cdContact || {};
+  if (c.username) { openTgUser(c.username); return; }
+  if (!c.telegram_user_id) { toast('⚠️ У контакта нет ни @username, ни Telegram ID'); return; }
+  toast('⏳ Открываю профиль через ваш аккаунт…');
+  let d;
+  try {
+    d = await api('/api/miniapp/uch/contacts/'+CURRENT_CONTACT_ID+'/tg_profile');
+  } catch(e) { await showInfo(errRu(e,'Не удалось открыть профиль')); return; }
+  const p = (d && d.profile) || {};
+  if (p.username && !c.username) { c.username = p.username; }
+  const name = [p.first_name,p.last_name].filter(Boolean).join(' ') || ('ID '+p.id);
+  const row = (k,v) => v ? '<div class="row"><div class="row-body"><div class="row-name">'+esc(k)+'</div><div class="row-val">'+esc(String(v))+'</div></div></div>' : '';
+  const marks = [p.premium?'⭐ Premium':'', p.verified?'✔️ Верифицирован':'', p.bot?'🤖 Бот':'',
+                 p.scam?'⚠️ Помечен как мошенник':'', p.deleted?'🗑 Аккаунт удалён':'',
+                 p.mutual_contact?'🤝 Взаимный контакт':''].filter(Boolean).join(' · ');
+  const bg = document.createElement('div');
+  bg.className = 'mbg show';
+  bg.style.zIndex = '9999';
+  bg.innerHTML = '<div class="modal"><div class="modal-title">👤 '+esc(name)+'</div>'
+    + '<div class="lst" style="margin:8px 0">'
+    + row('Telegram ID', p.id) + row('Юзернейм', p.username ? '@'+p.username : 'нет')
+    + row('Телефон', p.phone ? '+'+String(p.phone).replace(/^\+/,'') : '')
+    + row('О себе', p.bio) + row('Статус', p.status)
+    + row('Общих чатов с аккаунтом', p.common_chats) + row('Отметки', marks)
+    + '</div>'
+    + (p.username ? '' : '<div style="font-size:12px;color:var(--hint);margin-bottom:8px">У человека нет @username, поэтому ссылки t.me нет. Написать можно аккаунтом флота — кнопка «Написать». Открыть в вашем Telegram получится, только если ваш Telegram уже видел этого человека.</div>')
+    + '<div style="display:flex;gap:8px;flex-wrap:wrap">'
+    + '<button class="btn btn-p" id="_cpw" style="flex:1 1 auto">✍️ Написать</button>'
+    + '<button class="btn btn-s" id="_cpo" style="flex:1 1 auto">↗ В Telegram</button>'
+    + '<button class="btn btn-s" id="_cpa" style="flex:1 1 auto">📇 В контакты TG</button>'
+    + '<button class="btn btn-d" id="_cpc" style="flex:1 1 100%">Закрыть</button>'
+    + '</div></div>';
+  document.body.appendChild(bg);
+  const done = () => { try { document.body.removeChild(bg); } catch(_) {} };
+  bg.querySelector('#_cpc').onclick = done;
+  bg.onclick = e => { if (e.target === bg) done(); };
+  bg.querySelector('#_cpw').onclick = () => { done(); openContactWrite(); };
+  bg.querySelector('#_cpa').onclick = () => { done(); openContactTgAdd(); };
+  bg.querySelector('#_cpo').onclick = () => {
+    if (p.username) { openTgUser(p.username); return; }
+    try { window.location.href = 'tg://user?id=' + encodeURIComponent(String(p.id)); }
+    catch(_) { copyText(String(p.id)); }
+  };
+}
+// Добавить человека в адресную книгу аккаунтов флота по одному Telegram ID
+// (+ лид в CRM). Из адресной книги аккаунт резолвит его по ID в любой сессии,
+// значит писать можно даже тому, с кем переписки не было.
+function openContactTgAdd() {
+  const c = window._cdContact || {};
+  if (!c.telegram_user_id) { toast('⚠️ У контакта нет Telegram ID'); return; }
+  const e = document.getElementById('ctaErr'); if (e) e.textContent = '';
+  _renderContactAccPicker('ctaAccts', (window._cdSources||[]).map(s=>s.account_id));
+  showModal('mo-contact-tgadd');
+}
+async function submitContactTgAdd() {
+  const err = document.getElementById('ctaErr');
+  const btn = document.getElementById('ctaBtn');
+  const accIds = [...document.querySelectorAll('#ctaAccts .ca-acc-cb:checked')].map(cb=>+cb.value);
+  if (!accIds.length) { err.textContent = 'Выберите хотя бы один аккаунт'; return; }
+  if (accIds.length > 5) { err.textContent = 'Не больше пяти аккаунтов за раз'; return; }
+  const crm = !!(document.getElementById('ctaCrm')||{}).checked;
+  btn.disabled = true; btn.textContent = '⏳ Ищу и добавляю… (до пары минут)';
+  try {
+    const r = await api('/api/miniapp/uch/contacts/'+CURRENT_CONTACT_ID+'/tg_add',
+      {method:'POST', body: JSON.stringify({account_ids: accIds, crm})});
+    const fails = (r.results||[]).filter(x=>!x.ok);
+    if (r.added) {
+      closeModal('mo-contact-tgadd');
+      toast(`📇 Добавлен в контакты ${r.added} из ${r.total} акк.` + (r.crm_created ? ' · 💼 лид в CRM' : ''));
+      if (fails.length) await showInfo('Не добавили:\n' + fails.map(x=>'#'+x.account_id+': '+(x.error||'ошибка')).join('\n'));
+      openContactDetail(CURRENT_CONTACT_ID);
+    } else {
+      err.textContent = fails.map(x=>'#'+x.account_id+': '+(x.error||'ошибка')).join(' · ')
+        + (r.crm_created ? ' · в CRM лид заведён' : '');
+    }
+  } catch(e) { err.textContent = errRu(e,'Ошибка'); }
+  finally { btn.disabled = false; btn.textContent = '📇 Добавить'; }
 }
 function openContactInvite() {
   SEGMENT_TARGET = null;

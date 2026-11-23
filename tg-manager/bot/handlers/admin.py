@@ -2467,7 +2467,7 @@ async def handle_admin_message(
             )
         except Exception:
             log_exc_swallow(log, "admin_state insert failed for broadcast confirm")
-            await message.answer("❌ Не удалось подготовить рассылку — попробуйте ещё раз.")
+            await message.answer("❌ Не удалось подготовить рассылку — попробуйте ещё раз.", reply_markup=terminal_kb())
             return
         kb = InlineKeyboardBuilder()
         kb.button(text="✅ Отправить", callback_data=f"adm:bc_go:{state}")
@@ -4269,7 +4269,7 @@ async def msg_gate_add(message: Message, state: FSMContext, pool: asyncpg.Pool) 
     except Exception as exc:
         log.warning('handler error in msg_gate_add: %s', exc)
         await state.clear()
-        await message.answer(f"❌ Ошибка БД: {owner_error(exc)}", parse_mode="HTML")
+        await message.answer(f"❌ Ошибка БД: {owner_error(exc)}", parse_mode="HTML", reply_markup=terminal_kb())
         return
 
     # Reload channels into memory

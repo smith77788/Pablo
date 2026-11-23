@@ -264,7 +264,7 @@ async def msg_exp_name(message: Message, state: FSMContext, pool: asyncpg.Pool) 
     name = message.text.strip()
     if not data.get("bot_id") or not await db.get_bot(pool, data["bot_id"], message.from_user.id):
         await state.clear()
-        await message.answer("❌ Бот не найден.")
+        await message.answer("❌ Бот не найден.", reply_markup=terminal_kb())
         return
     exp_id = await db.create_experiment(
         pool, data["bot_id"], name, data.get("exp_type", "start_message")
@@ -314,7 +314,7 @@ async def msg_variant_content(
     if not data.get("exp_id") or not await _owns_experiment(
             pool, data["exp_id"], message.from_user.id):
         await state.clear()
-        await message.answer("❌ Эксперимент не найден.")
+        await message.answer("❌ Эксперимент не найден.", reply_markup=terminal_kb())
         return
     await db.add_experiment_variant(
         pool, data["exp_id"], data["variant_name"], message.text

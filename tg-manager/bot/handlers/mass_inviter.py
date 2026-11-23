@@ -725,7 +725,7 @@ async def _refs_from_document(message: Message, mode: str):
         data = buf.read() if hasattr(buf, "read") else bytes(buf)
     except Exception as e:
         log.warning("inviter: download file failed: %s", e)
-        await message.answer("⚠️ Не удалось скачать файл. Попробуйте ещё раз.")
+        await message.answer("⚠️ Не удалось скачать файл. Попробуйте ещё раз.", reply_markup=terminal_kb())
         return None
     try:
         # Разбор — чистый CPU (xlsx до 25 МБ — десятки секунд). На цикле
@@ -774,7 +774,7 @@ async def msg_inviter_acc_count(
     total = await _acc_count(pool, owner_id)
     use = min(n, total) if n > 0 else total
     if use == 0:
-        await message.answer("⚠️ Нет доступных аккаунтов.")
+        await message.answer("⚠️ Нет доступных аккаунтов.", reply_markup=terminal_kb())
         return
     await state.update_data(acc_count=use)
     data = await state.get_data()

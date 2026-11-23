@@ -71,3 +71,12 @@ def test_leftover_english_labels_gone():
     acc = _src("accounts.py")
     assert "FloodWait / cooldown" not in acc
     assert 'status_title = "FloodWait' not in acc
+
+
+def test_failed_search_offers_a_new_search():
+    src = _src("global_search.py")
+    assert "def _again_kb" in src and 'GSearchCb(action="open")' in src
+    # Пустой запрос, таймаут, ошибка, отказ и пустой результат — все ведут к
+    # новому поиску, а не только в главное меню.
+    assert src.count("reply_markup=_again_kb()") >= 5
+    assert "Попробуйте /search снова" not in src

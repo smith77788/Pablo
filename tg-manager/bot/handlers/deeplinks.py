@@ -188,7 +188,7 @@ async def msg_dl_param(message: Message, state: FSMContext, pool: asyncpg.Pool) 
         return  # keep state active so user can send another value
     if not await db.get_bot(pool, data.get("bot_id", 0), message.from_user.id):
         await state.clear()
-        await message.answer("❌ Бот не найден.")
+        await message.answer("❌ Бот не найден.", reply_markup=terminal_kb())
         return
     try:
         await db.create_deep_link(pool, data["bot_id"], data["link_name"], param)
