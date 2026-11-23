@@ -766,7 +766,7 @@ async def cb_net_clone_confirm(
     src_id = data.get("src_id")
     dst_id = callback_data.bot_id
     if not src_id or src_id == dst_id:
-        await callback.answer("Ошибка: некорректные боты.", show_alert=True)
+        await callback.answer("⚠️ Выбранные боты не найдены. Откройте список заново.", show_alert=True)
         return
 
     src_row = await db.get_bot(pool, src_id, callback.from_user.id)

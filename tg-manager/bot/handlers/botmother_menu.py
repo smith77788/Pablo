@@ -1505,7 +1505,7 @@ async def cb_alerts_clear_do(callback: CallbackQuery, pool: asyncpg.Pool) -> Non
             "DELETE FROM restriction_events WHERE owner_id=$1", callback.from_user.id
         )
     except Exception:
-        await callback.answer("❌ Ошибка при очистке алертов", show_alert=True)
+        await callback.answer("⚠️ Не удалось очистить предупреждения. Попробуйте ещё раз через минуту.", show_alert=True)
         return
     await callback.answer("Алерты очищены", show_alert=True)
     kb = InlineKeyboardBuilder()
@@ -2820,7 +2820,7 @@ async def cb_op_cancel(
             pool, op_id, user_id,
             allow=("pending", "running", "paused", "waiting_approval"))
     except Exception:
-        await callback.answer("❌ Ошибка при отмене операции", show_alert=True)
+        await callback.answer("⚠️ Не удалось отменить операцию. Попробуйте ещё раз через минуту.", show_alert=True)
         return
     await callback.answer("🛑 Операция отменена", show_alert=False)
     kb = InlineKeyboardBuilder()

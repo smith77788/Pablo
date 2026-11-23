@@ -440,7 +440,7 @@ async def cb_qp_use_template(
         )
     except Exception as exc:
         mark_handled_error(f"qp_use_template: {exc}")
-        await callback.answer("Ошибка загрузки шаблона.", show_alert=True)
+        await callback.answer("⚠️ Не удалось загрузить шаблон. Попробуйте ещё раз через минуту.", show_alert=True)
         return
     if not row:
         await callback.answer("Шаблон не найден.", show_alert=True)

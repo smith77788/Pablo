@@ -550,7 +550,7 @@ async def cb_cluster_add_bot(
         await callback.answer(f"✅ Бот добавлен в кластер «{cluster_name}»", show_alert=False)
     except Exception:
         log_exc_swallow(log, "cb_cluster_add_bot: DB update failed")
-        await callback.answer("❌ Ошибка при добавлении бота", show_alert=True)
+        await callback.answer("⚠️ Не удалось добавить бота. Попробуйте ещё раз через минуту.", show_alert=True)
         return
 
     # Refresh view

@@ -363,7 +363,7 @@ async def _run_local_op(callback: CallbackQuery, op: str, owner_id: int,
         return
     except Exception:
         log.exception("local op %s failed", op)
-        await callback.answer("Ошибка операции", show_alert=True)
+        await callback.answer("⚠️ Не удалось изменить профиль. Попробуйте ещё раз через минуту.", show_alert=True)
         return
     kb = InlineKeyboardBuilder()
     kb.button(text="◀️ В меню", callback_data=ProfileSetterCb(action="menu"))

@@ -806,7 +806,7 @@ async def cb_proxy_delete(
         )
     except Exception as exc:
         mark_handled_error(f"proxy_delete fetch: {exc}")
-        await callback.answer("Ошибка при загрузке прокси.", show_alert=True)
+        await callback.answer("⚠️ Не удалось загрузить прокси. Попробуйте ещё раз через минуту.", show_alert=True)
         return
     if not row:
         await callback.answer("Прокси не найден.", show_alert=True)
@@ -868,7 +868,7 @@ async def cb_proxy_toggle_backup(
         )
     except Exception as exc:
         mark_handled_error(f"proxy_toggle_backup: {exc}")
-        await callback.answer("Ошибка переключения резерва.", show_alert=True)
+        await callback.answer("⚠️ Не удалось переключить резерв. Попробуйте ещё раз через минуту.", show_alert=True)
         return
     if new_val is None:
         await callback.answer("Прокси не найден.", show_alert=True)

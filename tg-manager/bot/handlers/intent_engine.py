@@ -844,7 +844,7 @@ async def cb_intent_detail(
 ) -> None:
     row = await db.get_intent(pool, callback_data.intent_id, callback.from_user.id)
     if not row:
-        await callback.answer("Не найдено", show_alert=True)
+        await callback.answer("Запись не найдена. Уже удалено или недоступно. Откройте список заново.", show_alert=True)
         return
     await safe_answer(callback)
     if callback.message:

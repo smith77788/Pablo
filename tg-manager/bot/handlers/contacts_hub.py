@@ -248,7 +248,7 @@ async def cb_toggle_fav(
         await bulk_set_favorite(pool, owner_id, [cid], not cur)
     except Exception as exc:
         log.warning("contacts_hub fav toggle uid=%s cid=%s: %s", owner_id, cid, exc)
-        await callback.answer("Ошибка переключения.", show_alert=True)
+        await callback.answer("⚠️ Не удалось переключить. Попробуйте ещё раз через минуту.", show_alert=True)
         return
     await callback.answer("⭐ В избранном" if not cur else "Убрано из избранного")
     # Перерисовать текущий поиск с обновлённым состоянием.

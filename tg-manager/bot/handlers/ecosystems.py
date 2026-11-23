@@ -1300,7 +1300,7 @@ async def cb_eco_dna_save(
         )
     except Exception:
         log_exc_swallow(log, "cb_eco_dna_save: dna INSERT failed")
-        await callback.answer("❌ Ошибка сохранения ДНК", show_alert=True)
+        await callback.answer("⚠️ Не удалось сохранить ДНК. Попробуйте ещё раз через минуту.", show_alert=True)
         return
 
     try:

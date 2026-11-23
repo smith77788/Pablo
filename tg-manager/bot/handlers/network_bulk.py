@@ -109,7 +109,7 @@ async def cb_bulk_check(
         bots = await db.get_bots(pool, callback.from_user.id)
     except Exception:
         log_exc_swallow(log, "cb_bulk_check: get_bots failed")
-        await callback.answer("Ошибка загрузки ботов.", show_alert=True)
+        await callback.answer("⚠️ Не удалось загрузить ботов. Попробуйте ещё раз через минуту.", show_alert=True)
         return
     if not bots:
         await callback.answer("Нет ботов для проверки.", show_alert=True)

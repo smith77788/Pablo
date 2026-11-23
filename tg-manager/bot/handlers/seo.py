@@ -172,7 +172,7 @@ async def cb_seo_menu(
     try:
         row = await db.get_bot(pool, callback_data.bot_id, callback.from_user.id)
     except Exception:
-        await callback.answer("Ошибка базы данных.", show_alert=True)
+        await callback.answer("⚠️ Не удалось загрузить бота. Попробуйте ещё раз через минуту.", show_alert=True)
         return
     if not row:
         await callback.answer("Бот не найден.", show_alert=True)
@@ -260,7 +260,7 @@ async def cb_seo_analyze(
     try:
         row = await db.get_bot(pool, callback_data.bot_id, callback.from_user.id)
     except Exception:
-        await callback.answer("Ошибка базы данных.", show_alert=True)
+        await callback.answer("⚠️ Не удалось загрузить бота. Попробуйте ещё раз через минуту.", show_alert=True)
         return
     if not row:
         await callback.answer("Бот не найден.", show_alert=True)
@@ -2061,7 +2061,7 @@ async def cb_seo_preview(
     try:
         row = await db.get_bot(pool, callback_data.bot_id, callback.from_user.id)
     except Exception:
-        await callback.answer("Ошибка базы данных.", show_alert=True)
+        await callback.answer("⚠️ Не удалось загрузить бота. Попробуйте ещё раз через минуту.", show_alert=True)
         return
     if not row:
         await callback.answer("Бот не найден.", show_alert=True)
@@ -2270,7 +2270,7 @@ async def cb_seo_momentum(
     try:
         row = await db.get_bot(pool, bot_id, callback.from_user.id)
     except Exception:
-        await callback.answer("Ошибка базы данных.", show_alert=True)
+        await callback.answer("⚠️ Не удалось загрузить бота. Попробуйте ещё раз через минуту.", show_alert=True)
         return
     if not row:
         await callback.answer("Бот не найден.", show_alert=True)
@@ -2399,7 +2399,7 @@ async def cb_seo_content_gap(
     try:
         row = await db.get_bot(pool, bot_id, callback.from_user.id)
     except Exception:
-        await callback.answer("Ошибка базы данных.", show_alert=True)
+        await callback.answer("⚠️ Не удалось загрузить бота. Попробуйте ещё раз через минуту.", show_alert=True)
         return
     if not row:
         await callback.answer("Бот не найден.", show_alert=True)
@@ -2634,7 +2634,7 @@ async def cb_seo_uname_alts(
             log.warning("seo uname_alts: failed to fetch channel row")
             chan = None
         if not chan:
-            await callback.answer("Не найдено.", show_alert=True)
+            await callback.answer("Канал не найден. Уже удалено или недоступно. Откройте список заново.", show_alert=True)
             return
         current = chan.get("username") or ""
         base = current or chan.get("title") or "channel"
@@ -2647,10 +2647,10 @@ async def cb_seo_uname_alts(
         try:
             row = await db.get_bot(pool, callback_data.bot_id, callback.from_user.id)
         except Exception:
-            await callback.answer("Ошибка базы данных.", show_alert=True)
+            await callback.answer("⚠️ Не удалось загрузить бота. Попробуйте ещё раз через минуту.", show_alert=True)
             return
         if not row:
-            await callback.answer("Не найдено.", show_alert=True)
+            await callback.answer("Бот не найден. Уже удалено или недоступно. Откройте список заново.", show_alert=True)
             return
         current = row.get("username") or ""
         base = current or row.get("first_name") or "bot"

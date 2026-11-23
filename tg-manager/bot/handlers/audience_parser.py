@@ -557,7 +557,7 @@ async def _run_ops_and_report(
         return
     except Exception:
         log_exc_swallow(log, f"audience_ops {verb} failed")
-        await callback.answer("Ошибка операции", show_alert=True)
+        await callback.answer("⚠️ Не удалось выполнить действие с аудиторией. Попробуйте ещё раз через минуту.", show_alert=True)
         return
     await state.update_data(ops_selected=[])
     kb = InlineKeyboardBuilder()
@@ -622,7 +622,7 @@ async def cb_parser_ops_gender(
         res = await gc.classify_audience(pool, callback.from_user.id, run_id)
     except Exception:
         log_exc_swallow(log, "ops_gender classify failed")
-        await callback.answer("Ошибка разметки пола", show_alert=True)
+        await callback.answer("⚠️ Не удалось разметить пол аудитории. Попробуйте ещё раз через минуту.", show_alert=True)
         return
     total = res["total"] or 1
     kb = InlineKeyboardBuilder()
@@ -660,7 +660,7 @@ async def cb_parser_gender_export(
             f"ORDER BY tg_user_id LIMIT 50000", *args)
     except Exception:
         log_exc_swallow(log, "gender export query failed")
-        await callback.answer("Ошибка экспорта", show_alert=True)
+        await callback.answer("⚠️ Не удалось выгрузить аудиторию. Попробуйте ещё раз через минуту.", show_alert=True)
         return
     if not rows:
         await callback.answer("⚠️ Нет пользователей этого пола.", show_alert=True)

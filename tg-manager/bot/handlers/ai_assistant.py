@@ -1278,7 +1278,7 @@ async def cb_ai_memory_delete(
         deleted = await ai_memory.delete(pool, callback.from_user.id, memory_id)
     except Exception:
         log.exception("Failed to delete AI memory item %s", memory_id)
-        await callback.answer("❌ Ошибка при удалении", show_alert=True)
+        await callback.answer("⚠️ Не удалось удалить запись. Попробуйте ещё раз через минуту.", show_alert=True)
         return
 
     if deleted:

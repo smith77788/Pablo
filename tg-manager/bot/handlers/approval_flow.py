@@ -43,7 +43,7 @@ async def cb_approval_confirm(
         )
     except Exception as exc:
         mark_handled_error(f"approval_confirm fetch: {exc}")
-        await callback.answer("Ошибка при подтверждении операции.", show_alert=True)
+        await callback.answer("⚠️ Не удалось подтвердить операцию. Попробуйте ещё раз через минуту.", show_alert=True)
         return
     if not op or op["owner_id"] != callback.from_user.id:
         await callback.answer("Операция не найдена или нет прав.", show_alert=True)
@@ -97,7 +97,7 @@ async def cb_approval_cancel(
         )
     except Exception as exc:
         mark_handled_error(f"approval_cancel fetch: {exc}")
-        await callback.answer("Ошибка при отмене операции.", show_alert=True)
+        await callback.answer("⚠️ Не удалось отменить операцию. Попробуйте ещё раз через минуту.", show_alert=True)
         return
     if not op_check or op_check != callback.from_user.id:
         await callback.answer("Операция не найдена или нет прав.", show_alert=True)
@@ -109,7 +109,7 @@ async def cb_approval_cancel(
             pool, op_id, callback.from_user.id,
             allow=("waiting_approval",))
     except Exception:
-        await callback.answer("❌ Ошибка при отмене операции", show_alert=True)
+        await callback.answer("⚠️ Не удалось отменить операцию. Попробуйте ещё раз через минуту.", show_alert=True)
         return
     await safe_answer(callback)
     from bot.callbacks import BmCb
