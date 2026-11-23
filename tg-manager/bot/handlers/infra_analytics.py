@@ -243,7 +243,7 @@ async def cb_infra_health(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
         for pr in pool_rows:
             pool_name = pr["pool"] or "<i>без пула</i>"
             avg_t = float(pr["avg_trust"] or 0)
-            lines.append(f"  🏊 {pool_name}: {pr['cnt']} акк, avg trust={avg_t:.2f}")
+            lines.append(f"  🏊 {pool_name}: {pr['cnt']} акк., среднее доверие {avg_t:.2f}")
 
     await callback.message.edit_text(
         "\n".join(lines),
@@ -308,7 +308,7 @@ async def cb_infra_flood(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
         log.warning('handler error in cb_infra_flood: %s', e)
         action_stats = []
     if action_stats:
-        lines.append("\n<b>Топ действий с flood (7 дней):</b>")
+        lines.append("\n<b>Действия с флудом чаще всего (7 дней):</b>")
         for s in action_stats:
             lines.append(f"  • {s['action_type'] or 'default'}: {s['cnt']} flood")
 
@@ -887,8 +887,8 @@ async def cb_rebalance_preview(callback: CallbackQuery, pool: asyncpg.Pool) -> N
         lines.append(f"<i>... и ещё {len(changes) - 15}</i>")
 
     lines.append("\n<b>Правила распределения:</b>")
-    lines.append("• trust ≥ 0.75, нет предупреждений → <code>primary</code>")
-    lines.append("• trust < 0.3 или есть предупреждения → <code>monitoring</code>")
+    lines.append("• доверие ≥ 0.75, нет предупреждений → <code>primary</code>")
+    lines.append("• доверие < 0.3 или есть предупреждения → <code>monitoring</code>")
     lines.append("• на cooldown → <code>cooldown</code>")
 
     kb = InlineKeyboardBuilder()

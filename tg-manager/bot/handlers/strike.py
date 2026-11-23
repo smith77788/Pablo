@@ -1073,7 +1073,7 @@ async def cb_mini_strike_category(
         f"🎯 Цель: <code>{html.escape(format_telegram_join_ref_display(str(target)))}</code>\n"
         f"📂 Категория: {cat['label']}\n"
         f"🔴 Уровень: <b>{cat['severity']}</b>\n"
-        f"📱 Аккаунт: <b>{acc_label}</b> (trust: {trust:.2f})\n\n"
+        f"📱 Аккаунт: <b>{acc_label}</b> (доверие: {trust:.2f})\n\n"
         f"<b>Будет выполнено:</b>\n"
         f"• Telethon MTProto — 12 векторов, 100+ сообщений, все причины\n"
         f"• Email abuse@telegram.org: {smtp_status}\n"

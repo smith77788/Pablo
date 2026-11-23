@@ -1012,7 +1012,7 @@ async def cb_wu_accs_done(callback: CallbackQuery, state: FSMContext) -> None:
         f"Выбрано аккаунтов: <b>{n}</b>\n\n"
         "Откуда брать цели для прогрева?\n\n"
         "🏗️ <b>Из инфраструктуры</b> — выберите ваши каналы/боты/группы\n"
-        "📝 <b>По юзернейму</b> — введите один @username или invite link\n"
+        "📝 <b>По юзернейму</b> — введите один @username или ссылку-приглашение\n"
         "📋 <b>Списком</b> — введите несколько целей (по одной на строку)",
         parse_mode="HTML",
         reply_markup=kb.as_markup(),
@@ -1166,7 +1166,7 @@ async def cb_wu_back_to_targets(
         f"Выбрано аккаунтов: <b>{n}</b>\n\n"
         "Откуда брать цели для прогрева?\n\n"
         "🏗️ <b>Из инфраструктуры</b> — выберите ваши каналы/боты/группы\n"
-        "📝 <b>По юзернейму</b> — введите один @username или invite link\n"
+        "📝 <b>По юзернейму</b> — введите один @username или ссылку-приглашение\n"
         "📋 <b>Списком</b> — введите несколько целей (по одной на строку)",
         parse_mode="HTML",
         reply_markup=kb.as_markup(),
@@ -1189,7 +1189,7 @@ async def cb_wu_tgt_manual(
         "Введите несколько целей, каждую с новой строки:\n\n"
         "<code>@channel_name\n@bot_username\nhttps://t.me/+invite</code>"
         if is_list
-        else "Введите юзернейм или invite link:\n\n<code>@channel_name</code>"
+        else "Введите юзернейм или ссылку-приглашение:\n\n<code>@channel_name</code>"
     )
 
     kb = InlineKeyboardBuilder()

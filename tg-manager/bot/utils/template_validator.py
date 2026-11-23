@@ -242,7 +242,7 @@ def _validate_operation_template(t: dict) -> ValidationResult:
         links = t.get("links") or []
         if not links:
             result.valid = False
-            result.errors.append("Список ссылок для join не может быть пустым")
+            result.errors.append("Список ссылок для вступления не может быть пустым")
         elif not isinstance(links, list):
             result.valid = False
             result.errors.append("Список ссылок должен быть списком строк")
