@@ -158,6 +158,8 @@ ENGLISH_MODULE_NAMES = [
     "Autonomous Gate", "Node Thread", "Ecosystem Brain", "Nearby People",
     "String Session", "Session файл", "Публикация Story", "Массовый join",
     "Массовый leave", "Reader", "Reactor", "Commenter",
+    "CF relay", "Hot —", "Warm —", "Cold —", "Lost —", "Entry", "Conversion:",
+    "Retention", "Score:", "ReadHistory", "Visibility",
 ]
 _CYR = re.compile(r"[А-Яа-яЁё]")
 
