@@ -152,6 +152,12 @@ ENGLISH_MODULE_NAMES = [
     "Recovery Engine", "Health Center", "Intelligence Report", "Keyword Gap",
     "Mass Publish", "Free Mode", "Strike Module", "Copilot", "Failover",
     "Workspace", "Swarm", "Broadcast", "Dry Run",
+    # Обход 23.11.2026: заголовки экранов, у которых кнопка в меню уже русская.
+    "Growth Agent", "Account Cleaner", "Account Warming", "Audience DNA",
+    "Narrative Engine", "Persona Ecosystem", "Stars Yield", "Presence Pack",
+    "Autonomous Gate", "Node Thread", "Ecosystem Brain", "Nearby People",
+    "String Session", "Session файл", "Публикация Story", "Массовый join",
+    "Массовый leave", "Reader", "Reactor", "Commenter",
 ]
 _CYR = re.compile(r"[А-Яа-яЁё]")
 

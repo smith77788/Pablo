@@ -58,7 +58,7 @@ async def cb_net_menu(
         round(ov["swarm_bots"] / ov["total_bots"] * 100) if ov["total_bots"] else 0
     )
     await callback.message.edit_text(
-        f"🌐 <b>Сеть &amp; массовые операции</b>\n\n"
+        f"🌐 <b>Сеть и массовые операции</b>\n\n"
         f"🤖 Ботов: <b>{ov['total_bots']}</b> | "
         f"🧬 Рой: <b>{ov['swarm_bots']}</b> ({swarm_pct}%)\n"
         f"🌐 Кластеров: <b>{ov['clusters']}</b>\n"
@@ -124,7 +124,7 @@ async def cb_net_analytics(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
         f"  Уникальных: {ov['unique_users']:,}\n"
         f"  Пересечений: {overlap['multi_bot_users']:,} ({overlap['overlap_pct']}%)\n\n"
         f"<b>Рассылки отправлено:</b> {ov['total_sent']:,}\n"
-        f"<b>Средний Score:</b> {ov['avg_score']:.3f}\n\n"
+        f"<b>Средняя оценка:</b> {ov['avg_score']:.3f}\n\n"
         + ("<b>Топ-3 по аудитории:</b>\n" + "\n".join(top3_lines) if top3 else ""),
         parse_mode="HTML",
         reply_markup=kb.as_markup(),
@@ -574,7 +574,7 @@ async def cb_net_broadcast(
     await safe_answer(callback)
     if not await require_plan(pool, callback.from_user.id, "enterprise"):
         await callback.message.edit_text(
-            locked_text("Сетевая рассылка (legacy)", "enterprise"),
+            locked_text("Сетевая рассылка (старая)", "enterprise"),
             parse_mode="HTML",
             reply_markup=subscription_locked_markup("enterprise", back_callback=BmCb(action="bulk_ops")),
         )

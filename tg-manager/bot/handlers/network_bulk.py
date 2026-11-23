@@ -196,7 +196,7 @@ async def cb_bulk_name_lang(
         return
     await safe_answer(callback)
     await callback.message.edit_text(
-        "🌍 <b>Имя по GEO — выберите язык</b>\n\nКакому языку задать имя?",
+        "🌍 <b>Имя по языкам — выберите язык</b>\n\nКакому языку задать имя?",
         parse_mode="HTML",
         reply_markup=_geo_lang_kb("name"),
     )
@@ -270,7 +270,7 @@ async def cb_bulk_desc_lang(
         return
     await safe_answer(callback)
     await callback.message.edit_text(
-        "🌍 <b>Описание по GEO — выберите язык</b>\n\nКакому языку задать описание?",
+        "🌍 <b>Описание по языкам — выберите язык</b>\n\nКакому языку задать описание?",
         parse_mode="HTML",
         reply_markup=_geo_lang_kb("desc"),
     )
@@ -344,7 +344,7 @@ async def cb_bulk_short_lang(
         return
     await safe_answer(callback)
     await callback.message.edit_text(
-        "🌍 <b>Краткое описание по GEO — выберите язык</b>\n\nКакому языку задать краткое описание?",
+        "🌍 <b>Краткое описание по языкам — выберите язык</b>\n\nКакому языку задать краткое описание?",
         parse_mode="HTML",
         reply_markup=_geo_lang_kb("short"),
     )
@@ -426,7 +426,7 @@ async def cb_bulk_commands_lang(
         return
     await safe_answer(callback)
     await callback.message.edit_text(
-        "🌍 <b>Команды по GEO — выберите язык</b>\n\nДля какого языка задать команды?",
+        "🌍 <b>Команды по языкам — выберите язык</b>\n\nДля какого языка задать команды?",
         parse_mode="HTML",
         reply_markup=_geo_lang_kb("cmd"),
     )

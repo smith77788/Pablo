@@ -101,7 +101,7 @@ async def cb_eco_menu(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
     kb = InlineKeyboardBuilder()
     if not ecosystems:
         text = (
-            "🌐 <b>Ecosystem Brain</b>\n\n"
+            "🌐 <b>Экосистемы сетей</b>\n\n"
             "Экосистема — это живой объект, объединяющий аккаунты, каналы, "
             "группы и ботов в единую управляемую структуру.\n\n"
             "У вас ещё нет ни одной экосистемы.\n"
@@ -117,7 +117,7 @@ async def cb_eco_menu(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
         summary_icon = "🟢" if avg_h >= 70 else ("🟡" if avg_h >= 40 else "🔴")
 
         lines = [
-            "🌐 <b>Ecosystem Brain</b>\n",
+            "🌐 <b>Экосистемы сетей</b>\n",
             f"{summary_icon} Здоровье: <b>{avg_h}%</b>  •  "
             f"Экосистем: <b>{len(ecosystems)}</b>  •  "
             f"Объектов: <b>{total_objs}</b>",
@@ -989,7 +989,7 @@ async def cb_eco_summary(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
         kb_back.button(text="◀️ Назад", callback_data=EcoCb(action="menu"))
         try:
             await callback.message.edit_text(
-                "📊 Экосистем нет. Создайте первую в разделе 🌐 Ecosystem Brain.",
+                "📊 Экосистем нет. Создайте первую в разделе «🌐 Экосистемы сетей».",
                 reply_markup=kb_back.as_markup(),
             )
         except Exception as e:
@@ -1859,7 +1859,7 @@ async def fsm_eco_dna_name(
         )
         kb.adjust(1)
         await message.answer(
-            f"✅ <b>DNA снята</b>\n\n"
+            f"✅ <b>ДНК снята</b>\n\n"
             f"{icon} Шаблон <b>{html.escape(name)}</b> (#{dna_id}) сохранён.\n"
             f"Тип: {dna_type} · применим к любой экосистеме.",
             parse_mode="HTML",
@@ -1883,7 +1883,7 @@ async def cb_eco_dna_view(
     dna_id = callback_data.page  # reuse page field as dna_id
     dna = await _eb.get_dna(pool, dna_id, callback.from_user.id)
     if not dna:
-        await callback.answer("DNA не найдена", show_alert=True)
+        await callback.answer("ДНК не найдена", show_alert=True)
         return
     await safe_answer(callback)
 
@@ -1932,7 +1932,7 @@ async def cb_eco_dna_apply(
 
     eco_id = callback_data.eco_id
     dna_id = callback_data.page
-    await callback.answer("⏳ Применяю DNA…")
+    await callback.answer("⏳ Применяю ДНК…")
     try:
         changes = await _eb.apply_dna_to_ecosystem(
             pool, dna_id, eco_id, callback.from_user.id
@@ -1961,7 +1961,7 @@ async def cb_eco_dna_delete(
     eco_id = callback_data.eco_id
     dna_id = callback_data.page
     await _eb.delete_dna(pool, dna_id, callback.from_user.id)
-    await callback.answer("🗑 DNA удалена", show_alert=True)
+    await callback.answer("🗑 ДНК удалена", show_alert=True)
     # Show updated DNA menu directly
     dna_list = await _eb.list_dna(pool, callback.from_user.id)
     kb = InlineKeyboardBuilder()
@@ -2085,7 +2085,7 @@ async def cb_ecopick_list(
         text = (
             f"🌐 <b>Добавить {obj_label} в экосистему</b>\n\n"
             f"У вас нет активных экосистем.\n"
-            f"Создайте экосистему в разделе 🌐 Ecosystem Brain."
+            f"Создайте экосистему в разделе «🌐 Экосистемы сетей»."
         )
         kb.button(text="🌐 Создать экосистему", callback_data=EcoCb(action="create"))
     else:

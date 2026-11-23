@@ -407,7 +407,7 @@ async def cb_intent_confirm(
         await callback.answer("Нужна ручная проверка", show_alert=True)
         if callback.message:
             await callback.message.edit_text(
-                "🛑 <b>Autonomous Gate</b>\n\n"
+                "🛑 <b>Автозапуск недоступен</b>\n\n"
                 "План пока нельзя запускать автоматически:\n"
                 + "\n".join(f"• {reason}" for reason in blockers[:5]),
                 reply_markup=_plan_kb(intent_id, plan, strategy),

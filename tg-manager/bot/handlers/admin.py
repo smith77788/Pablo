@@ -3962,7 +3962,7 @@ async def _ai_keys_menu(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
     kb = InlineKeyboardBuilder()
     lines = [
         "🤖 <b>AI-ключи провайдеров</b>\n",
-        "Нужны для: Narrative, Growth Agent, AI-ассистент, SEO-AI, "
+        "Нужны для: нарратива, агента роста, AI-ассистент, SEO-AI, "
         "AI-генерация шаблонов/постов и ОСМЫСЛЕННЫЙ разогрев чатов (Claude).\n",
     ]
     for pid, plabel, skey, _env in _AI_PROVIDERS:

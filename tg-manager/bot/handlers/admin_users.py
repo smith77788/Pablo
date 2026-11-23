@@ -484,7 +484,7 @@ async def cb_revoke_plan(
     from bot.utils.subscription import invalidate_plan_cache
     invalidate_plan_cache(user_id)
     await callback.answer(
-        "✅ Подписка отменена. Пользователь вернулся на free.", show_alert=True
+        "✅ Подписка отменена. Пользователь вернулся на бесплатный тариф.", show_alert=True
     )
 
     # Уведомить пользователя об отзыве подписки
@@ -492,7 +492,7 @@ async def cb_revoke_plan(
         await callback.bot.send_message(
             user_id,
             "ℹ️ <b>Ваша подписка была отозвана администратором.</b>\n\n"
-            "Вы переведены на план FREE.\n"
+            "Вы переведены на бесплатный тариф.\n"
             "Для восстановления доступа оформите подписку: /menu → ⚙️ Настройки → 💳 Подписка",
             parse_mode="HTML",
         )
@@ -501,7 +501,7 @@ async def cb_revoke_plan(
 
     # Вернуться к меню пользователя
     await callback.message.edit_text(
-        f"✅ Подписка отменена. Пользователь #{user_id} переведён на план <b>FREE</b>.",
+        f"✅ Подписка отменена. Пользователь #{user_id} переведён на <b>бесплатный</b> тариф.",
         parse_mode="HTML",
         reply_markup=terminal_kb(),
     )
