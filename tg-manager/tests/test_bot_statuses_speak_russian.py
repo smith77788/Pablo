@@ -80,3 +80,36 @@ def test_failed_search_offers_a_new_search():
     # новому поиску, а не только в главное меню.
     assert src.count("reply_markup=_again_kb()") >= 5
     assert "Попробуйте /search снова" not in src
+
+
+_LATIN_OK = re.compile(r"CRM|SEO|Telegram|Stars|TON|USDT|TRC|CTR|<[^>]+>|https?://\S+|@\w+|/\w+")
+
+
+def test_no_ui_string_is_entirely_english():
+    """«⏳ Starting transfer...», «🔑 String Session (Telethon)», «🏠 Infragram OS»
+    на кнопке «в меню» — строка без единого русского слова."""
+    import ast
+
+    bad = []
+    for path in sorted((ROOT.parent).rglob("*.py")):
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        for c in ast.walk(tree):
+            if not (isinstance(c, ast.Call) and isinstance(c.func, ast.Attribute)):
+                continue
+            if c.func.attr in ("answer", "edit_text", "reply", "send_message", "edit_caption"):
+                args = c.args[:1]
+            elif c.func.attr == "button":
+                args = [k.value for k in c.keywords if k.arg == "text"]
+            else:
+                continue
+            for a in args:
+                if isinstance(a, ast.Constant) and isinstance(a.value, str):
+                    txt = a.value
+                elif isinstance(a, ast.JoinedStr):
+                    txt = "".join(v.value for v in a.values if isinstance(v, ast.Constant))
+                else:
+                    continue
+                rest = _LATIN_OK.sub("", txt)
+                if re.search(r"[A-Za-z]{3,}", rest) and not re.search(r"[А-Яа-яЁё]", txt):
+                    bad.append(f"{path.name}:{c.lineno}: {txt[:50]!r}")
+    assert not bad, "строка интерфейса целиком по-английски:\n" + "\n".join(bad)

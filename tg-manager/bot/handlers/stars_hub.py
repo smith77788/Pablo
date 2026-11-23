@@ -12,7 +12,7 @@ from aiogram.types import CallbackQuery, Message
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 import asyncpg
 
-from bot.callbacks import StarsCb
+from bot.callbacks import BmCb, StarsCb
 from bot.utils.picker_cap import cap_slice as _cap, cap_note_button as _cap_note
 from bot.states import StarsExperimentFSM
 from database import db
@@ -47,6 +47,7 @@ def _main_kb() -> InlineKeyboardBuilder:
     kb.button(text="🧪 Эксперименты", callback_data=StarsCb(action="list_experiments", experiment_id=0, bot_id=0))
     kb.button(text="➕ Новый A/B тест", callback_data=StarsCb(action="create_start", experiment_id=0, bot_id=0))
     kb.button(text="💡 Рекомендации", callback_data=StarsCb(action="recommendations", experiment_id=0, bot_id=0))
+    kb.button(text="🏠 Главное меню", callback_data=BmCb(action="main"))
     kb.adjust(1)
     return kb
 
@@ -116,7 +117,6 @@ async def cb_dashboard(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
         await callback.message.edit_text(text, parse_mode="HTML", reply_markup=_main_kb().as_markup())
     except Exception as e:
         log.error("stars_hub cb_dashboard: %s", e)
-        from bot.callbacks import BmCb
         kb = InlineKeyboardBuilder()
         kb.button(text="◀️ Назад", callback_data=BmCb(action="growth"))
         await callback.message.edit_text(
