@@ -87,7 +87,7 @@ async def msg_cloner_source(msg: Message, state: FSMContext) -> None:
     from services.content_cloner_engine import parse_channel_ref
     raw = (msg.text or "").strip()
     if not raw:
-        await msg.answer("⚠️ Введите ссылку или username канала/группы.")
+        await msg.answer("⚠️ Введите ссылку или юзернейм канала/группы.")
         return
     source_ref = parse_channel_ref(raw)
     await state.update_data(source_ref=source_ref)
@@ -115,7 +115,7 @@ async def msg_cloner_targets(msg: Message, state: FSMContext) -> None:
     from services.content_cloner_engine import parse_channel_ref
     raw = (msg.text or "").strip()
     if not raw:
-        await msg.answer("⚠️ Введите username или ссылку канала/группы.")
+        await msg.answer("⚠️ Введите юзернейм или ссылку канала/группы.")
         return
 
     data = await state.get_data()

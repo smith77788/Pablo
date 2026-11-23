@@ -903,7 +903,7 @@ async def cb_mini_strike_start(
     kb.button(text="❌ Отмена", callback_data=StrikeCb(action="menu"))
     await callback.message.edit_text(
         "⚡ <b>Мини-страйк</b>\n\n"
-        "Введите username или ссылку на цель:\n"
+        "Введите юзернейм или ссылку на цель:\n"
         "• <code>@channelname</code>\n"
         "• <code>https://t.me/channelname</code>\n"
         "• <code>https://t.me/+HASH</code> — приватный канал по инвайт-ссылке\n"
@@ -924,7 +924,7 @@ async def msg_mini_strike_target(
 
     raw = (message.text or "").strip()
     if not raw:
-        await message.answer("⚠️ Введите username канала.", parse_mode="HTML")
+        await message.answer("⚠️ Введите юзернейм канала.", parse_mode="HTML")
         return
 
     # Нормализация — обрабатываем публичные username и приватные invite-ссылки (+HASH)
@@ -932,7 +932,7 @@ async def msg_mini_strike_target(
     target = f"+{ref_value}" if ref_kind == "invite" else ref_value.lstrip("@")
     target_display = html.escape(format_telegram_join_ref_display(target))
     if not target or len(target) < 4:
-        await message.answer("⚠️ Некорректный username или ссылка. Попробуйте ещё раз.")
+        await message.answer("⚠️ Некорректный юзернейм или ссылка. Попробуйте ещё раз.")
         return
 
     await state.update_data(target=target)

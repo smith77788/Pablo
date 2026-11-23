@@ -926,7 +926,7 @@ async def cb_bot_add_start(callback: CallbackQuery, state: FSMContext, pool: asy
     await safe_edit(
         callback,
         "🤖 <b>Добавить бота на склад</b>\n\n"
-        "Введите <b>username</b> бота (без @):\n\n<i>Отмена: /cancel</i>",
+        "Введите <b>юзернейм</b> бота (без @):\n\n<i>Отмена: /cancel</i>",
         reply_markup=kb.as_markup(),
     )
 
@@ -941,7 +941,7 @@ async def fsm_bot_cancel(callback: CallbackQuery, state: FSMContext, pool: async
 async def fsm_bot_username(message: Message, state: FSMContext) -> None:
     username = (message.text or "").strip().lstrip("@")
     if not username or len(username) < 3:
-        await message.answer("❌ Username минимум 3 символа.")
+        await message.answer("❌ Юзернейм минимум 3 символа.")
         return
     await state.update_data(username=username)
     await state.set_state(PromoAddBotFSM.reg_date)

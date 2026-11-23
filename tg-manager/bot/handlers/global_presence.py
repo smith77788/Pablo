@@ -188,7 +188,7 @@ async def cb_gp_menu(
         f"🌍 <b>Гео-сеть: создать</b>\n"
         f"{'─' * 28}\n"
         f"Бот <b>создаёт НОВУЮ</b> Telegram-инфраструктуру сразу в сотнях городов — "
-        f"каналы, группы и боты с локализованными названиями, username, "
+        f"каналы, группы и боты с локализованными названиями, юзернейм, "
         f"описаниями и аватарами.\n"
         f"<i>Если нужно объединить уже существующие активы — это «🔗 Связки».</i>\n"
         f"{plans_hint}\n"
@@ -297,7 +297,7 @@ async def _show_structure_step(callback: CallbackQuery, state: FSMContext) -> No
         f"🏗 <b>Структура города</b>\n"
         f"{'─' * 28}\n"
         f"Отметьте, какие объекты создать <b>в каждом городе</b>. "
-        f"У каждой тематики свои названия, username и описания — "
+        f"У каждой тематики свои названия, юзернейм и описания — "
         f"их не нужно придумывать.\n\n"
         f"<b>Выбрано ({len(selected)} на город):</b>\n{structure_text}\n\n"
         f"<i>Пример показан для Самары.</i>",
@@ -575,7 +575,7 @@ async def _show_name_pattern_step(
     ]
     ex_text = "\n".join(f"  • <code>{e}</code>" for e in examples)
     bot_note = (
-        "\n\n💡 <i>Для ботов: название — отображаемое имя в Telegram (не username).</i>"
+        "\n\n💡 <i>Для ботов: название — отображаемое имя в Telegram (не юзернейм).</i>"
         if asset_type in ("bot", "full_package")
         else ""
     )
@@ -611,7 +611,7 @@ async def _show_name_pattern_step(
         f"  <code>{{{{CITY_LOC}}}}</code> — предложный падеж (Москве, Самаре)\n"
         f"  <code>{{{{CITY}}}}</code> — город латиницей\n"
         f"  <code>{{{{COUNTRY}}}}</code> / <code>{{{{COUNTRY_CODE}}}}</code> — страна / код\n"
-        f"  <code>{{{{CITY_SLUG}}}}</code> — транслит-слаг (для username)\n"
+        f"  <code>{{{{CITY_SLUG}}}}</code> — транслит-слаг (для юзернейма)\n"
         f"  <code>{{{{INDEX}}}}</code> — порядковый номер\n\n"
         f"Примеры:\n{ex_text}"
         + bot_note
@@ -735,14 +735,14 @@ async def _show_username_pattern_step(
     ex_text = "\n".join(f"  • <code>{e}</code>" for e in examples)
     kb = InlineKeyboardBuilder()
     kb.button(text="◀️ Назад", callback_data=GeoPresenceCb(action="retry_name"))
-    kb.button(text="⏭️ Без username", callback_data=GeoPresenceCb(action="skip_uname"))
+    kb.button(text="⏭️ Без юзернейма", callback_data=GeoPresenceCb(action="skip_uname"))
     kb.button(text="❌ Отмена", callback_data=GeoPresenceCb(action="cancel"))
     kb.adjust(2, 1)
     await _edit(
         callback,
         f"🌍 <b>Гео-сеть — фабрика присутствия</b>\n\n"
-        f"<b>Шаг 4/8 — Паттерн username</b>\n"
-        f"Username делает канал публичным и находимым.\n"
+        f"<b>Шаг 4/8 — Паттерн юзернейма</b>\n"
+        f"Юзернейм делает канал публичным и находимым.\n"
         f"Правила: 5–32 символа, a-z, 0-9, подчёркивание.\n\n"
         f"Примеры:\n{ex_text}\n\n"
         + (f"💡 Последний ввод: <code>{prefill}</code>\n\n" if prefill else "")
@@ -756,7 +756,7 @@ async def msg_gp_username_pattern(message: Message, state: FSMContext) -> None:
     pattern = (message.text or "").strip()
     if not pattern:
         await _reply(
-            message, "⚠️ Введите паттерн или нажмите «Без username».", _cancel_kb()
+            message, "⚠️ Введите паттерн или нажмите «Без юзернейма».", _cancel_kb()
         )
         return
 
@@ -790,17 +790,17 @@ async def msg_gp_username_pattern(message: Message, state: FSMContext) -> None:
     kb = InlineKeyboardBuilder()
     kb.button(text="✅ Принять", callback_data=GeoPresenceCb(action="accept_uname"))
     kb.button(text="✏️ Изменить", callback_data=GeoPresenceCb(action="retry_uname"))
-    kb.button(text="⏭️ Без username", callback_data=GeoPresenceCb(action="skip_uname"))
+    kb.button(text="⏭️ Без юзернейма", callback_data=GeoPresenceCb(action="skip_uname"))
     kb.button(text="❌ Отмена", callback_data=GeoPresenceCb(action="cancel"))
     kb.adjust(2, 2)
 
     await state.update_data(username_pattern_pending=pattern)
     await _reply(
         message,
-        f"🌍 <b>Предпросмотр паттерна username</b>\n\n"
+        f"🌍 <b>Предпросмотр паттерна юзернейма</b>\n\n"
         f"Паттерн: <code>{pattern}</code>\n\n"
         f"Примеры:\n{examples_text}\n\n"
-        f"⚠️ Telegram проверяет доступность username при создании. "
+        f"⚠️ Telegram проверяет доступность юзернейма при создании. "
         f"Если занят — система попробует варианты.\n\n"
         f"Всё верно?",
         markup=kb.as_markup(),
@@ -1851,7 +1851,7 @@ async def _show_preview(
     # уйдут в исполнение, потому что генерация детерминирована по seed.
     sample_lines = []
     for t in targets[:4]:
-        uname = f"@{t['planned_username']}" if t["planned_username"] else "(без username)"
+        uname = f"@{t['planned_username']}" if t["planned_username"] else "(без юзернейма)"
         role_label = infra_generator.ROLE_LIBRARY.get(t["role"], {}).get("label", t["role"])
         sample_lines.append(
             f"  {role_label}\n"
@@ -1877,7 +1877,7 @@ async def _show_preview(
     uname_warn = ""
     if summary["missing_username"]:
         uname_warn = (
-            f"\n⚠️ Без username останется {summary['missing_username']} объектов "
+            f"\n⚠️ Без юзернейма останется {summary['missing_username']} объектов "
             f"(будут приватными)."
         )
 
@@ -2704,7 +2704,7 @@ async def cb_gp_report(
     done_lines = "\n".join(
         f"  ✅ {html.escape(t['city'] or '?')}: {html.escape(t['planned_name'] or '?')}"
         # Показываем ФАКТИЧЕСКИЙ username: запланированный мог быть занят.
-        + (f" → @{html.escape(t['final_username'])}" if t["final_username"] else " <i>(без username)</i>")
+        + (f" → @{html.escape(t['final_username'])}" if t["final_username"] else " <i>(без юзернейма)</i>")
         + ("" if t["avatar_applied"] else " ⚠️ без аватара")
         for t in done_targets
     )
@@ -2730,7 +2730,7 @@ async def cb_gp_report(
     if stats["done"]:
         dressing = (
             f"🖼 С аватаром: {total_avatars} из {stats['done']}\n"
-            f"🔗 С username: {total_unames} из {stats['done']}\n"
+            f"🔗 С юзернеймом: {total_unames} из {stats['done']}\n"
         )
 
     text = (
@@ -3053,7 +3053,7 @@ async def cb_gp_catalog(
         if uname:
             link = f'\n     🔗 <a href="https://t.me/{uname}">@{html.escape(uname)}</a>'
         elif r["status"] == "done":
-            link = "\n     <i>без username (приватный)</i>"
+            link = "\n     <i>без юзернейма (приватный)</i>"
         else:
             link = ""
         avatar_note = (
@@ -3102,7 +3102,7 @@ _BULK_LABELS: dict[str, str] = {
     "both": "описания и аватары",
     "post_pin": "пост с закрепом",
     "admin": "назначение админа",
-    "username": "доназначение username",
+    "username": "доназначение юзернейма",
 }
 
 
@@ -3168,7 +3168,7 @@ async def cb_gp_bulk_menu(
             # Кнопка показывается только когда есть кому доназначать: иначе она
             # обещала бы работу, которой нет.
             kb.button(
-                text=f"🔗 Доназначить username ({no_username})",
+                text=f"🔗 Доназначить юзернейм ({no_username})",
                 callback_data=GeoPresenceCb(
                     action="bulk_run", plan_id=plan_id, item="username"
                 ),
@@ -3188,7 +3188,7 @@ async def cb_gp_bulk_menu(
         if no_avatar:
             gaps.append(f"без аватара: {no_avatar}")
         if no_username:
-            gaps.append(f"без username: {no_username}")
+            gaps.append(f"без юзернейма: {no_username}")
         gaps_line = ("⚠️ " + ", ".join(gaps) + "\n") if gaps else ""
         body = (
             f"Объектов под применение: <b>{applicable}</b>\n{gaps_line}\n"
@@ -3199,7 +3199,7 @@ async def cb_gp_bulk_menu(
             "(с подстановкой города) и закрепит его.\n"
             "👑 <b>Админ</b> — выдаст права указанному пользователю во всех "
             "объектах проекта.\n"
-            "🔗 <b>Username</b> — доназначит имя тем, у кого его не встало.\n\n"
+            "🔗 <b>Юзернейм</b> — доназначит имя тем, у кого его не встало.\n\n"
             "<i>Операции идут через общую очередь: аккаунты в карантине "
             "пропускаются, прогресс и повтор — как у остальных.</i>"
         )

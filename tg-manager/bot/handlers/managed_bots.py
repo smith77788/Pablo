@@ -99,7 +99,7 @@ async def msg_name(message: Message, state: FSMContext) -> None:
         "Пришлите желаемый <b>@username</b> бота. Правила Telegram: 5–32 символа, "
         "латиница/цифры/«_», обязательно заканчивается на <b>bot</b>.\n"
         "Например: <code>my_helper_bot</code>.\n\n"
-        "<i>Если username занят — Telegram даст поправить его на шаге подтверждения.</i>",
+        "<i>Если юзернейм занят — Telegram даст поправить его на шаге подтверждения.</i>",
         parse_mode="HTML", reply_markup=kb.as_markup())
 
 

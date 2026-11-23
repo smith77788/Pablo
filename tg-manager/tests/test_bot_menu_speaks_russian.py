@@ -237,3 +237,52 @@ def test_slang_probe_sees_known_examples_and_spares_username():
     assert _SLANG.search('kb.button(text="🚫 Заблокировать юзера")')
     assert _SLANG.search('f"{label} — {n} юз. / score {s:.3f}"')
     assert not _SLANG.search('"Введите юзернейм (без @)"')
+
+
+_BARE_USERNAME = re.compile(r"(?<![@_\w/.])[Uu]sername(?![_\w(=])")
+
+
+def _russian_literal_parts(src: str):
+    """Литеральные куски строк с кириллицей (без кода внутри {…} f-строк,
+    без докстрингов и SQL)."""
+    import ast
+    import io
+    import tokenize
+    tree = ast.parse(src)
+    doc_lines = {
+        n.body[0].value.lineno for n in ast.walk(tree)
+        if isinstance(n, (ast.Module, ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))
+        and n.body and isinstance(n.body[0], ast.Expr)
+        and isinstance(getattr(n.body[0], "value", None), ast.Constant)
+    }
+    lines = src.split("\n")
+    kinds = {tokenize.STRING, getattr(tokenize, "FSTRING_MIDDLE", -1)}
+    for tok in tokenize.generate_tokens(io.StringIO(src).readline):
+        if tok.type not in kinds:
+            continue
+        if tok.type == tokenize.STRING and tok.start[0] in doc_lines:
+            continue
+        text = tok.string if tok.type == tokenize.STRING else lines[tok.start[0] - 1]
+        if not re.search(r"[А-Яа-яЁё]", text) or re.search(r"SELECT|FROM |first_name", tok.string):
+            continue
+        yield tok.start[0], tok.string
+
+
+def test_no_bare_english_username_in_bot_texts():
+    """«⏭ Без username», «Введите username» — английское слово в тексте для
+    владельца; по-русски «юзернейм». «@username» в примерах — это образец
+    ввода, его не трогаем."""
+    bad = []
+    for p in sorted(BOT.rglob("*.py")):
+        if p.name == "ai_tools.py":
+            continue
+        for ln, part in _russian_literal_parts(p.read_text(encoding="utf-8")):
+            if _BARE_USERNAME.search(part):
+                bad.append(f"{p.relative_to(BOT)}:{ln}: {part.strip()[:90]}")
+    assert not bad, "английское «username» в тексте:\n" + "\n".join(bad)
+
+
+def test_username_probe_sees_a_known_example():
+    src = 'kb.button(text="⏭ Без username")\nx = f"Юзер @{username} — пример @username"\n'
+    hits = [part for _, part in _russian_literal_parts(src) if _BARE_USERNAME.search(part)]
+    assert hits == ['"⏭ Без username"']

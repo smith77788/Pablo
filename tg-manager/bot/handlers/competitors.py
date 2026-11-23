@@ -104,7 +104,7 @@ async def comp_add(cb: CallbackQuery, state: FSMContext) -> None:
         "➕ <b>Добавить конкурента</b>\n\n"
         "Введите @username канала или бота конкурента:\n\n"
         "💡 Например: <code>@durov</code> или просто <code>durov</code>\n"
-        "<i>Только username без пробелов, не ссылка.</i>",
+        "<i>Только юзернейм без пробелов, не ссылка.</i>",
         reply_markup=kb.as_markup(),
     )
 
@@ -130,7 +130,7 @@ async def comp_got_username(message: Message, state: FSMContext) -> None:
         kb = InlineKeyboardBuilder()
         kb.button(text="❌ Отмена", callback_data=CompCb(action="cancel_fsm"))
         await message.answer(
-            "⚠️ Username слишком короткий (минимум 3 символа). Попробуйте ещё раз:",
+            "⚠️ Юзернейм слишком короткий (минимум 3 символа). Попробуйте ещё раз:",
             reply_markup=kb.as_markup(),
         )
         return
@@ -139,7 +139,7 @@ async def comp_got_username(message: Message, state: FSMContext) -> None:
         kb = InlineKeyboardBuilder()
         kb.button(text="❌ Отмена", callback_data=CompCb(action="cancel_fsm"))
         await message.answer(
-            "⚠️ Недопустимый username. Используйте только буквы, цифры и _\n"
+            "⚠️ Недопустимый юзернейм. Используйте только буквы, цифры и _\n"
             "Длина: 3–32 символа. Попробуйте ещё раз:",
             reply_markup=kb.as_markup(),
         )

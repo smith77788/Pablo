@@ -2260,7 +2260,7 @@ def _analyze_error(error_msg: str) -> dict:
     if any(w in msg for w in ("not found", "not exist", "invalid", "no such")):
         result["cause"] = "Целевой канал/чат/бот не найден"
         result["recommendation"] = (
-            "Проверьте правильность username или ID. "
+            "Проверьте правильность юзернейма или ID. "
             "Возможно, канал был удалён или переименован."
         )
         return result

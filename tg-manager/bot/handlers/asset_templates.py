@@ -70,7 +70,7 @@ _TYPE_PROMPTS = {
     ),
     "channel": (
         "📡 <b>Шаблон канала — параметры</b>\n\n"
-        "Введите через <code>;;;</code>: название канала, описание, username "
+        "Введите через <code>;;;</code>: название канала, описание, юзернейм "
         "(или оставьте пустым).\n\n"
         "Пример:\n"
         "<code>Мой канал;;;Новости о моде;;;fashion_shop</code>\n\n"
@@ -80,7 +80,7 @@ _TYPE_PROMPTS = {
     ),
     "group": (
         "👥 <b>Шаблон группы — параметры</b>\n\n"
-        "Введите через <code>;;;</code>: название группы, описание, username "
+        "Введите через <code>;;;</code>: название группы, описание, юзернейм "
         "(или оставьте пустым).\n\n"
         "Пример:\n"
         "<code>Моя группа;;;Обсуждения о моде;;;fashion_chat</code>\n\n"
@@ -1650,7 +1650,7 @@ async def _ask_operator(target: Message, state: FSMContext, data: dict) -> None:
     send = target.answer if isinstance(target, Message) else target.edit_text
     await send(
         "✏️ <b>Настройка шаблона — шаг 3/3</b>\n\n"
-        "👤 Username живого оператора (например @support_manager)\n"
+        "👤 Юзернейм живого оператора (например @support_manager)\n"
         "Пользователи смогут написать напрямую.\n\n"
         "Если оператора нет — нажмите «Пропустить»:",
         parse_mode="HTML",

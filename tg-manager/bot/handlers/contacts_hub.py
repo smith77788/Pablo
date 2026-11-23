@@ -85,7 +85,7 @@ async def cb_stats(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
         f"Всего: <b>{s.get('total', 0)}</b>\n"
         f"⭐ Избранных: <b>{s.get('favorites', 0)}</b>\n"
         f"💎 Premium: <b>{s.get('premium', 0)}</b>\n"
-        f"@ С username: <b>{s.get('with_username', 0)}</b>\n"
+        f"@ С юзернеймом: <b>{s.get('with_username', 0)}</b>\n"
         f"📞 С телефоном: <b>{s.get('with_phone', 0)}</b>\n"
         f"🏷 Тегов: <b>{s.get('tags', 0)}</b> · 👥 Групп: <b>{s.get('groups', 0)}</b>\n"
         f"📝 С заметками: <b>{s.get('notes', 0)}</b>",
