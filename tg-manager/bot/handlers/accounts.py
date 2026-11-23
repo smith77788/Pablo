@@ -4173,7 +4173,7 @@ async def cb_import_batch(callback: CallbackQuery, state: FSMContext) -> None:
         "1BVtsOIKAGkB...</code>\n\n"
         "Или загрузите файл:\n"
         "• <b>.txt</b> — одна сессия на строку\n"
-        "• <b>.csv</b> — колонки: <code>session,cluster</code> (cluster — опционально)\n"
+        "• <b>.csv</b> — колонки: <code>session,cluster</code> (кластер — необязательно)\n"
         "• <b>.zip</b> — архив с файлами <code>.session</code> (Telethon SQLite)\n\n"
         "Пример CSV:\n"
         "<code>session,cluster\n"
@@ -4602,7 +4602,7 @@ async def fsm_batch_import_file(
         if not pairs:
             await message.answer(
                 "⚠️ CSV не содержит распознанных сессий.\n\n"
-                "Ожидаемый формат: <code>session,cluster</code> (cluster — опционально)",
+                "Ожидаемый формат: <code>session,cluster</code> (кластер — необязательно)",
                 parse_mode="HTML",
                 reply_markup=terminal_kb(),
             )

@@ -290,7 +290,8 @@ def test_username_probe_sees_a_known_example():
 
 _ENGLISH_LABELS = re.compile(
     r"(?<![\w@/_.-])(trust|Trust score|risk|Mass Ops|Health Dashboard|snippet|"
-    r"search authority|authority|invite link|safe pacing|pacing_mode=safe|flood|Join)(?![\w_-])"
+    r"search authority|authority|invite link|safe pacing|pacing_mode=safe|flood|Join|"
+    r"Free|FREE|User ID|Chat ID|CTA|About|Bio|bio|\[enterprise\]|retention score|freshness score|quality score)(?![\w_-])"
 )
 
 

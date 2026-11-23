@@ -119,7 +119,7 @@ async def cb_nodes_add(callback: CallbackQuery, state: FSMContext) -> None:
     await state.set_state(NodesAddFSM.waiting_chat_id)
     await callback.message.edit_text(
         "<b>📡 Новый воркспейс — шаг 1/3</b>\n\n"
-        "Отправьте <b>Chat ID</b> форум-супергруппы.\n\n"
+        "Отправьте <b>ID чата</b> форум-супергруппы.\n\n"
         "Как получить ID:\n"
         "• Добавьте @userinfobot в группу\n"
         "• Или используйте <code>getUpdates</code> в Bot API\n\n"
@@ -136,7 +136,7 @@ async def msg_nodes_chat_id(message: Message, state: FSMContext) -> None:
         chat_id = int(raw)
     except (TypeError, ValueError):
         await message.answer(
-            "❌ Неверный формат. Введите числовой Chat ID, например <code>-1001234567890</code>",
+            "❌ Неверный формат. Введите числовой ID чата, например <code>-1001234567890</code>",
             parse_mode="HTML",
             reply_markup=_cancel_kb(),
         )
@@ -585,7 +585,7 @@ async def msg_prov_topic_name(
             "Проверьте:\n"
             "• Бот является администратором форум-группы\n"
             "• Группа включена в форум-режим\n"
-            "• Chat ID корректен",
+            "• ID чата указан верно",
             parse_mode="HTML",
             reply_markup=kb.as_markup(),
         )

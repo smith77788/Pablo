@@ -664,7 +664,7 @@ async def cb_chan_menu(callback: CallbackQuery, pool: asyncpg.Pool, state: FSMCo
         "• <b>Создать</b> → новый канал или группу\n"
         "• <b>Вступить / Выйти</b> → управление подписками\n"
         "• <b>Опубликовать пост</b> → от имени аккаунта\n"
-        "• <b>Профиль аккаунта</b> → имя, bio, юзернейм аккаунта\n"
+        "• <b>Профиль аккаунта</b> → имя, «О себе», юзернейм аккаунта\n"
         "• <b>⚡ Массовые операции</b> → одно действие на всех аккаунтах\n\n"
         "💡 Нет аккаунтов? 📱 /accounts",
         parse_mode="HTML",
@@ -3208,7 +3208,7 @@ async def cb_profile_menu(callback: CallbackQuery, callback_data: ChanCb) -> Non
 
 for _prof_action, _prof_field, _prof_prompt in [
     ("prof_name", "first_name", "✏️ Введите новое <b>имя</b>:"),
-    ("prof_bio", "about", "📝 Введите новое <b>bio</b> (до 70 символов):"),
+    ("prof_bio", "about", "📝 Введите новый текст <b>«О себе»</b> (до 70 символов):"),
     ("prof_uname", "username", "🔤 Введите новый <b>юзернейм</b> аккаунта (без @):"),
 ]:
 
@@ -4549,7 +4549,7 @@ async def cb_bulk_confirm_selection(
     elif op in ("prof_name", "prof_bio", "prof_uname"):
         field_map = {
             "prof_name": ("first_name", "✏️ Введите новое <b>имя</b>:"),
-            "prof_bio": ("about", "📝 Введите новое <b>bio</b> (до 70 символов):"),
+            "prof_bio": ("about", "📝 Введите новый текст <b>«О себе»</b> (до 70 символов):"),
             "prof_uname": (
                 "username",
                 "🔤 Введите <b>юзернейм</b> (для 2-го+ аккаунтов добавится цифра):",

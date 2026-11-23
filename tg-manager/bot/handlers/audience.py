@@ -438,7 +438,7 @@ async def cb_send_user(
     )
     await callback.message.edit_text(
         "📤 <b>Написать пользователю</b>\n\n"
-        "Введите Telegram User ID пользователя\n"
+        "Введите Telegram ID пользователя\n"
         "(число, например <code>123456789</code>):",
         parse_mode="HTML",
         reply_markup=kb.as_markup(),
@@ -450,12 +450,12 @@ async def msg_send_user_id(message: Message, state: FSMContext) -> None:
     try:
         user_id = int(message.text.strip())
     except ValueError:
-        await message.answer("❌ Неверный формат. Введите числовой User ID:")
+        await message.answer("❌ Неверный формат. Введите числовой ID пользователя:")
         return
     await state.update_data(target_user_id=user_id)
     await state.set_state(SendToUser.waiting_message)
     await message.answer(
-        f"✅ User ID: <code>{user_id}</code>\n\nТеперь введите текст сообщения:",
+        f"✅ ID пользователя: <code>{user_id}</code>\n\nТеперь введите текст сообщения:",
         parse_mode="HTML",
         reply_markup=terminal_kb(),
     )

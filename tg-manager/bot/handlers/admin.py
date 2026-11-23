@@ -853,7 +853,7 @@ async def cb_admin(
     elif action == "broadcast":
         kb = InlineKeyboardBuilder()
         kb.button(text="👥 Все пользователи платформы", callback_data="adm:bc_seg:all")
-        kb.button(text="🆓 Только Free", callback_data="adm:bc_seg:free")
+        kb.button(text="🆓 Только бесплатный", callback_data="adm:bc_seg:free")
         kb.button(text="💎 Только платные", callback_data="adm:bc_seg:paid")
         kb.button(text="🤖 Аудиториям всех ботов", callback_data="adm:bc_botusers")
         kb.button(text="📢 Во все каналы/группы", callback_data="adm:bc_channels")
@@ -863,7 +863,7 @@ async def cb_admin(
             "📨 <b>Рассылка владельца сервиса</b>\n\n"
             "Выберите <b>сегмент</b> получателей:\n\n"
             "👥 <b>Все</b> — все зарегистрированные пользователи\n"
-            "🆓 <b>Free</b> — пользователи без подписки\n"
+            "🆓 <b>Бесплатный</b> — пользователи без подписки\n"
             "💎 <b>Платные</b> — пользователи с активной подпиской\n\n"
             "🤖 <b>Аудиториям ботов</b> — подписчики всех управляемых ботов\n"
             "📢 <b>Каналы/группы</b> — пост во все подключённые каналы",
@@ -875,7 +875,7 @@ async def cb_admin(
         seg = action.removeprefix("bc_seg:")
         seg_labels = {
             "all":  "всем пользователям платформы",
-            "free": "пользователям без подписки (Free)",
+            "free": "пользователям без подписки",
             "paid": "платным пользователям",
         }
         seg_label = seg_labels.get(seg, seg)
@@ -1013,7 +1013,7 @@ async def cb_admin(
             "Отправьте в формате:\n"
             "<code>USER_ID план месяцев</code>\n\n"
             "Пример: <code>123456789 paid 3</code>\n"
-            "Планы: <code>paid</code> (или старые: starter, pro, enterprise)",
+            "Планы: <code>paid</code> (старые названия тоже принимаются: starter, pro, enterprise)",
             parse_mode="HTML",
             reply_markup=_back_kb(),
         )
@@ -1032,7 +1032,7 @@ async def cb_admin(
             "Отправьте Telegram ID пользователя:\n"
             "<code>USER_ID</code>\n\n"
             "Пример: <code>123456789</code>\n\n"
-            "Подписка будет деактивирована, пользователь вернётся на FREE.",
+            "Подписка будет деактивирована, пользователь вернётся на бесплатный план.",
             parse_mode="HTML",
             reply_markup=_back_kb(),
         )
@@ -1169,7 +1169,7 @@ async def cb_admin(
             "<code>USER_ID план месяцев</code> — по одному на строку\n\n"
             "Пример:\n"
             "<code>123456 paid 3\n789012 paid 1\n345678 paid 6</code>\n\n"
-            "Планы: <code>paid</code> (или старые: starter, pro, enterprise)",
+            "Планы: <code>paid</code> (старые названия тоже принимаются: starter, pro, enterprise)",
             parse_mode="HTML",
             reply_markup=_back_kb(),
         )
@@ -2760,7 +2760,7 @@ async def handle_admin_message(
             await db.revoke_plan_from_user(pool, uid, message.from_user.id)
             await message.answer(
                 f"❌ Подписка отозвана у пользователя <code>{uid}</code>.\n"
-                f"Пользователь переведён на план <b>FREE</b>.",
+                f"Пользователь переведён на <b>бесплатный</b> план.",
                 parse_mode="HTML",
                 reply_markup=_admin_main_kb(),
             )
@@ -2768,7 +2768,7 @@ async def handle_admin_message(
                 await message.bot.send_message(
                     uid,
                     "ℹ️ <b>Ваша подписка была отозвана администратором.</b>\n\n"
-                    "Вы переведены на план FREE.\n"
+                    "Вы переведены на бесплатный план.\n"
                     "Для восстановления доступа оформите подписку: /menu → ⚙️ Настройки → 💳 Подписка",
                     parse_mode="HTML",
                 )
