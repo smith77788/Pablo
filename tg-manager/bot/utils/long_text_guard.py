@@ -12,6 +12,12 @@ HTML в лимит не входит) и, если текст не влезае�
 закрывает оставшиеся открытыми теги и дописывает, что дальше не поместилось.
 Резать по строкам, а не по знаку, нужно ради разметки: середина `<a href=…>` или
 `&amp;` превращает ответ в «can't parse entities», то есть в ту же тишину.
+
+Второе, той же природы: «can't parse entities». Экран, в который попал
+неэкранированный `<` или `&` из данных (имя канала, ответ подписчика, причина
+от Telegram), Telegram не принимает целиком — и опять кнопка «ничего не
+делает». Тогда тот же текст уходит ещё раз простым текстом: без жирного
+шрифта, но с содержанием и кнопками. Повтор один, только для HTML.
 """
 from __future__ import annotations
 
@@ -89,18 +95,45 @@ def _is_html(method) -> bool:
     return True
 
 
+# Только теги, которые понимает Telegram: «<x>» из данных — это текст, его
+# оставляем (ради него разметка и не разобралась).
+_TG_TAGS = re.compile(
+    r"</?(b|strong|i|em|u|ins|s|strike|del|code|pre|a|blockquote|tg-spoiler|"
+    r"tg-emoji|span|br)(\s[^>]*)?/?>",
+    re.IGNORECASE,
+)
+
+
+def as_plain(text: str) -> str:
+    """Тот же текст без разметки — для повтора после «can't parse entities»."""
+    return html.unescape(_TG_TAGS.sub("", text))
+
+
 class LongTextGuard(BaseRequestMiddleware):
     async def __call__(self, make_request, bot, method):
-        if isinstance(method, (SendMessage, EditMessageText)):
-            text = getattr(method, "text", None)
-            if isinstance(text, str) and len(text) > _BUDGET:
-                mode = getattr(method, "parse_mode", None)
-                if not (isinstance(mode, str) and mode.upper().startswith("MARKDOWN")):
-                    fitted = fit(text, as_html=_is_html(method))
-                    if fitted is not text:
-                        log.warning("экран не влез в 4096 знаков (%d) — обрезан", len(text))
-                        method = method.model_copy(update={"text": fitted})
-        return await make_request(bot, method)
+        if not isinstance(method, (SendMessage, EditMessageText)):
+            return await make_request(bot, method)
+        method = self._fit(method)
+        try:
+            return await make_request(bot, method)
+        except Exception as exc:
+            if "can't parse entities" not in str(exc).lower() or not _is_html(method):
+                raise
+            log.warning("разметка экрана не разобралась — шлю простым текстом: %s", exc)
+            plain = method.model_copy(update={"text": as_plain(method.text), "parse_mode": None})
+            return await make_request(bot, plain)
+
+    @staticmethod
+    def _fit(method):
+        text = getattr(method, "text", None)
+        if isinstance(text, str) and len(text) > _BUDGET:
+            mode = getattr(method, "parse_mode", None)
+            if not (isinstance(mode, str) and mode.upper().startswith("MARKDOWN")):
+                fitted = fit(text, as_html=_is_html(method))
+                if fitted is not text:
+                    log.warning("экран не влез в 4096 знаков (%d) — обрезан", len(text))
+                    method = method.model_copy(update={"text": fitted})
+        return method
 
 
 def install(bot) -> None:
