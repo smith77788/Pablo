@@ -419,31 +419,53 @@ def _row_signals(r) -> dict:
     }
 
 
+_UPSERT_CHUNK = 500
+
+
 async def compute_owner(pool: asyncpg.Pool, owner_id: int) -> int:
     """Пересчитать риск ВСЕХ аккаунтов владельца (с сессией). Возвращает число.
 
     Считаются все, а не только те, у кого были операции: иначе оценка
     аккаунта, переставшего работать, не остывает никогда.
+
+    Пишется пачками по `_UPSERT_CHUNK` (executemany), а не запросом на
+    аккаунт: на флоте в тысячи аккаунтов это тысячи round-trip'ов на каждом
+    круге фонового цикла и на каждом проходе щита. Не прошла пачка — она
+    переписывается построчно, и битая строка, как и раньше, теряет только
+    себя.
     """
     rows = await pool.fetch(_SIGNALS_SQL, owner_id)
-    n = 0
+    params = []
     for r in rows or []:
         res = score_signals(_row_signals(r))
         ops_1h = int(r["ops_1h"] or 0)
         floods_1h = int(r["floods_1h"] or 0)
         flood_rate_1h = floods_1h / max(ops_1h + floods_1h, 1)
+        params.append((
+            int(r["id"]), res["risk_score"],
+            res["ban_probability"], round(flood_rate_1h, 4),
+            int(r["ops_24h"] or 0), r["last_flood_at"],
+            json.dumps(res["factors"], ensure_ascii=False),
+        ))
+    n = 0
+    for i in range(0, len(params), _UPSERT_CHUNK):
+        chunk = params[i:i + _UPSERT_CHUNK]
         try:
-            await pool.execute(
-                _UPSERT_SQL, int(r["id"]), res["risk_score"],
-                res["ban_probability"], round(flood_rate_1h, 4),
-                int(r["ops_24h"] or 0), r["last_flood_at"],
-                json.dumps(res["factors"], ensure_ascii=False),
-            )
-            n += 1
+            await pool.executemany(_UPSERT_SQL, chunk)
+            n += len(chunk)
+            continue
         except asyncio.CancelledError:
             raise
         except Exception as e:
-            log.debug("physics_engine: upsert acc=%s: %s", r["id"], e)
+            log.debug("physics_engine: пачка не записалась, пишу построчно: %s", e)
+        for row in chunk:
+            try:
+                await pool.execute(_UPSERT_SQL, *row)
+                n += 1
+            except asyncio.CancelledError:
+                raise
+            except Exception as e:
+                log.debug("physics_engine: upsert acc=%s: %s", row[0], e)
     return n
 
 

@@ -64,51 +64,63 @@ def is_closing_message(text: str | None, media_type: str | None = None) -> bool:
 
 # ── Список диалогов ──────────────────────────────────────────────────────────
 
+# Один проход по сообщениям вместо трёх (свод, последнее, последнее живое) и
+# без коррелированного подсчёта непрочитанных на каждый диалог: «последнее»
+# берётся первым элементом array_agg в том же порядке, что был у DISTINCT ON
+# (msg_date DESC NULLS LAST, msg_id DESC — msg_id уникален в диалоге, так что
+# выбор однозначен), а граница непрочитанного — оконным максимумом исходящих.
+# Стенд: 30 000 диалогов 192 -> 76 мс, 5000 диалогов × 40 сообщений 500 ->
+# 360 мс. Совпадение со старым запросом сверяет
+# tests/test_vault_dialogs_one_pass_postgres.py.
 _DIALOGS_SQL = """
-WITH agg AS (
-    SELECT chat_id,
-           MAX(peer_name)     AS peer_name,
-           MAX(peer_username) AS peer_username,
-           COUNT(*)           AS total,
-           COUNT(*) FILTER (WHERE is_deleted)               AS deleted,
-           COUNT(*) FILTER (WHERE media_type IS NOT NULL)   AS media,
-           MIN(msg_date)      AS first_date,
-           MAX(msg_date)      AS last_date,
-           MAX(msg_date) FILTER (WHERE direction='out')     AS last_out,
-           MAX(msg_date) FILTER (WHERE direction='in' AND NOT is_deleted) AS last_in
+WITH m AS (
+    SELECT chat_id, peer_name, peer_username, is_deleted, media_type, msg_date,
+           msg_id, direction, text_enc,
+           MAX(msg_date) FILTER (WHERE direction='out')
+               OVER (PARTITION BY chat_id) AS chat_last_out
       FROM vault_messages
      WHERE owner_id=$1 AND ($2::bigint IS NULL OR chat_id=$2)
-     GROUP BY chat_id
 ),
-last AS (
-    SELECT DISTINCT ON (chat_id) chat_id, text_enc, media_type, is_deleted, direction
-      FROM vault_messages
-     WHERE owner_id=$1 AND ($2::bigint IS NULL OR chat_id=$2)
-     ORDER BY chat_id, msg_date DESC NULLS LAST, msg_id DESC
-),
-live AS (
-    SELECT DISTINCT ON (chat_id) chat_id, text_enc AS live_text_enc,
-           media_type AS live_media_type, direction AS live_direction
-      FROM vault_messages
-     WHERE owner_id=$1 AND NOT is_deleted AND ($2::bigint IS NULL OR chat_id=$2)
-     ORDER BY chat_id, msg_date DESC NULLS LAST, msg_id DESC
+agg AS (
+    SELECT m.chat_id,
+           MAX(m.peer_name)     AS peer_name,
+           MAX(m.peer_username) AS peer_username,
+           COUNT(*)             AS total,
+           COUNT(*) FILTER (WHERE m.is_deleted)               AS deleted,
+           COUNT(*) FILTER (WHERE m.media_type IS NOT NULL)   AS media,
+           MIN(m.msg_date)      AS first_date,
+           MAX(m.msg_date)      AS last_date,
+           MAX(m.msg_date) FILTER (WHERE m.direction='out')     AS last_out,
+           MAX(m.msg_date) FILTER (WHERE m.direction='in' AND NOT m.is_deleted) AS last_in,
+           (array_agg(m.text_enc   ORDER BY m.msg_date DESC NULLS LAST, m.msg_id DESC))[1] AS text_enc,
+           (array_agg(m.media_type ORDER BY m.msg_date DESC NULLS LAST, m.msg_id DESC))[1] AS media_type,
+           (array_agg(m.is_deleted ORDER BY m.msg_date DESC NULLS LAST, m.msg_id DESC))[1] AS last_deleted,
+           (array_agg(m.direction  ORDER BY m.msg_date DESC NULLS LAST, m.msg_id DESC))[1] AS last_direction,
+           (array_agg(m.text_enc   ORDER BY m.msg_date DESC NULLS LAST, m.msg_id DESC)
+                FILTER (WHERE NOT m.is_deleted))[1] AS live_text_enc,
+           (array_agg(m.media_type ORDER BY m.msg_date DESC NULLS LAST, m.msg_id DESC)
+                FILTER (WHERE NOT m.is_deleted))[1] AS live_media_type,
+           (array_agg(m.direction  ORDER BY m.msg_date DESC NULLS LAST, m.msg_id DESC)
+                FILTER (WHERE NOT m.is_deleted))[1] AS live_direction,
+           COUNT(*) FILTER (
+               WHERE m.direction='in' AND NOT m.is_deleted
+                 AND m.msg_date > GREATEST(COALESCE(m.chat_last_out, '-infinity'::timestamptz),
+                                           COALESCE(rs.read_at, '-infinity'::timestamptz))
+           ) AS unread
+      FROM m
+      LEFT JOIN vault_chat_state rs ON rs.owner_id=$1 AND rs.chat_id=m.chat_id
+     GROUP BY m.chat_id
 )
-SELECT a.*, l.text_enc, l.media_type, l.is_deleted AS last_deleted,
-       l.direction AS last_direction,
-       v.live_text_enc, v.live_media_type, v.live_direction,
+SELECT a.chat_id, a.peer_name, a.peer_username, a.total, a.deleted, a.media,
+       a.first_date, a.last_date, a.last_out, a.last_in,
+       a.text_enc, a.media_type, a.last_deleted, a.last_direction,
+       a.live_text_enc, a.live_media_type, a.live_direction,
        COALESCE(s.pinned, FALSE)   AS pinned,
        COALESCE(s.archived, FALSE) AS archived,
        COALESCE(s.muted, FALSE)    AS muted,
        s.read_at, s.handled_at, s.purchased_at, s.note,
-       (SELECT COUNT(*) FROM vault_messages u
-         WHERE u.owner_id=$1 AND u.chat_id=a.chat_id AND u.direction='in'
-           AND NOT u.is_deleted
-           AND u.msg_date > GREATEST(COALESCE(a.last_out, '-infinity'::timestamptz),
-                                     COALESCE(s.read_at, '-infinity'::timestamptz))
-       ) AS unread
+       a.unread
   FROM agg a
-  LEFT JOIN last l USING (chat_id)
-  LEFT JOIN live v USING (chat_id)
   LEFT JOIN vault_chat_state s ON s.owner_id=$1 AND s.chat_id=a.chat_id
 """
 
