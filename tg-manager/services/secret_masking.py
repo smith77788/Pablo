@@ -11,6 +11,7 @@
 """
 from __future__ import annotations
 
+import functools
 import re
 
 _MASK = "***"
@@ -127,6 +128,25 @@ def _scrub_str(value: str) -> str:
     return _BOT_TOKEN_RE.sub(lambda m: f"{m.group(1)}:{_MASK}", value)
 
 
+@functools.lru_cache(maxsize=4096)
+def _key_kind(key: str) -> int:
+    """0 — обычный ключ, 1 — секрет целиком, 2 — адрес с паролем внутри.
+
+    Ключей в ответах — десятки разных на сотни тысяч вхождений, поэтому
+    `lower()` и проверка по наборам считаются один раз на имя ключа.
+    """
+    low = key.lower()
+    if low in _SECRET_KEYS:
+        return 1
+    if low in _URL_CRED_KEYS:
+        return 2
+    return 0
+
+
+# Значения, в которых секрета быть не может по типу: их не обходим вовсе.
+_PLAIN_TYPES = frozenset({int, float, bool, type(None)})
+
+
 def scrub_payload(data, _depth: int = 0):
     """Последний барьер перед отдачей данных наружу: секретов в ответе нет.
 
@@ -136,33 +156,56 @@ def scrub_payload(data, _depth: int = 0):
     секретах не подумал.
 
     Возвращает исходный объект, если чистить нечего — большие ответы не
-    копируются лишний раз.
+    копируются лишний раз. Копия словаря/списка заводится только при первой
+    замене: проход идёт по каждому ответу API, и на мегабайтных ответах
+    (топология сети, здоровье флота) прежний обход со сборкой копии каждого
+    словаря занимал больше половины времени ручки.
     """
     if _depth > _MAX_SCRUB_DEPTH:
         return data
-    if isinstance(data, str):
+    t = type(data)
+    if t in _PLAIN_TYPES:
+        return data
+    if t is str or isinstance(data, str):
         return _scrub_str(data)
+    deeper = _depth + 1
     if isinstance(data, dict):
-        changed = False
-        out = {}
+        out = None
         for key, val in data.items():
-            if isinstance(key, str) and key.lower() in _SECRET_KEYS:
+            kind = _key_kind(key) if isinstance(key, str) else 0
+            if kind == 1:
                 new = _MASK if val not in (None, "", b"") else val
-            elif (isinstance(key, str) and key.lower() in _URL_CRED_KEYS
-                    and isinstance(val, str) and "@" in val):
+            elif kind == 2 and isinstance(val, str) and "@" in val:
                 new = _URL_CRED_RE.sub(
                     lambda m: f"{m.group(1)}{m.group(2)}:{_MASK}@", val)
+            elif type(val) in _PLAIN_TYPES:
+                continue
+            elif type(val) is str:
+                if deeper > _MAX_SCRUB_DEPTH or len(val) < _MIN_SECRET_LEN or ":" not in val:
+                    continue
+                new = _scrub_str(val)
             else:
-                new = scrub_payload(val, _depth + 1)
+                new = scrub_payload(val, deeper)
             if new is not val:
-                changed = True
-            out[key] = new
-        return out if changed else data
+                if out is None:
+                    out = dict(data)
+                out[key] = new
+        if out is None:
+            return data
+        return out
     if isinstance(data, (list, tuple)):
-        items = [scrub_payload(v, _depth + 1) for v in data]
-        if any(n is not o for n, o in zip(items, data)):
-            return type(data)(items) if isinstance(data, tuple) else items
-        return data
+        items = None
+        for i, v in enumerate(data):
+            if type(v) in _PLAIN_TYPES:
+                continue
+            n = scrub_payload(v, deeper)
+            if n is not v:
+                if items is None:
+                    items = list(data)
+                items[i] = n
+        if items is None:
+            return data
+        return type(data)(items) if isinstance(data, tuple) else items
     return data
 
 
