@@ -375,6 +375,93 @@ async def get_history(session_string: str, acc: dict | None, peer: int | str,
         await _unclaim(_acc_id)
 
 
+def _status_label(status: Any) -> str | None:
+    """Был(а) в сети — по-русски, без английских имён классов Telethon."""
+    if status is None:
+        return None
+    name = type(status).__name__
+    if name == "UserStatusOnline":
+        return "в сети"
+    if name == "UserStatusOffline":
+        when = getattr(status, "was_online", None)
+        return f"был(а) {when.strftime('%d.%m.%Y %H:%M')} UTC" if when else "не в сети"
+    return {"UserStatusRecently": "был(а) недавно",
+            "UserStatusLastWeek": "был(а) на этой неделе",
+            "UserStatusLastMonth": "был(а) в этом месяце",
+            "UserStatusEmpty": "давно не заходил(а)"}.get(name)
+
+
+async def get_user_profile(session_string: str, acc: dict | None, user_id: int,
+                           access_hash: int | None = None,
+                           pool=None) -> dict[str, Any]:
+    """Профиль пользователя по голому Telegram ID глазами аккаунта флота.
+
+    Нужен там, где у контакта нет ни @username, ни телефона: ссылки t.me/<ник>
+    нет, а `tg://user?id=` открывается только у того клиента, который этого
+    человека уже знает. Аккаунт, видевший человека (общий чат, переписка,
+    контакт), отдаёт профиль целиком — и заодно свежий @username, если он
+    появился после синка.
+
+    code='unresolved' — этот аккаунт человека не знает (пробовать другой).
+    """
+    from services.account_manager import (PeerUnresolvedError, _make_client,
+                                          resolve_user_peer)
+
+    _acc_id, _busy = await _claim(acc)
+    if _busy:
+        return dict(_BUSY_RESULT)
+    client = None
+    try:
+        client = _make_client(session_string, acc)
+        await asyncio.wait_for(client.connect(), timeout=_CONNECT_TIMEOUT)
+        try:
+            peer = await asyncio.wait_for(
+                resolve_user_peer(client, int(user_id), access_hash),
+                timeout=_ACTION_TIMEOUT * 3)
+        except PeerUnresolvedError as exc:
+            return {"ok": False, "code": "unresolved", "error": str(exc)}
+        from telethon.tl.functions.users import GetFullUserRequest
+        full = await asyncio.wait_for(client(GetFullUserRequest(peer)),
+                                      timeout=_ACTION_TIMEOUT)
+        user = next((u for u in (getattr(full, "users", None) or [])
+                     if getattr(u, "id", None) == int(user_id)), None)
+        fu = getattr(full, "full_user", None)
+        usernames = [getattr(x, "username", None)
+                     for x in (getattr(user, "usernames", None) or [])
+                     if getattr(x, "active", True)]
+        main_un = getattr(user, "username", None) or next(
+            (u for u in usernames if u), None)
+        return {"ok": True, "profile": {
+            "id": int(user_id),
+            "first_name": getattr(user, "first_name", None),
+            "last_name": getattr(user, "last_name", None),
+            "username": main_un,
+            "usernames": [u for u in usernames if u],
+            "phone": getattr(user, "phone", None),
+            "bio": getattr(fu, "about", None),
+            "premium": bool(getattr(user, "premium", False)),
+            "verified": bool(getattr(user, "verified", False)),
+            "bot": bool(getattr(user, "bot", False)),
+            "scam": bool(getattr(user, "scam", False) or getattr(user, "fake", False)),
+            "deleted": bool(getattr(user, "deleted", False)),
+            "mutual_contact": bool(getattr(user, "mutual_contact", False)),
+            "common_chats": getattr(fu, "common_chats_count", None),
+            "status": _status_label(getattr(user, "status", None)),
+        }}
+    except Exception as exc:
+        code, human = await note_error(pool, acc, exc)
+        log.warning("account_console.get_user_profile acc=%s: %s",
+                    (acc or {}).get("id"), exc)
+        return {"ok": False, "code": code, "error": human}
+    finally:
+        if client is not None:
+            try:
+                await client.disconnect()
+            except Exception:
+                pass
+        await _unclaim(_acc_id)
+
+
 async def send_text(session_string: str, acc: dict | None, peer: int | str,
                     text: str, access_hash: int | None = None,
                     pool=None) -> dict[str, Any]:
