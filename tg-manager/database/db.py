@@ -3652,8 +3652,11 @@ async def get_tg_accounts(
 ) -> list:
     base = (
         "SELECT id, phone, tg_user_id, first_name, username, added_at, is_active, "
+        # session_str один раз: прежний псевдоним `session_string` вёз ту же
+        # зашифрованную строку второй раз в каждой строке — на флоте в тысячи
+        # аккаунтов это мегабайты на каждое открытие меню. Читатели берут
+        # `acc.get("session_str") or acc.get("session_string")`.
         "session_str, "
-        "session_str AS session_string, "
         "COALESCE(acc_status, 'active') AS acc_status, status_checked_at, status_reason, "
         "(session_str IS NOT NULL AND session_str <> '') AS has_session, "
         "trust_score, cooldown_until, pool, tags, warnings "
@@ -3666,6 +3669,16 @@ async def get_tg_accounts(
             status_filter,
         )
     return await pool.fetch(base + " ORDER BY added_at DESC", owner_id)
+
+
+async def count_tg_accounts(pool: asyncpg.Pool, owner_id: int) -> int:
+    """Сколько аккаунтов у владельца — для проверки лимита тарифа.
+
+    Раньше лимит проверялся как `len(await get_tg_accounts(...))`: ради одного
+    числа из базы ехал весь флот вместе с зашифрованными сессиями.
+    """
+    return int(await pool.fetchval(
+        "SELECT COUNT(*) FROM tg_accounts WHERE owner_id=$1", owner_id) or 0)
 
 
 async def update_acc_status(
