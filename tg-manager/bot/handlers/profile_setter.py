@@ -45,9 +45,9 @@ _NO_INPUT_OPS = {
 _LOCAL_OPS = {"loc_versions", "loc_gender_m", "loc_gender_f", "loc_role_add", "loc_role_del"}
 # Человекочитаемые метки операций.
 _OP_LABELS = {
-    "name": "Имя/Фамилия/Bio", "avatar": "Фото", "username": "Юзернейм",
+    "name": "Имя/Фамилия/О себе", "avatar": "Фото", "username": "Юзернейм",
     "2fa": "2FA пароль", "reset_2fa": "Удалить 2FA", "remove_avatar": "Удалить фото",
-    "remove_username": "Удалить юзернейм", "clear_bio": "Удалить bio",
+    "remove_username": "Удалить юзернейм", "clear_bio": "Удалить «О себе»",
     "close_sessions": "Закрыть сессии", "set_online": "Держать онлайн",
     "check_restriction": "Проверка ограничения", "login_code": "Код авторизации",
     "privacy": "Приватность",
@@ -91,7 +91,7 @@ async def cb_setter_menu(
     total = await _total_accs(pool, callback.from_user.id)
     kb = InlineKeyboardBuilder()
     # Настройка аккаунтов
-    kb.button(text="📝 Имя/Bio", callback_data=ProfileSetterCb(action="op_name"))
+    kb.button(text="📝 Имя/О себе", callback_data=ProfileSetterCb(action="op_name"))
     kb.button(text="🖼 Фото", callback_data=ProfileSetterCb(action="op_avatar"))
     kb.button(text="🆔 Юзернейм", callback_data=ProfileSetterCb(action="op_username"))
     kb.button(text="🗑 Удалить фото", callback_data=ProfileSetterCb(action="op_remove_avatar"))
@@ -131,9 +131,9 @@ async def cb_setter_menu(
 # ── Операции С вводом значения ───────────────────────────────────────────────
 
 _INPUT_PROMPTS = {
-    "name": ("📝 <b>Имя / Фамилия / Bio</b>\n\nВведите (каждое поле с новой строки):\n\n"
+    "name": ("📝 <b>Имя / Фамилия / О себе</b>\n\nВведите (каждое поле с новой строки):\n\n"
              "<code>Имя: {Алекс|Макс|Игорь}\nФамилия: {Петров|Иванов}\n"
-             "Bio: {Предприниматель|Бизнес}</code>\n\n"
+             "О себе: {Предприниматель|Бизнес}</code>\n\n"
              "Пустое поле = не менять. Спинтакс {A|B} — рандом на каждый акк."),
     "avatar": ("🖼 <b>Фото профиля</b>\n\nПрямая ссылка на изображение (JPG/PNG):\n\n"
                "<code>https://example.com/photo.jpg</code>"),
@@ -192,7 +192,7 @@ async def msg_setter_value(message: Message, state: FSMContext, pool: asyncpg.Po
     if op == "name":
         parsed = _parse_name_bio(text)
         if not any(parsed.values()):
-            await message.answer("⚠️ Не распознано. Формат:\nИмя: Текст\nФамилия: Текст\nBio: Текст",
+            await message.answer("⚠️ Не распознано. Формат:\nИмя: Текст\nФамилия: Текст\nО себе: Текст",
                                  reply_markup=terminal_kb())
             return
         await state.update_data(name_data=parsed)

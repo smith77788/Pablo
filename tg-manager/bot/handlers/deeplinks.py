@@ -138,7 +138,7 @@ async def cb_dl_create(
     await callback.message.edit_text(
         "🔗 <b>Новый диплинк</b>\n\n"
         "Введите название ссылки (для вашего удобства):\n"
-        "Например: <code>Instagram bio</code>, <code>VK post</code>, <code>YouTube desc</code>",
+        "Например: <code>Instagram профиль</code>, <code>VK пост</code>, <code>YouTube описание</code>",
         parse_mode="HTML",
         reply_markup=_dl_cancel_kb(callback_data.bot_id),
     )
