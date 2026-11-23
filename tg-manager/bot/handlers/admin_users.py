@@ -842,7 +842,7 @@ async def cb_export_csv_users(callback: CallbackQuery, pool: asyncpg.Pool) -> No
         users = await db.get_all_platform_users(pool, limit=10000, offset=0)
     except Exception as e:
         log_exc_swallow(log, "Ошибка экспорта CSV пользователей")
-        await callback.message.answer(f"❌ Ошибка: {owner_error(e)}")
+        await callback.message.answer(f"❌ Ошибка: {owner_error(e)}", reply_markup=terminal_kb())
         return
 
     import io

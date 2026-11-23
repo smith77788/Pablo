@@ -880,7 +880,7 @@ async def cb_qp_publish(
         mark_handled_error(f"qp_post_confirm channels: {exc}")
         await callback.message.edit_text(
             "⚠️ Ошибка загрузки данных. Попробуйте ещё раз.",
-            parse_mode="HTML",
+            parse_mode="HTML", reply_markup=terminal_kb(),
         )
         return
 

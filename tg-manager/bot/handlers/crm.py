@@ -24,7 +24,7 @@ from bot.keyboards import (
 )
 from bot.utils.subscription import require_plan, locked_text
 from database import db
-from bot.utils.op_helpers import safe_answer
+from bot.utils.op_helpers import safe_answer, terminal_kb
 
 router = Router()
 log = logging.getLogger(__name__)
@@ -1054,7 +1054,7 @@ async def cb_deal_move(
 
     deal = await db.get_crm_deal(pool, callback_data.deal_id, callback.from_user.id)
     if not deal:
-        await callback.message.edit_text("✅ Стадия изменена.")
+        await callback.message.edit_text("✅ Стадия изменена.", reply_markup=terminal_kb())
         return
     activities = await db.get_crm_activity(pool, deal["id"], limit=5)
     stage_label = _STAGE_LABELS.get(deal["stage"], deal["stage"])

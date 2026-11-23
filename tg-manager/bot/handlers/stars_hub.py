@@ -312,7 +312,7 @@ async def cb_delete_confirm(callback: CallbackQuery, callback_data: StarsCb, poo
         "SELECT name FROM stars_experiments WHERE id = $1 AND owner_id = $2",
         callback_data.experiment_id, callback.from_user.id)
     if not row:
-        await callback.message.edit_text("Эксперимент не найден.")
+        await callback.message.edit_text("Эксперимент не найден.", reply_markup=terminal_kb())
         return
     name = _html.escape(row["name"] or "")
     kb = InlineKeyboardBuilder()
