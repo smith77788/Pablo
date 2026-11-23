@@ -105,7 +105,7 @@ async def cb_dashboard(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
         )
 
         text = (
-            "⭐ <b>Stars Yield Optimizer</b>\n\n"
+            "⭐ <b>Звёзды: оптимизация дохода</b>\n\n"
             f"📅 Доход за 30 дней: <b>{total_stars} Stars</b>\n"
             f"📊 Средняя цена: <b>{avg_price} Stars</b>\n"
             f"🧪 Активных экспериментов: <b>{active_count}</b>\n"
@@ -120,7 +120,7 @@ async def cb_dashboard(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
         kb = InlineKeyboardBuilder()
         kb.button(text="◀️ Назад", callback_data=BmCb(action="growth"))
         await callback.message.edit_text(
-            "⭐ <b>Stars Yield Optimizer</b>\n\n"
+            "⭐ <b>Звёзды: оптимизация дохода</b>\n\n"
             "⚠️ Модуль недоступен — таблицы не созданы в базе данных.\n\n"
             "Администратору необходимо применить миграцию <code>schema_v118.sql</code>.",
             parse_mode="HTML",

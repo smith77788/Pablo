@@ -1601,7 +1601,7 @@ async def cb_acc_post_story_start(
     await state.set_state(AccountStory.waiting_media)
     await state.update_data(acc_id=callback_data.acc_id)
     await callback.message.edit_text(
-        "📸 <b>Публикация Story</b>\n\n"
+        "📸 <b>Публикация истории</b>\n\n"
         "Отправьте <b>прямую ссылку</b> на фото или видео (URL):\n"
         "<code>https://example.com/photo.jpg</code>",
         parse_mode="HTML",
@@ -1671,7 +1671,7 @@ async def handle_story_caption(
     else:
         txt = f"❌ Не удалось: <code>{escape(str(res.get('error') or 'ошибка')[:200])}</code>"
     await message.answer(
-        f"📸 <b>Публикация Story</b>\n\n{txt}",
+        f"📸 <b>Публикация истории</b>\n\n{txt}",
         parse_mode="HTML",
         reply_markup=_back_to_acc_markup(acc_id or 0),
     )
@@ -3592,7 +3592,7 @@ async def cb_import_menu(
     )
     kb.button(text="📦 tdata (ZIP-архив)", callback_data=AccCb(action="import_tdata"))
     kb.button(
-        text="📂 Session файл (.session)",
+        text="📂 Файл .session",
         callback_data=AccCb(action="import_session_file"),
     )
     kb.button(
@@ -3603,7 +3603,7 @@ async def cb_import_menu(
     await callback.message.edit_text(
         "📥 <b>Импорт сессии</b>\n\n"
         "Выберите формат:\n\n"
-        "🔑 <b>String Session</b> — строка вида <code>1BQANOTEuA...</code> (Telethon)\n"
+        "🔑 <b>Строка сессии</b> — строка вида <code>1BQANOTEuA...</code> (Telethon)\n"
         "📄 <b>Session JSON</b> — JSON с полями <code>dc_id</code>, <code>auth_key</code> (Pyrogram)\n"
         "📦 <b>tdata</b> — ZIP-архив папки <code>tdata</code> из Telegram Desktop\n"
         "📋 <b>Батч-импорт</b> — несколько Telethon session strings, по одному на строку\n\n"
@@ -3623,7 +3623,7 @@ async def cb_import_string(callback: CallbackQuery, state: FSMContext) -> None:
     kb = InlineKeyboardBuilder()
     kb.button(text="❌ Отмена", callback_data=AccCb(action="import_menu"))
     await callback.message.edit_text(
-        "🔑 <b>Импорт Telethon String Session</b>\n\n"
+        "🔑 <b>Импорт строки сессии Telethon</b>\n\n"
         "Отправьте строку сессии. Она начинается с цифры <code>1</code> "
         "и содержит только буквы, цифры, <code>+</code>, <code>/</code>, <code>=</code>.\n\n"
         "Пример:\n<code>1BQANOTEuAGkA...</code>\n\n"
@@ -3662,7 +3662,7 @@ async def cb_import_pyrogram(callback: CallbackQuery, state: FSMContext) -> None
     kb = InlineKeyboardBuilder()
     kb.button(text="❌ Отмена", callback_data=AccCb(action="import_menu"))
     await callback.message.edit_text(
-        "📄 <b>Импорт Pyrogram JSON Session</b>\n\n"
+        "📄 <b>Импорт сессии Pyrogram (JSON)</b>\n\n"
         "Отправьте JSON с данными сессии. Необходимые поля:\n"
         "• <code>dc_id</code> — номер дата-центра (1–5)\n"
         "• <code>auth_key</code> — ключ авторизации (base64, 256 байт)\n\n"
@@ -3804,7 +3804,7 @@ async def handle_import_tdata(
                     fname = member.filename.replace("\\", "/")
                     if os.path.isabs(fname) or ".." in fname.split("/"):
                         await state.clear()
-                        await msg.edit_text("❌ Архив содержит подозрительные пути (path traversal). Отклонено.")
+                        await msg.edit_text("❌ Архив содержит подозрительные пути к файлам. Архив отклонён.")
                         return
                 # Распаковка до 200 МБ — в поток: на цикле событий это секунды
                 # простоя всего процесса.
@@ -3844,7 +3844,7 @@ async def handle_import_tdata(
             await state.clear()
             kb = InlineKeyboardBuilder()
             kb.button(
-                text="🔑 Импорт через String Session",
+                text="🔑 Импорт строкой сессии",
                 callback_data=AccCb(action="import_string"),
             )
             kb.button(
@@ -3854,10 +3854,10 @@ async def handle_import_tdata(
             kb.button(text="◀️ Назад", callback_data=AccCb(action="import_menu"))
             kb.adjust(1)
             await msg.edit_text(
-                "❌ <b>tdata импорт недоступен</b>\n\n"
+                "❌ <b>Импорт tdata недоступен</b>\n\n"
                 "Пакет <code>opentele</code> не установлен на сервере.\n\n"
                 "<b>Альтернативные способы импорта:</b>\n"
-                "• <b>String Session</b> — скопируйте строку сессии из вашего скрипта\n"
+                "• <b>Строка сессии</b> — скопируйте строку сессии из вашего скрипта\n"
                 "• <b>.session файл</b> — загрузите SQLite-файл Telethon напрямую",
                 parse_mode="HTML",
                 reply_markup=kb.as_markup(),
@@ -4165,7 +4165,7 @@ async def cb_import_batch(callback: CallbackQuery, state: FSMContext) -> None:
     kb = InlineKeyboardBuilder()
     kb.button(text="❌ Отмена", callback_data=AccCb(action="import_menu"))
     await callback.message.edit_text(
-        "📋 <b>Батч-импорт Telethon String Sessions</b>\n\n"
+        "📋 <b>Пакетный импорт строк сессий Telethon</b>\n\n"
         "Отправьте несколько session strings — <b>по одной на строку</b>:\n\n"
         "<code>1BQANOTEuAGkA...\n"
         "1BVtsOIKAGkB...</code>\n\n"
@@ -4442,7 +4442,7 @@ async def fsm_batch_import_text(
     raw = (message.text or "").strip()
     sessions = [ln.strip() for ln in raw.splitlines() if ln.strip()]
     if not sessions:
-        await message.answer("⚠️ Введите хотя бы одну session string:")
+        await message.answer("⚠️ Введите хотя бы одну строку сессии:")
         return
     if len(sessions) > 50:
         sessions = sessions[:50]

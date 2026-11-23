@@ -71,7 +71,7 @@ async def cb_engage_menu(
         f"🌡 Тёплые (1–7 дн):     <b>{segs['warm']}</b> ({pct_warm}%) — недавно заходили\n"
         f"❄️ Холодные (7–30 дн):  <b>{segs['cold']}</b> ({pct_cold}%) — давно нет\n"
         f"💀 Потерянные (30+ дн): <b>{segs['lost']}</b> ({pct_lost}%) — почти ушли\n\n"
-        "<i>💡 Совет: реактивируйте холодных и потерянных — это поднимает engagement rate в поиске.</i>",
+        "<i>💡 Совет: реактивируйте холодных и потерянных — это поднимает вовлечённость и позиции в поиске.</i>",
         parse_mode="HTML",
         reply_markup=engagement_menu(callback_data.bot_id, segs),
     )

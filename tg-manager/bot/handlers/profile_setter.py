@@ -96,7 +96,7 @@ async def cb_setter_menu(
     kb.button(text="🆔 Юзернейм", callback_data=ProfileSetterCb(action="op_username"))
     kb.button(text="🗑 Удалить фото", callback_data=ProfileSetterCb(action="op_remove_avatar"))
     kb.button(text="🗑 Удалить юзернейм", callback_data=ProfileSetterCb(action="op_remove_username"))
-    kb.button(text="🗑 Удалить bio", callback_data=ProfileSetterCb(action="op_clear_bio"))
+    kb.button(text="🗑 Удалить описание профиля", callback_data=ProfileSetterCb(action="op_clear_bio"))
     # Безопасность
     kb.button(text="🔑 Установить 2FA", callback_data=ProfileSetterCb(action="op_2fa"))
     kb.button(text="🔓 Удалить 2FA", callback_data=ProfileSetterCb(action="op_reset_2fa"))

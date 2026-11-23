@@ -135,7 +135,7 @@ async def cb_multigeo_short(
         for (code, _, _), v in zip(LANGUAGES, values)
     }
     await callback.message.edit_text(
-        "📋 <b>Краткие описания (about) по языкам</b>\n\nВыберите язык для редактирования:",
+        "📋 <b>Краткие описания по языкам</b>\n\nВыберите язык для редактирования:",
         parse_mode="HTML",
         reply_markup=multigeo_field(callback_data.bot_id, "short", lang_vals),
     )

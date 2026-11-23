@@ -430,7 +430,7 @@ def _bulk_menu_kb() -> InlineKeyboardBuilder:
         text="✏️ Имя аккаунта (массово)", callback_data=ChanCb(action="bulk_prof_name")
     )
     kb.button(
-        text="📝 Bio аккаунта (массово)", callback_data=ChanCb(action="bulk_prof_bio")
+        text="📝 Описание профиля (массово)", callback_data=ChanCb(action="bulk_prof_bio")
     )
     kb.button(
         text="🔤 Username аккаунта (массово)",
@@ -458,7 +458,7 @@ _BULK_OP_LABELS = {
     "leave": "🚪 Выйти из канала",
     "post": "📤 Опубликовать пост",
     "prof_name": "✏️ Изменить имя",
-    "prof_bio": "📝 Изменить bio",
+    "prof_bio": "📝 Изменить описание профиля",
     "prof_uname": "🔤 Изменить username",
     "chan_uname": "🔤 Username каналам (массово)",
     "chan_about": "📄 Описание каналам (массово)",
@@ -3188,7 +3188,7 @@ async def cb_profile_menu(callback: CallbackQuery, callback_data: ChanCb) -> Non
         text="✏️ Изменить имя", callback_data=ChanCb(action="prof_name", acc_id=acc_id)
     )
     kb.button(
-        text="📝 Изменить bio", callback_data=ChanCb(action="prof_bio", acc_id=acc_id)
+        text="📝 Изменить описание профиля", callback_data=ChanCb(action="prof_bio", acc_id=acc_id)
     )
     kb.button(
         text="🔤 Изменить username",
