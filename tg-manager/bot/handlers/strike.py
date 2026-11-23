@@ -240,7 +240,7 @@ async def cb_strike_settings(callback: CallbackQuery, pool: asyncpg.Pool) -> Non
         log_exc_swallow(log, "cb_strike_settings: _has_access failed")
         access = False
     if not access:
-        await callback.answer("Нет доступа.", show_alert=True)
+        await callback.answer("⛔ Модуль «Массовые жалобы» не подключён. Его открывает подписка «Массовые жалобы» или администратор платформы.", show_alert=True)
         return
     await safe_answer(callback)
 
@@ -724,7 +724,7 @@ async def _show_strike_history(callback: CallbackQuery, pool: asyncpg.Pool) -> N
 @router.callback_query(StrikeCb.filter(F.action == "history"))
 async def cb_strike_history(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
     if not await _has_access(pool, callback.from_user.id):
-        await callback.answer("Нет доступа.", show_alert=True)
+        await callback.answer("⛔ Модуль «Массовые жалобы» не подключён. Его открывает подписка «Массовые жалобы» или администратор платформы.", show_alert=True)
         return
     await safe_answer(callback)
     await _show_strike_history(callback, pool)
@@ -741,7 +741,7 @@ async def cb_strike_rerun(
     state: FSMContext,
 ) -> None:
     if not await _has_access(pool, callback.from_user.id):
-        await callback.answer("Нет доступа.", show_alert=True)
+        await callback.answer("⛔ Модуль «Массовые жалобы» не подключён. Его открывает подписка «Массовые жалобы» или администратор платформы.", show_alert=True)
         return
     history_id = callback_data.page
     try:
@@ -816,7 +816,7 @@ async def cb_strike_admin_grant(
     from bot.utils.subscription import is_platform_admin
 
     if not is_platform_admin(callback.from_user.id):
-        await callback.answer("Нет прав.", show_alert=True)
+        await callback.answer("⛔ Только для администраторов платформы.", show_alert=True)
         return
     target_id = callback_data.page  # page поле используется как target_user_id
     await _ensure_table(pool)
@@ -897,7 +897,7 @@ async def cb_mini_strike_start(
     callback: CallbackQuery, pool: asyncpg.Pool, state: FSMContext
 ) -> None:
     if not await _has_access(pool, callback.from_user.id):
-        await callback.answer("Нет доступа.", show_alert=True)
+        await callback.answer("⛔ Модуль «Массовые жалобы» не подключён. Его открывает подписка «Массовые жалобы» или администратор платформы.", show_alert=True)
         return
     await safe_answer(callback)
     await state.set_state(MiniStrikeFSM.awaiting_target)
@@ -955,7 +955,7 @@ async def cb_mini_strike_category(
     state: FSMContext,
 ) -> None:
     if not await _has_access(pool, callback.from_user.id):
-        await callback.answer("Нет доступа.", show_alert=True)
+        await callback.answer("⛔ Модуль «Массовые жалобы» не подключён. Его открывает подписка «Массовые жалобы» или администратор платформы.", show_alert=True)
         return
 
     sd = await state.get_data()
@@ -1094,7 +1094,7 @@ async def cb_mini_strike_run(
     callback: CallbackQuery, pool: asyncpg.Pool, state: FSMContext
 ) -> None:
     if not await _has_access(pool, callback.from_user.id):
-        await callback.answer("Нет доступа.", show_alert=True)
+        await callback.answer("⛔ Модуль «Массовые жалобы» не подключён. Его открывает подписка «Массовые жалобы» или администратор платформы.", show_alert=True)
         return
 
     # Проверка давления инфраструктуры
@@ -1347,7 +1347,7 @@ async def _show_email_list(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
 @router.callback_query(StrikeCb.filter(F.action == "emails"))
 async def cb_strike_emails(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
     if not await _has_access(pool, callback.from_user.id):
-        await callback.answer("Нет доступа.", show_alert=True)
+        await callback.answer("⛔ Модуль «Массовые жалобы» не подключён. Его открывает подписка «Массовые жалобы» или администратор платформы.", show_alert=True)
         return
     await safe_answer(callback)
     await _show_email_list(callback, pool)
@@ -1358,7 +1358,7 @@ async def cb_email_toggle(
     callback: CallbackQuery, callback_data: StrikeCb, pool: asyncpg.Pool
 ) -> None:
     if not await _has_access(pool, callback.from_user.id):
-        await callback.answer("Нет доступа.", show_alert=True)
+        await callback.answer("⛔ Модуль «Массовые жалобы» не подключён. Его открывает подписка «Массовые жалобы» или администратор платформы.", show_alert=True)
         return
     email_id = callback_data.page
     try:
@@ -1390,7 +1390,7 @@ async def cb_email_del(
     callback: CallbackQuery, callback_data: StrikeCb, pool: asyncpg.Pool
 ) -> None:
     if not await _has_access(pool, callback.from_user.id):
-        await callback.answer("Нет доступа.", show_alert=True)
+        await callback.answer("⛔ Модуль «Массовые жалобы» не подключён. Его открывает подписка «Массовые жалобы» или администратор платформы.", show_alert=True)
         return
     email_id = callback_data.page
     try:
@@ -1413,7 +1413,7 @@ async def cb_email_oauth(
     callback: CallbackQuery, callback_data: StrikeCb, pool: asyncpg.Pool
 ) -> None:
     if not await _has_access(pool, callback.from_user.id):
-        await callback.answer("Нет доступа.", show_alert=True)
+        await callback.answer("⛔ Модуль «Массовые жалобы» не подключён. Его открывает подписка «Массовые жалобы» или администратор платформы.", show_alert=True)
         return
     if not await require_feature(pool, callback.from_user.id, "email_oauth"):
         await callback.answer(
@@ -1453,7 +1453,7 @@ async def cb_email_add(
     callback: CallbackQuery, pool: asyncpg.Pool, state: FSMContext
 ) -> None:
     if not await _has_access(pool, callback.from_user.id):
-        await callback.answer("Нет доступа.", show_alert=True)
+        await callback.answer("⛔ Модуль «Массовые жалобы» не подключён. Его открывает подписка «Массовые жалобы» или администратор платформы.", show_alert=True)
         return
     await safe_answer(callback)
     await state.set_state(StrikeEmailFSM.awaiting_email)

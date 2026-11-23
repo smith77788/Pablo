@@ -188,7 +188,7 @@ async def cb_exp_view(
     callback: CallbackQuery, callback_data: ExperimentCb, pool: asyncpg.Pool
 ) -> None:
     if not await _owns_experiment(pool, callback_data.exp_id, callback.from_user.id):
-        await callback.answer("⛔ Нет доступа.", show_alert=True)
+        await callback.answer("Эксперимент не найден — возможно, он уже удалён. Откройте список заново.", show_alert=True)
         return
     await safe_answer(callback)
     exp = await db.get_experiment(pool, callback_data.exp_id)
@@ -383,7 +383,7 @@ async def cb_exp_start(
         )
         return
     if not await _owns_experiment(pool, callback_data.exp_id, callback.from_user.id):
-        await callback.answer("⛔ Нет доступа.", show_alert=True)
+        await callback.answer("Эксперимент не найден — возможно, он уже удалён. Откройте список заново.", show_alert=True)
         return
     await safe_answer(callback)
     # Guard: don't start if already active
@@ -429,7 +429,7 @@ async def cb_exp_pause(
     callback: CallbackQuery, callback_data: ExperimentCb, pool: asyncpg.Pool
 ) -> None:
     if not await _owns_experiment(pool, callback_data.exp_id, callback.from_user.id):
-        await callback.answer("⛔ Нет доступа.", show_alert=True)
+        await callback.answer("Эксперимент не найден — возможно, он уже удалён. Откройте список заново.", show_alert=True)
         return
     await callback.answer("⏸ Эксперимент приостановлен.")
     await db.set_experiment_status(pool, callback_data.exp_id, "paused")
@@ -458,7 +458,7 @@ async def cb_exp_resume(
         )
         return
     if not await _owns_experiment(pool, callback_data.exp_id, callback.from_user.id):
-        await callback.answer("⛔ Нет доступа.", show_alert=True)
+        await callback.answer("Эксперимент не найден — возможно, он уже удалён. Откройте список заново.", show_alert=True)
         return
     await callback.answer("▶️ Эксперимент возобновлён.")
     await db.set_experiment_status(pool, callback_data.exp_id, "active")
@@ -479,7 +479,7 @@ async def cb_pick_winner(
     callback: CallbackQuery, callback_data: ExperimentCb, pool: asyncpg.Pool
 ) -> None:
     if not await _owns_experiment(pool, callback_data.exp_id, callback.from_user.id):
-        await callback.answer("⛔ Нет доступа.", show_alert=True)
+        await callback.answer("Эксперимент не найден — возможно, он уже удалён. Откройте список заново.", show_alert=True)
         return
     await safe_answer(callback)
     variants = await db.get_experiment_variants(pool, callback_data.exp_id)
@@ -502,7 +502,7 @@ async def cb_set_winner(
     callback: CallbackQuery, callback_data: ExperimentCb, pool: asyncpg.Pool
 ) -> None:
     if not await _owns_experiment(pool, callback_data.exp_id, callback.from_user.id):
-        await callback.answer("⛔ Нет доступа.", show_alert=True)
+        await callback.answer("Эксперимент не найден — возможно, он уже удалён. Откройте список заново.", show_alert=True)
         return
     await callback.answer(
         "🏆 Победитель выбран! Эксперимент завершён.", show_alert=True
