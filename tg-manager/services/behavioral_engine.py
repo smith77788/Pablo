@@ -135,6 +135,9 @@ async def _recompute_scores(pool: asyncpg.Pool) -> None:
                   MIN(occurred_at) AS first_event,
                   COUNT(*) FILTER (WHERE event_type = 'reentry') AS reentry_count,
                   COUNT(*) FILTER (WHERE event_type = 'cross_nav') AS cross_nav_count,
+                  -- Разнообразие переходов — здесь же, а не запросом на сущность.
+                  COUNT(DISTINCT meta->>'to_type') FILTER (WHERE event_type = 'cross_nav')
+                      AS cross_nav_dest_types,
                   COUNT(DISTINCT date_trunc('week', occurred_at)) AS active_weeks,
                   ROUND(STDDEV(
                       EXTRACT(DOW FROM occurred_at) * 24 + EXTRACT(HOUR FROM occurred_at)
@@ -187,19 +190,7 @@ async def _recompute_scores(pool: asyncpg.Pool) -> None:
         cross_nav = r["cross_nav_count"]
         if cross_nav > 0:
             # Check diversity: unique destination types
-            unique_dest = (
-                await pool.fetchval(
-                    """SELECT COUNT(DISTINCT meta->>'to_type')
-                   FROM behavioral_events
-                   WHERE owner_id=$1 AND entity_type=$2 AND entity_id=$3
-                     AND event_type='cross_nav'
-                     AND occurred_at > now() - INTERVAL '30 days'""",
-                    r["owner_id"],
-                    r["entity_type"],
-                    r["entity_id"],
-                )
-                or 0
-            )
+            unique_dest = int(r["cross_nav_dest_types"] or 0)
             diversity_bonus = min(1.5, 0.8 + unique_dest * 0.15)
         else:
             diversity_bonus = 1.0

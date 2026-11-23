@@ -68,12 +68,19 @@ async def _recalculate_scores(pool: asyncpg.Pool) -> None:
         # In cooldown → cap score at 0.2
         if row["cooldown_until"]:
             score = min(score, 0.2)
-        await pool.execute(
-            "UPDATE tg_accounts SET trust_score=$1 WHERE id=$2",
-            score,
-            row["id"],
-        )
         history_batch.append((row["id"], row["owner_id"], score))
+
+    # Одна запись на весь флот вместо UPDATE на аккаунт, и только там, где
+    # число изменилось: trust_score входит в индекс, поэтому каждая «пустая»
+    # перезапись — новая версия строки и новые записи индекса.
+    if history_batch:
+        await pool.execute(
+            """UPDATE tg_accounts a SET trust_score = v.score
+               FROM unnest($1::int[], $2::float8[]) AS v(id, score)
+               WHERE a.id = v.id AND a.trust_score IS DISTINCT FROM v.score""",
+            [h[0] for h in history_batch],
+            [h[2] for h in history_batch],
+        )
 
     # Корректируем trust для ограниченных аккаунтов, которые могли быть пересчитаны ранее
     try:

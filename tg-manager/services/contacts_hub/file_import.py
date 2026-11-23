@@ -309,7 +309,124 @@ def parse_contacts(filename: str, data: bytes) -> list[dict]:
 async def import_contacts(pool, owner_id: int, rows: list[dict], source: str = "файл") -> dict:
     """Положить записи в хранилище. Дедуп по телефону: совпал — слияние (поля
     дополняются, телефоны/почты/адреса объединяются), иначе — новая запись.
-    Возвращает {created, updated, total, skipped}."""
+    Возвращает {created, updated, total, skipped}.
+
+    Пачкой и в одной транзакции: поштучно файл в 10 000 строк шёл ~40 с
+    (поиск по телефону + запись на строку, и каждый поиск ещё листал
+    растущий хвост GIN-индекса). Не прошла пачка — откат и прежний
+    поштучный путь, у которого битая строка пропускается, а не роняет файл.
+    """
+    try:
+        if hasattr(pool, "acquire"):
+            async with pool.acquire() as conn:
+                async with conn.transaction():
+                    return await _import_batched(conn, owner_id, rows, source)
+        async with pool.transaction():  # уже соединение
+            return await _import_batched(pool, owner_id, rows, source)
+    except Exception as e:
+        log.warning("file_import: пачка не прошла owner=%s, поштучно: %s",
+                    owner_id, type(e).__name__)
+    return await _import_one_by_one(pool, owner_id, rows, source)
+
+
+_LOOKUP_CHUNK = 5000
+
+
+def _jlist(v):
+    if isinstance(v, list):
+        return v
+    try:
+        return json.loads(v) if v else []
+    except (ValueError, TypeError):
+        return []
+
+
+def _absorb(state: dict, rec: dict, tag: str) -> None:
+    """То же, что UPDATE в `_merge`, но над записью в памяти."""
+    for f in ("first_name", "last_name", "patronymic", "display_name", "company"):
+        if not state.get(f):  # COALESCE(NULLIF(f,''), новое)
+            state[f] = rec.get(f) or None
+    note = ("%s %s" % (state.get("notes") or "", rec.get("notes") or "")).strip(" ")
+    state["notes"] = note or None  # NULLIF(TRIM(CONCAT(notes, ' ', новое)), '')
+    state["phones"] = _union(state["phones"], rec.get("phones"))
+    state["emails"] = _union(state["emails"], rec.get("emails"))
+    state["addresses"] = _union(state["addresses"], rec.get("addresses"))
+    state["tags"] = _union(state["tags"], [tag, "импорт"])
+
+
+async def _import_batched(conn, owner_id: int, rows: list[dict], source: str) -> dict:
+    created = updated = skipped = 0
+    tag = source[:40]
+    wanted = sorted({p for rec in rows for p in rec.get("phones", []) if p})
+    by_phone: dict[str, dict] = {}
+    for i in range(0, len(wanted), _LOOKUP_CHUNK):
+        for r in await conn.fetch(
+                "SELECT id, phones, emails, addresses, first_name, last_name, "
+                "patronymic, display_name, company, notes, tags "
+                "FROM unified_contacts WHERE owner_id=$1 AND phones ?| $2::text[]",
+                owner_id, wanted[i:i + _LOOKUP_CHUNK]):
+            st = {k: r[k] for k in ("first_name", "last_name", "patronymic",
+                                    "display_name", "company", "notes")}
+            st.update(id=r["id"], new=False, phones=_jlist(r["phones"]),
+                      emails=_jlist(r["emails"]), addresses=_jlist(r["addresses"]),
+                      tags=list(r["tags"] or []))
+            for ph in st["phones"]:
+                by_phone.setdefault(ph, st)
+    touched: dict[int, dict] = {}
+    fresh: list[dict] = []
+    for rec in rows:
+        phones = [p for p in rec.get("phones", []) if p]
+        if not phones and not (rec.get("display_name") or rec.get("emails")):
+            skipped += 1
+            continue
+        target = next((by_phone[p] for p in phones if p in by_phone), None)
+        if target is not None:
+            _absorb(target, rec, tag)
+            if not target["new"]:
+                touched[id(target)] = target
+            updated += 1
+        else:
+            target = {"id": str(uuid.uuid4()), "new": True,
+                      "first_name": rec.get("first_name") or None,
+                      "last_name": rec.get("last_name") or None,
+                      "patronymic": rec.get("patronymic") or None,
+                      "display_name": rec.get("display_name") or None,
+                      "company": rec.get("company") or None,
+                      "notes": rec.get("notes") or "",
+                      "phones": list(rec.get("phones", [])),
+                      "emails": list(rec.get("emails", [])),
+                      "addresses": list(rec.get("addresses", [])),
+                      "tags": [tag, "импорт"]}
+            fresh.append(target)
+            created += 1
+        # Слитые номера тоже ищутся: следующая строка файла с любым из них
+        # найдёт этот контакт, как находила его в базе поштучная версия.
+        for ph in target["phones"]:
+            by_phone.setdefault(ph, target)
+    if fresh:
+        await conn.executemany(
+            "INSERT INTO unified_contacts (id, owner_id, first_name, last_name, "
+            "patronymic, display_name, phones, emails, addresses, company, notes, "
+            "tags, persona_type) VALUES "
+            "($1,$2,$3,$4,$5,$6,$7::jsonb,$8::jsonb,$9::jsonb,$10,$11,$12,'imported')",
+            [(t["id"], owner_id, t["first_name"], t["last_name"], t["patronymic"],
+              t["display_name"], json.dumps(t["phones"]), json.dumps(t["emails"]),
+              json.dumps(t["addresses"]), t["company"], t["notes"], t["tags"])
+             for t in fresh])
+    if touched:
+        await conn.executemany(
+            "UPDATE unified_contacts SET first_name=$3, last_name=$4, patronymic=$5, "
+            "display_name=$6, company=$7, notes=$8, phones=$9::jsonb, emails=$10::jsonb, "
+            "addresses=$11::jsonb, tags=$12, updated_at=NOW() WHERE id=$1 AND owner_id=$2",
+            [(t["id"], owner_id, t["first_name"], t["last_name"], t["patronymic"],
+              t["display_name"], t["company"], t["notes"], json.dumps(t["phones"]),
+              json.dumps(t["emails"]), json.dumps(t["addresses"]), t["tags"])
+             for t in touched.values()])
+    return {"created": created, "updated": updated,
+            "total": len(rows), "skipped": skipped}
+
+
+async def _import_one_by_one(pool, owner_id: int, rows: list[dict], source: str) -> dict:
     created = updated = skipped = 0
     tag = source[:40]
     for rec in rows:

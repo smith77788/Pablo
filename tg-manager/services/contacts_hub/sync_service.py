@@ -4,6 +4,7 @@ import json
 import logging
 import re
 import time
+import uuid
 
 from services.contacts_hub.identity_keys import merge_phones
 from services.contacts_hub.merge_engine import _as_list
@@ -65,6 +66,111 @@ def classify_session_error(emsg: str) -> tuple[str, str]:
     return (f"ошибка: {(emsg or '')[:140]}", "")
 
 
+_SYNC_WRITE_CHUNK = 1000
+
+_UPDATE_SQL = (
+    'UPDATE unified_contacts SET username=$1, first_name=$2, last_name=$3, display_name=$4, '
+    'phones=$5::jsonb, is_premium=$6, is_verified=$7, is_mutual=$8, '
+    # ::text::date / ::text::timestamptz: reg_est и last_seen_at приходят
+    # ISO-СТРОКАМИ. Голый ::date заставлял asyncpg кодировать параметр
+    # как date и звать .toordinal() у str → падало на КАЖДОМ контакте
+    # («'str' object has no attribute 'toordinal'»). Приводим текст →
+    # тип уже в Postgres.
+    'registered_estimate=$9::text::date, last_seen_type=$10, '
+    'last_seen_at=$11::text::timestamptz, digital_footprint=$12::jsonb, '
+    'last_synced_at=NOW(), updated_at=NOW() WHERE id=$13')
+
+# NOT EXISTS — в самой вставке: между чтением «кого уже знаем» и записью
+# пачки другой аккаунт того же владельца (синк идёт параллельно) мог завести
+# того же человека, и второй контакт стал бы дублем.
+_INSERT_SQL = (
+    'INSERT INTO unified_contacts (id, owner_id, telegram_user_id, username, first_name, '
+    'last_name, display_name, phones, is_premium, is_verified, is_mutual, '
+    'registered_estimate, last_seen_type, last_seen_at, digital_footprint, last_synced_at) '
+    # $12/$14 — ISO-строки даты/времени: приводим text→тип в Postgres,
+    # иначе asyncpg зовёт .toordinal()/.timestamp() у str и падает.
+    'SELECT $1::uuid, $2::bigint, $3::bigint, $4::text, $5::text, $6::text, $7::text, '
+    '$8::jsonb, $9::boolean, $10::boolean, $11::boolean, $12::text::date, $13::text, '
+    '$14::text::timestamptz, $15::jsonb, NOW() '
+    'WHERE NOT EXISTS (SELECT 1 FROM unified_contacts u '
+    '                  WHERE u.owner_id=$2::bigint AND u.telegram_user_id=$3::bigint)')
+
+_KNOWN_SQL = (
+    'SELECT DISTINCT ON (telegram_user_id) telegram_user_id, id, phones '
+    'FROM unified_contacts WHERE owner_id=$1 AND telegram_user_id = ANY($2::bigint[]) '
+    'ORDER BY telegram_user_id, created_at')
+
+
+async def _write_chunk(pool, owner_id: int, account_id: int, chunk: list) -> tuple[int, int]:
+    """Записать кусок контактов: (создано, обновлено)."""
+    uids = [int(c['user_id']) for c in chunk]
+    known = {int(r['telegram_user_id']): r for r in await pool.fetch(_KNOWN_SQL, owner_id, uids)}
+    upd_rows, ins_rows, names = [], [], {}
+    for c in chunk:
+        user_id = c['user_id']
+        username = c.get('username') or None
+        first_name = c.get('first_name') or ''
+        last_name = c.get('last_name') or ''
+        display_name = f"{first_name} {last_name}".strip()
+        names[int(user_id)] = display_name
+        phones = [c['phone']] if c.get('phone') else []
+        is_premium = bool(c.get('is_premium'))
+        is_verified = bool(c.get('is_verified'))
+        is_mutual = bool(c.get('is_mutual'))
+        reg_est = c.get('registered_estimate')  # 'YYYY-MM-DD' | None
+        last_seen_type = c.get('last_seen_type')
+        last_seen_at = c.get('last_seen_at')  # ISO str | None
+        # Полный сырой снимок всех полей — в digital_footprint (не теряем данные,
+        # даже если под них ещё нет отдельной колонки).
+        footprint = json.dumps({k: c.get(k) for k in (
+            'is_scam', 'is_fake', 'is_restricted', 'access_hash',
+            'last_seen_type', 'last_seen_at', 'registered_estimate',
+        )})
+        existing = known.get(int(user_id))
+        if existing:
+            # Телефоны ДОПОЛНЯЮТСЯ, а не перезаписываются. Синк писал
+            # `phones = [номер из Telegram]`, а у собеседника из диалогов
+            # Telegram номера не отдаёт вовсе — то есть каждый синк стирал
+            # номера, внесённые владельцем вручную, импортом или слиянием
+            # дублей (absorb_contact объединяет списки). Объединённая база
+            # теряла ровно то, ради чего её объединяли.
+            phones = merge_phones(_as_list(existing['phones']), phones)
+            upd_rows.append((
+                username, first_name, last_name, display_name,
+                json.dumps(phones), is_premium, is_verified, is_mutual,
+                reg_est, last_seen_type, last_seen_at, footprint, existing['id']))
+        else:
+            ins_rows.append((
+                str(uuid.uuid4()), owner_id, user_id, username, first_name,
+                last_name, display_name, json.dumps(phones), is_premium,
+                is_verified, is_mutual, reg_est, last_seen_type, last_seen_at, footprint))
+    if upd_rows:
+        await pool.executemany(_UPDATE_SQL, upd_rows)
+    ids = {uid: r['id'] for uid, r in known.items()}
+    created = 0
+    if ins_rows:
+        await pool.executemany(_INSERT_SQL, ins_rows)
+        fresh = {int(r['telegram_user_id']): r['id'] for r in await pool.fetch(
+            _KNOWN_SQL, owner_id, [int(r[2]) for r in ins_rows])}
+        for row in ins_rows:
+            contact_id = fresh.get(int(row[2]), row[0])
+            ids[int(row[2])] = contact_id
+            if str(contact_id) == row[0]:
+                created += 1
+    # Привязать ЭТОТ аккаунт как источник — и для НОВОГО, и для уже
+    # существующего контакта (contact_id = existing['id']). Раньше связь
+    # писалась только в ветке нового: контакт, впервые добавленный ДРУГИМ
+    # аккаунтом, не числился за этим → «по аккаунтам» показывало доли
+    # реального (Bella 792 вместо тысяч), хотя контакты собраны.
+    # UNIQUE(contact_id, account_id) → идемпотентно.
+    await pool.executemany(
+        'INSERT INTO contact_sources (contact_id, account_id, local_name, last_synced_at) '
+        'VALUES ($1,$2,$3,NOW()) '
+        'ON CONFLICT (contact_id, account_id) DO UPDATE SET last_synced_at=NOW()',
+        [(ids[uid], account_id, names[uid]) for uid in uids if uid in ids])
+    return created, len(upd_rows)
+
+
 async def sync_account(pool, owner_id: int, account_id: int) -> dict:
     from database.db import get_account_for_telethon
     from services import account_manager
@@ -102,76 +208,14 @@ async def sync_account(pool, owner_id: int, account_id: int) -> dict:
         contacts = list(_by_uid.values())
         created = 0
         updated = 0
-        for c in contacts:
-            user_id = c['user_id']
-            username = c.get('username') or None
-            first_name = c.get('first_name') or ''
-            last_name = c.get('last_name') or ''
-            display_name = f"{first_name} {last_name}".strip()
-            phones = [c['phone']] if c.get('phone') else []
-            is_premium = bool(c.get('is_premium'))
-            is_verified = bool(c.get('is_verified'))
-            is_mutual = bool(c.get('is_mutual'))
-            reg_est = c.get('registered_estimate')  # 'YYYY-MM-DD' | None
-            last_seen_type = c.get('last_seen_type')
-            last_seen_at = c.get('last_seen_at')  # ISO str | None
-            # Полный сырой снимок всех полей — в digital_footprint (не теряем данные,
-            # даже если под них ещё нет отдельной колонки).
-            footprint = json.dumps({k: c.get(k) for k in (
-                'is_scam', 'is_fake', 'is_restricted', 'access_hash',
-                'last_seen_type', 'last_seen_at', 'registered_estimate',
-            )})
-
-            existing = await pool.fetchrow(
-                'SELECT id, phones FROM unified_contacts WHERE owner_id=$1 AND telegram_user_id=$2',
-                owner_id, user_id)
-            if existing:
-                # Телефоны ДОПОЛНЯЮТСЯ, а не перезаписываются. Синк писал
-                # `phones = [номер из Telegram]`, а у собеседника из диалогов
-                # Telegram номера не отдаёт вовсе — то есть каждый синк стирал
-                # номера, внесённые владельцем вручную, импортом или слиянием
-                # дублей (absorb_contact объединяет списки). Объединённая база
-                # теряла ровно то, ради чего её объединяли.
-                phones = merge_phones(_as_list(existing['phones']), phones)
-                await pool.execute(
-                    'UPDATE unified_contacts SET username=$1, first_name=$2, last_name=$3, display_name=$4, '
-                    'phones=$5::jsonb, is_premium=$6, is_verified=$7, is_mutual=$8, '
-                    # ::text::date / ::text::timestamptz: reg_est и last_seen_at приходят
-                    # ISO-СТРОКАМИ. Голый ::date заставлял asyncpg кодировать параметр
-                    # как date и звать .toordinal() у str → падало на КАЖДОМ контакте
-                    # («'str' object has no attribute 'toordinal'»). Приводим текст →
-                    # тип уже в Postgres.
-                    'registered_estimate=$9::text::date, last_seen_type=$10, '
-                    'last_seen_at=$11::text::timestamptz, digital_footprint=$12::jsonb, '
-                    'last_synced_at=NOW(), updated_at=NOW() WHERE id=$13',
-                    username, first_name, last_name, display_name,
-                    json.dumps(phones), is_premium, is_verified, is_mutual,
-                    reg_est, last_seen_type, last_seen_at, footprint, existing['id'])
-                contact_id = existing['id']
-                updated += 1
-            else:
-                contact_id = str(__import__('uuid').uuid4())
-                await pool.execute(
-                    'INSERT INTO unified_contacts (id, owner_id, telegram_user_id, username, first_name, '
-                    'last_name, display_name, phones, is_premium, is_verified, is_mutual, '
-                    'registered_estimate, last_seen_type, last_seen_at, digital_footprint, last_synced_at) '
-                    # $12/$14 — ISO-строки даты/времени: приводим text→тип в Postgres,
-                    # иначе asyncpg зовёт .toordinal()/.timestamp() у str и падает.
-                    'VALUES ($1,$2,$3,$4,$5,$6,$7,$8::jsonb,$9,$10,$11,$12::text::date,$13,$14::text::timestamptz,$15::jsonb,NOW())',
-                    contact_id, owner_id, user_id, username, first_name,
-                    last_name, display_name, json.dumps(phones), is_premium,
-                    is_verified, is_mutual, reg_est, last_seen_type, last_seen_at, footprint)
-                created += 1
-            # Привязать ЭТОТ аккаунт как источник — и для НОВОГО, и для уже
-            # существующего контакта. Раньше связь писалась только в ветке нового:
-            # контакт, впервые добавленный ДРУГИМ аккаунтом, не числился за этим →
-            # «по аккаунтам» показывало доли реального (Bella 792 вместо тысяч),
-            # хотя контакты собраны. UNIQUE(contact_id, account_id) → идемпотентно.
-            await pool.execute(
-                'INSERT INTO contact_sources (contact_id, account_id, local_name, last_synced_at) '
-                'VALUES ($1,$2,$3,NOW()) '
-                'ON CONFLICT (contact_id, account_id) DO UPDATE SET last_synced_at=NOW()',
-                contact_id, account_id, display_name)
+        # Пачками, а не тремя запросами на человека: у рабочего аккаунта
+        # тысячи контактов, и поштучный синк одного аккаунта стоил десятки
+        # тысяч round-trip'ов (флот синкается по несколько аккаунтов сразу).
+        for i in range(0, len(contacts), _SYNC_WRITE_CHUNK):
+            c_new, c_upd = await _write_chunk(
+                pool, owner_id, account_id, contacts[i:i + _SYNC_WRITE_CHUNK])
+            created += c_new
+            updated += c_upd
 
         duration_ms = int((time.monotonic() - started) * 1000)
         await log_sync(pool, owner_id, account_id, 'auto', len(contacts), created, updated, 0, duration_ms)

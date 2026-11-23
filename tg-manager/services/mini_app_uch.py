@@ -2080,7 +2080,9 @@ def setup_routes(app: web.Application, pool) -> None:
         try:
             from services.contacts_hub.relationship_engine import compute_relationships
             result = await compute_relationships(pool, uid)
-            return _json_resp(result)
+            # Экрану нужен только счёт; сам список — сотни тысяч пар и
+            # десятки мегабайт ответа. Связи экран читает потом постранично.
+            return _json_resp({'count': result.get('count', 0)})
         except Exception:
             log.exception("uch_graph_compute")
             return _err(_INTERNAL_ERROR, 500)

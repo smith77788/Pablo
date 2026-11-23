@@ -87,7 +87,8 @@ def test_iso_date_params_bound_as_text():
     """
     from pathlib import Path
     src = (Path(__file__).resolve().parents[1] / "services" / "contacts_hub" / "sync_service.py").read_text(encoding="utf-8")
-    body = src[src.index("async def sync_account("): src.index("async def sync_all_accounts(")]
+    # Запросы синка вынесены в константы перед `_write_chunk` — читаем от них.
+    body = src[src.index("_UPDATE_SQL = ("): src.index("async def sync_all_accounts(")]
     # Правильная форма присутствует…
     assert "$12::text::date" in body and "$14::text::timestamptz" in body, "INSERT: нет text-приведения"
     assert "$9::text::date" in body and "$11::text::timestamptz" in body, "UPDATE: нет text-приведения"
@@ -104,7 +105,8 @@ def test_sync_account_does_not_mark_itself():
     from pathlib import Path
     src = (Path(__file__).resolve().parents[1] / "services" / "contacts_hub" / "sync_service.py").read_text(encoding="utf-8")
     # тело sync_account — до начала sync_all_accounts
-    body = src[src.index("async def sync_account("): src.index("async def sync_all_accounts(")]
+    # Запросы синка вынесены в константы перед `_write_chunk` — читаем от них.
+    body = src[src.index("_UPDATE_SQL = ("): src.index("async def sync_all_accounts(")]
     assert "acc_status='session_expired'" not in body, (
         "sync_account снова метит аккаунт сам — при системном сбое это массовая ложная тревога"
     )
