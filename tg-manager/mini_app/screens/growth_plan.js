@@ -46,7 +46,30 @@ function _gpSummary(goals) {
   if (n.ok) parts.push(`<span style="color:var(--green)">успеваете: ${n.ok}</span>`);
   if (n.bad) parts.push(`<span style="color:var(--red)">отстают: ${n.bad}</span>`);
   if (n.done) parts.push(`выполнено: ${n.done}`);
-  return `<div class="field-note" id="gpSummary" style="padding:6px 4px 8px">${parts.join(' · ')}</div>`;
+  return `<div class="field-note" id="gpSummary" style="padding:6px 4px 8px;display:flex;gap:8px;align-items:center;flex-wrap:wrap">` +
+    `<span style="flex:1;min-width:0">${parts.join(' · ')}</span>` +
+    `<span class="sec-btn" onclick="gpCopyReport()" role="button" tabindex="0">📋 Отчёт</span></div>`;
+}
+
+// Отчёт по целям текстом — переслать партнёру или вставить в заметку.
+// Сначала отстающие: ради них отчёт и пересылают.
+function gpReportText(goals) {
+  const bad = g => ['behind', 'stalled', 'overdue'].includes((g.progress || {}).state) && g.status !== 'done';
+  const list = (goals || []).slice().sort((a, b) => Number(bad(b)) - Number(bad(a)));
+  const lines = ['План роста: целей ' + list.length];
+  for (const g of list) {
+    const p = g.progress || {};
+    lines.push('• ' + (g.asset_kind === 'bot' ? '🤖 ' : '📡 ') + (g.name || '') + ' — ' + (g.state_ru || '') + ': ' +
+      _gpNum(p.current) + ' из ' + _gpNum(p.target) + ' (' + (Number(p.pct) || 0) + '%), до ' + (g.deadline_ru || '') +
+      (p.need_per_day && g.status !== 'done' ? ', нужно ' + _gpNum(p.need_per_day) + ' в день' : ''));
+  }
+  return lines.join('\n');
+}
+
+function gpCopyReport() {
+  const goals = (GP.data && GP.data.goals) || [];
+  if (!goals.length) { toast('Нечего копировать'); return; }
+  copyToClipboard(gpReportText(goals), '📋 Отчёт скопирован');
 }
 
 function _gpBar(p) {

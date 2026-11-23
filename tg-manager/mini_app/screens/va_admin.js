@@ -377,7 +377,7 @@ function _vaDraftsHtml(drafts, ctx) {
     return '<div class="lst" style="padding:12px 14px">' +
       '<div style="font-size:12px;color:var(--hint);margin-bottom:6px">' + esc(x.title || '') +
         (x.pillar ? ' · ' + esc(x.pillar) : '') + '</div>' +
-      '<div id="vaBody' + ctx + '-' + x.id + '" style="white-space:pre-wrap;font-size:14px;line-height:1.45">' + esc(x.body) + '</div>' + reasons +
+      '<div id="vaBody' + ctx + '-' + x.id + '"' + (x.media_id ? ' data-media="1"' : '') + ' style="white-space:pre-wrap;font-size:14px;line-height:1.45">' + esc(x.body) + '</div>' + reasons +
       (x.media_id ? '<div style="margin-top:8px">Фото: ' + esc(x.media_description || '') +
         '<button class="btn btn-s" onclick="vaMediaPreview(\'' + esc(x.channel_id) + '\',' + Number(x.media_id) + ',this)">Показать фото</button></div>' : '') +
       // Три кнопки в один ряд при 360px не помещались: «Опубликовать» ломалось
@@ -418,14 +418,36 @@ function vaDraftEdit(id, ctx) {
   // Высота поля по длине поста: фиксированные двенадцать строк под коротким
   // постом оставляли полэкрана пустоты, а длинный всё равно приходилось крутить.
   const rows = Math.min(18, Math.max(5, was.split('\n').length + Math.ceil(was.length / 40)));
-  box.innerHTML = '<textarea id="vaEd' + ctx + '-' + id + '" rows="' + rows + '" maxlength="4096" style="width:100%;background:var(--bg3);' +
+  box.innerHTML = '<textarea id="vaEd' + ctx + '-' + id + '" rows="' + rows + '" maxlength="4096" oninput="vaEdCount(' + id + ',\'' + ctx + '\')" style="width:100%;background:var(--bg3);' +
     'border:1px solid var(--border-input);border-radius:var(--radius);padding:10px 12px;font-size:14px;line-height:1.45;' +
     'color:var(--text);font-family:inherit;resize:vertical;outline:none">' + esc(was) + '</textarea>' +
-    '<div class="field-note">В канал уйдёт ровно этот текст.</div>';
+    '<div class="field-note" id="vaEdN' + ctx + '-' + id + '"></div>';
   acts.innerHTML = '<button class="btn btn-p" style="width:100%" onclick="_vaDraftCtx=\'' + ctx + '\';vaDraftAct(' + id + ',\'publish\')">✅ Опубликовать правку</button>' +
     '<button class="btn btn-s" style="width:100%;margin-top:8px" onclick="vaDraftEditCancel(' + id + ',\'' + ctx + '\')">Отмена</button>';
   const ed = document.getElementById('vaEd' + ctx + '-' + id);
   if (ed) { ed.focus(); ed.setSelectionRange(ed.value.length, ed.value.length); }
+  vaEdCount(id, ctx);
+}
+
+// Предел текста поста: с фото это подпись, и сервер берёт не больше 900
+// знаков (va_media.CAPTION_LIMIT — запас от предела Telegram 1024), без
+// фото — 4096. Сервер длинную подпись
+// отбивает, но узнать об этом после «Опубликовать» — значит переписывать
+// вслепую. Длина JS-строки — те же UTF-16 единицы, что считает сервер.
+function vaDraftLimit(hasMedia) { return hasMedia ? 900 : 4096; }
+
+function vaEdCount(id, ctx) {
+  const ed = document.getElementById('vaEd' + ctx + '-' + id);
+  const note = document.getElementById('vaEdN' + ctx + '-' + id);
+  const box = document.getElementById('vaBody' + ctx + '-' + id);
+  if (!ed || !note) return;
+  const media = !!(box && box.dataset.media);
+  const max = vaDraftLimit(media), n = ed.value.length, over = n > max;
+  note.innerHTML = '<span style="color:' + (over ? 'var(--red)' : 'var(--hint)') + '">' + n + ' / ' + max + '</span> · ' +
+    (over ? 'длиннее, чем Telegram пропустит' + (media ? ' в подписи к фото' : '') + ' — сократите' : 'В канал уйдёт ровно этот текст.');
+  const acts = document.getElementById('vaActs' + ctx + '-' + id);
+  const pub = acts && acts.querySelector('.btn-p');
+  if (pub) pub.disabled = over;
 }
 
 function vaDraftEditCancel(id, ctx) {

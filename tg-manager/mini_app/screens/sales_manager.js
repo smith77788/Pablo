@@ -1005,18 +1005,74 @@ function spChat(pid) {
     '<div style="display:flex;gap:8px">' +
     '<input type="text" id="spChatInput" placeholder="Написать сообщение…" class="inp" style="flex:1" ' +
     'onkeydown="if(event.key===\'Enter\')spChatSend()">' +
-    '<button class="btn btn-p" onclick="spChatSend()">▶</button></div>';
+    '<button class="btn btn-p" onclick="spChatSend()">▶</button></div>' +
+    '<div id="spChatEx"></div>' +
+    '<button class="btn btn-s" style="width:100%;margin-top:8px;font-size:12px" onclick="spChatReset()">🔄 Начать диалог заново</button>';
+}
+
+function spChatReset() {
+  _spChatHistory = [];
+  _spChatRender();
+  txt('spChatEx', '');
+  const inp = document.getElementById('spChatInput');
+  if (inp) inp.focus();
+}
+
+// Пара «сообщение клиента → ответ» для i-й реплики менеджера: ближайшая
+// реплика клиента перед ней. Удачный (или поправленный) ответ из тест-чата —
+// лучший пример диалога, а раньше его приходилось перепечатывать в форму
+// примеров руками.
+function spChatPair(hist, i) {
+  const a = hist[i];
+  if (!a || a.role !== 'assistant') return null;
+  for (let k = i - 1; k >= 0; k--) {
+    if (hist[k].role === 'user') return { user_msg: hist[k].content, assistant_msg: a.content };
+  }
+  return null;
+}
+
+function spChatToExample(i) {
+  const pair = spChatPair(_spChatHistory, i);
+  const box = document.getElementById('spChatEx');
+  if (!pair || !box) return;
+  box.innerHTML = '<div style="margin-top:8px;padding:10px;background:var(--bg2);border-radius:10px">' +
+    '<div style="font-size:12px;color:var(--hint);margin-bottom:4px">Пример для менеджера. Поправьте ответ, если нужно, — так он и будет отвечать.</div>' +
+    '<div style="font-size:12px;margin-bottom:6px">👤 ' + esc(pair.user_msg) + '</div>' +
+    '<textarea id="spChatExA" rows="3" class="inp" style="width:100%;resize:vertical">' + esc(pair.assistant_msg) + '</textarea>' +
+    '<div style="display:flex;gap:6px;margin-top:6px">' +
+    '<button class="btn btn-p" style="flex:1;font-size:12px" id="spChatExBtn" onclick="spChatSaveExample(' + Number(i) + ')">💾 Сохранить пример</button>' +
+    '<button class="btn btn-s" style="font-size:12px" onclick="txt(\'spChatEx\',\'\')">Отмена</button></div></div>';
+  box.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+}
+
+async function spChatSaveExample(i) {
+  const pair = spChatPair(_spChatHistory, i);
+  const a = ((document.getElementById('spChatExA') || {}).value || '').trim();
+  if (!pair || !a) { toast('Ответ пустой'); return; }
+  const btn = document.getElementById('spChatExBtn');
+  if (btn) btn.disabled = true;
+  try {
+    await api('/api/miniapp/sales/persona/' + _spChatPid + '/example',
+      { method: 'POST', body: JSON.stringify({ user_msg: pair.user_msg, assistant_msg: a }) });
+    toast('📌 Пример сохранён');
+    txt('spChatEx', '');
+  } catch (e) {
+    toast('⚠️ ' + errRu(e, 'Не удалось сохранить пример'));
+    if (btn) btn.disabled = false;
+  }
 }
 
 function _spChatRender() {
   const log = document.getElementById('spChatLog');
   if (!log) return;
-  log.innerHTML = _spChatHistory.map(m => {
+  log.innerHTML = _spChatHistory.map((m, i) => {
     const mine = m.role === 'user';
-    return '<div style="display:flex;justify-content:' + (mine ? 'flex-end' : 'flex-start') + ';margin:4px 0">' +
+    const save = !mine && spChatPair(_spChatHistory, i)
+      ? '<div style="margin:2px 0 0 4px"><span class="sec-btn" style="font-size:11px" role="button" tabindex="0" onclick="spChatToExample(' + i + ')">📌 В примеры</span></div>' : '';
+    return '<div style="display:flex;flex-direction:column;align-items:' + (mine ? 'flex-end' : 'flex-start') + ';margin:4px 0">' +
       '<div style="max-width:80%;padding:7px 10px;border-radius:12px;white-space:pre-wrap;' +
       'background:' + (mine ? 'var(--btn-solid)' : 'var(--bg)') + ';color:' + (mine ? 'var(--btn-text)' : 'var(--fg)') + '">' +
-      esc(m.content) + '</div></div>';
+      esc(m.content) + '</div>' + save + '</div>';
   }).join('');
   log.scrollTop = log.scrollHeight;
 }
