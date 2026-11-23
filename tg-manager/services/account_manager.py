@@ -3650,6 +3650,226 @@ async def scan_owned_assets(session_string: str, _acc: dict | None = None) -> di
             log_exc_swallow(log, "Сбой в _collect")
 
 
+class PeerUnresolvedError(ValueError):
+    """Аккаунт не может адресовать пользователя по голому Telegram ID.
+
+    Telegram принимает сообщение только для InputPeerUser(id, access_hash), а
+    access_hash выдаётся КАЖДОМУ аккаунту свой — когда аккаунт «видел»
+    человека (диалог, контакт, общий чат). StringSession кэш сущностей между
+    подключениями не хранит, поэтому без прогрева голый ID не резолвится
+    даже у аккаунта, который с этим человеком переписывался.
+    Наследник ValueError — прежние `except ValueError` ловят его как раньше.
+    """
+
+
+PEER_UNRESOLVED_TEXT = (
+    "нет доступа по ID: этот аккаунт не знает пользователя (нет @username, "
+    "общих чатов, переписки и контакта) — Telegram не даёт написать по голому ID"
+)
+
+# Сколько последних диалогов прогревать в поиске access_hash. Больше — дольше
+# и дороже по запросам; 300 покрывает живую переписку аккаунта.
+_RESOLVE_DIALOGS_LIMIT = 300
+
+
+def numeric_peer(target: Any) -> int | None:
+    """ID из цели отправки: int или строка цифр (с необязательным '@' и '-')."""
+    if isinstance(target, bool):
+        return None
+    if isinstance(target, int):
+        return target
+    if isinstance(target, str):
+        s = target.strip().lstrip("@")
+        if s.lstrip("-").isdigit():
+            return int(s)
+    return None
+
+
+async def resolve_user_peer(client: Any, peer_id: int,
+                            access_hash: int | None = None,
+                            deep: dict | None = None) -> Any:
+    """Разрешить числовой Telegram ID в InputPeer, от дешёвого к дорогому.
+
+    1. Кэш сессии (`get_input_entity`) — без запросов.
+    2. Известный нам access_hash (сохранён синком контактов) — проверяем его
+       одним `users.GetUsers`: хэш принадлежит аккаунту, который его получил,
+       и с чужим аккаунтом не работает.
+    3. Прогрев последних диалогов — человек, с которым аккаунт переписывался.
+    4. Прогрев адресной книги — человек в контактах аккаунта.
+    5. Только с `deep` (адресная работа по ОДНОМУ человеку, не рассылка):
+       поиск среди участников групп — сперва тех, откуда человек пришёл
+       (`deep["chats"]`: @ник или id чата из парсинга), затем групп самого
+       аккаунта, поиском по имени (`deep["name"]`). Участник группы
+       приходит вместе со СВОИМ для этого аккаунта access_hash, поэтому
+       так можно написать человеку, с которым переписки не было никогда.
+
+    Не нашёлся нигде — PeerUnresolvedError с понятной причиной, а не сырое
+    «Could not find the input entity for PeerUser(...)».
+    """
+    async def _cached() -> Any:
+        return await asyncio.wait_for(client.get_input_entity(peer_id),
+                                      timeout=_OP_TIMEOUT)
+
+    try:
+        return await _cached()
+    except (ValueError, TypeError):
+        pass
+
+    if access_hash and peer_id > 0:
+        try:
+            from telethon.tl.functions.users import GetUsersRequest
+            from telethon.tl.types import InputPeerUser, InputUser
+            users = await asyncio.wait_for(
+                client(GetUsersRequest([InputUser(peer_id, int(access_hash))])),
+                timeout=_OP_TIMEOUT)
+            if users and getattr(users[0], "id", None) == peer_id \
+                    and type(users[0]).__name__ != "UserEmpty":
+                return InputPeerUser(peer_id, int(access_hash))
+        except Exception:
+            # Чужой/устаревший хэш (PEER_ID_INVALID и т.п.) — идём дальше.
+            log_exc_swallow(log, "resolve_user_peer: access_hash не подошёл")
+
+    dialogs: list = []
+    try:
+        dialogs = list(await asyncio.wait_for(
+            client.get_dialogs(limit=_RESOLVE_DIALOGS_LIMIT),
+            timeout=max(_OP_TIMEOUT, 60)) or [])
+        return await _cached()
+    except (ValueError, TypeError):
+        pass
+
+    if peer_id > 0:
+        try:
+            from telethon.tl.functions.contacts import GetContactsRequest
+            await asyncio.wait_for(client(GetContactsRequest(hash=0)),
+                                   timeout=_OP_TIMEOUT)
+            return await _cached()
+        except (ValueError, TypeError):
+            pass
+
+    if deep and peer_id > 0:
+        found = await _find_in_groups(client, peer_id, deep, dialogs, _cached)
+        if found is not None:
+            return found
+
+    raise PeerUnresolvedError(
+        PEER_UNRESOLVED_DEEP_TEXT if deep else PEER_UNRESOLVED_TEXT)
+
+
+# Потолки глубокого поиска: каждый поиск участников — запрос в Telegram.
+_DEEP_MAX_SOURCE_CHATS = 5
+_DEEP_MAX_OWN_GROUPS = 15
+# Без имени ищем перебором только в небольших группах: перебор большой группы
+# — десятки запросов и прямой путь к FloodWait.
+_DEEP_FULL_SCAN_MAX_MEMBERS = 1500
+
+PEER_UNRESOLVED_DEEP_TEXT = (
+    "нет доступа по ID: этот аккаунт не знает пользователя и не нашёл его ни "
+    "в исходных группах, ни в своих группах — Telegram не даёт написать по "
+    "голому ID без общего чата, @username или телефона"
+)
+
+
+async def _find_in_groups(client: Any, peer_id: int, deep: dict,
+                          dialogs: list, cached) -> Any:
+    """Найти человека среди участников групп и вернуть его InputPeer.
+
+    FloodWait пробрасывается: продолжать поиск под паузой Telegram — значит
+    добить аккаунт. Прочие ошибки конкретной группы (закрытые участники,
+    нас там нет) — пропуск группы."""
+    from telethon.errors import FloodWaitError
+
+    name = " ".join(str(deep.get("name") or "").split())[:64]
+
+    async def _scan(entity, members: int | None) -> Any:
+        queries = [name] if name else []
+        if not name and (members or 0) <= _DEEP_FULL_SCAN_MAX_MEMBERS:
+            queries.append("")
+        for q in queries:
+            try:
+                await asyncio.wait_for(
+                    client.get_participants(
+                        entity, search=q,
+                        limit=200 if q else _DEEP_FULL_SCAN_MAX_MEMBERS),
+                    timeout=max(_OP_TIMEOUT, 60))
+            except FloodWaitError:
+                raise
+            except Exception:
+                log_exc_swallow(log, "resolve_user_peer: участники недоступны")
+                return None
+            try:
+                return await cached()
+            except (ValueError, TypeError):
+                continue
+        return None
+
+    seen: set = set()
+    for ref in list(deep.get("chats") or [])[:_DEEP_MAX_SOURCE_CHATS]:
+        if isinstance(ref, str):
+            ref = ref.strip().lstrip("@")
+            ref = int(ref) if ref.lstrip("-").isdigit() else ref
+        if ref in (None, "") or ref in seen:
+            continue
+        seen.add(ref)
+        if isinstance(ref, int) and ref > 0:
+            # id чата из парсинга — «голый» id канала/супергруппы; как int
+            # Telethon принял бы его за пользователя.
+            from telethon.tl.types import PeerChannel
+            ref = PeerChannel(ref)
+        try:
+            entity = await asyncio.wait_for(client.get_entity(ref),
+                                            timeout=_OP_TIMEOUT)
+        except FloodWaitError:
+            raise
+        except Exception:
+            continue
+        seen.add(getattr(entity, "id", None))
+        got = await _scan(entity, getattr(entity, "participants_count", None))
+        if got is not None:
+            return got
+
+    if deep.get("scan_groups", True):
+        groups = [d for d in dialogs if getattr(d, "is_group", False)]
+        for d in groups[:_DEEP_MAX_OWN_GROUPS]:
+            ent = getattr(d, "entity", None)
+            if ent is None or getattr(ent, "id", None) in seen:
+                continue
+            got = await _scan(ent, getattr(ent, "participants_count", None))
+            if got is not None:
+                return got
+    return None
+
+
+async def _resolve_send_target(client: Any, target: Any,
+                               access_hash: int | None = None,
+                               deep: dict | None = None) -> Any:
+    """Цель отправки как есть, а числовой ID — разрешённым в InputPeer."""
+    pid = numeric_peer(target)
+    if pid is None:
+        return target.lstrip("@") if isinstance(target, str) else target
+    return await resolve_user_peer(client, pid, access_hash, deep)
+
+
+async def add_user_to_contacts(client: Any, peer_id: int, first_name: str,
+                               last_name: str = "", *,
+                               access_hash: int | None = None,
+                               deep: dict | None = None) -> Any:
+    """Добавить человека в адресную книгу аккаунта по Telegram ID.
+
+    Сначала резолв (с глубоким поиском по группам), затем contacts.addContact
+    без телефона. После этого ID резолвится у аккаунта из адресной книги —
+    писать человеку можно и в следующих сессиях, без повторного поиска.
+    Возвращает InputPeer; PeerUnresolvedError — если человека не нашли."""
+    from telethon.tl.functions.contacts import AddContactRequest
+
+    peer = await resolve_user_peer(client, int(peer_id), access_hash, deep)
+    await asyncio.wait_for(client(AddContactRequest(
+        id=peer, first_name=(first_name or "").strip()[:64] or str(peer_id),
+        last_name=(last_name or "").strip()[:64], phone="",
+        add_phone_privacy_exception=False)), timeout=_OP_TIMEOUT)
+    return peer
+
+
 async def send_message_via_account(
     session_string: str, chat_id: int, text: str, _acc: dict | None = None,
     *, strict: bool = False,
@@ -3675,7 +3895,9 @@ async def send_message_via_account(
     client = _make_client(session_string, _acc)
     try:
         await _connect_and_track(client, _acc, "send_message")
-        await asyncio.wait_for(client.send_message(chat_id, text), timeout=_OP_TIMEOUT)
+        # Голый числовой ID на свежей StringSession не резолвится без прогрева.
+        dest = await _resolve_send_target(client, chat_id)
+        await asyncio.wait_for(client.send_message(dest, text), timeout=_OP_TIMEOUT)
         return True
     except asyncio.TimeoutError:
         _record_proxy_fail(_acc, "send_message")
@@ -3718,6 +3940,8 @@ async def send_media_via_account(
     media_filename: str | None = None,
     uniquify: bool = False,
     strict: bool = False,
+    access_hash: int | None = None,
+    deep: dict | None = None,
 ) -> bool:
     """Отправляет медиа (фото/видео/док) с подписью через личный аккаунт.
 
@@ -3756,8 +3980,9 @@ async def send_media_via_account(
         await asyncio.wait_for(client.connect(), timeout=_CONNECT_TIMEOUT)
         # Онлайн перед отправкой медиа — как в send_dm (действие из оффлайна = триггер).
         await mark_online(client)
+        dest = await _resolve_send_target(client, chat_id, access_hash, deep)
         await asyncio.wait_for(
-            client.send_file(chat_id, file=send_target, caption=caption or None),
+            client.send_file(dest, file=send_target, caption=caption or None),
             timeout=max(_OP_TIMEOUT, 60),
         )
         return True
@@ -3767,6 +3992,10 @@ async def send_media_via_account(
         if strict:
             raise
         return False
+    except PeerUnresolvedError:
+        # Не сбой отправки, а «этот аккаунт не знает получателя по ID» —
+        # вызывающий пробует другой аккаунт, поэтому причину не глотаем.
+        raise
     except FloodWaitError:
         raise
     except (
@@ -3849,7 +4078,8 @@ send_message = send_message_via_account
 
 
 async def send_dm(
-    session_string: str, username: str, text: str, _acc: dict | None = None
+    session_string: str, username: str, text: str, _acc: dict | None = None,
+    *, access_hash: int | None = None, deep: dict | None = None,
 ) -> dict:
     """Send a DM to a user by username or numeric ID.
 
@@ -3874,12 +4104,17 @@ async def send_dm(
         # человек онлайн, когда пишет). Best-effort, send_dm строит клиент сам
         # (минуя connect_client), поэтому присутствие ставим здесь.
         await mark_online(client)
-        target = username.lstrip("@") if isinstance(username, str) else username
-        # Try to resolve numeric IDs
-        if isinstance(target, str) and target.isdigit():
-            target = int(target)
+        # Числовой ID нельзя отдавать Telethon голым: на свежей StringSession
+        # он падал «Could not find the input entity for PeerUser(...)» у
+        # контакта без @username (кэш сущностей сессия не хранит). Резолвим
+        # через кэш → известный access_hash → диалоги → адресную книгу.
+        target = await _resolve_send_target(client, username, access_hash, deep)
         await asyncio.wait_for(client.send_message(target, text), timeout=_OP_TIMEOUT)
         return {"ok": True}
+    except PeerUnresolvedError as e:
+        # Не сбой аккаунта и не «закрытая личка»: этот аккаунт просто не знает
+        # человека. Другой аккаунт флота (общий чат/переписка) может знать.
+        return {"error": str(e), "peer_unresolved": True}
     except FloodWaitError as e:
         return {"error": f"FloodWait: подождите {e.seconds}с", "flood_wait": e.seconds}
     except PeerFloodError as e:
