@@ -10690,7 +10690,7 @@ async def create_bot_via_botfather(
             if wait is not None:
                 await _bf_cancel()
                 return {
-                    "error": f"BotFather rate limit после имени: {wait}с",
+                    "error": f"BotFather просит подождать после имени: {wait}с",
                     "flood_wait": wait,
                 }
             await _bf_cancel()
@@ -10738,7 +10738,7 @@ async def create_bot_via_botfather(
         if wait is not None:
             await _bf_cancel()
             return {
-                "error": f"BotFather rate limit при создании: {wait}с",
+                "error": f"BotFather просит подождать при создании: {wait}с",
                 "flood_wait": wait,
             }
 

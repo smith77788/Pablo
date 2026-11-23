@@ -9082,7 +9082,7 @@ async def _exec_bulk_join(
     if not accounts:
         return {
             "status": "requeue",
-            "summary": "⏳ Bulk Join: флот занят другими операциями или исчерпал суточный лимит действий — операция в очереди",
+            "summary": "⏳ Массовое вступление: флот занят другими операциями или исчерпал суточный лимит действий — операция в очереди",
         }
 
     try:
@@ -24657,7 +24657,7 @@ async def _exec_content_clone(
                         "ok": ok_count,
                         "failed": fail_count + (total - idx),
                         "summary": (
-                            f"🚫 Аккаунт ограничен Telegram (peer flood) на {idx}/{total}.\n"
+                            f"🚫 Аккаунт ограничен Telegram (флуд-ограничение) на {idx}/{total}.\n"
                             f"✅ Успели: {ok_count}"
                         ),
                     }

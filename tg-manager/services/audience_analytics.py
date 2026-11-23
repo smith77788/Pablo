@@ -910,7 +910,7 @@ def _generate_insight_recommendations(
         )
     elif quality_score >= 70:
         recs.append(
-            "🟢 <b>Отличное качество аудитории:</b> высокий retention и активность"
+            "🟢 <b>Отличное качество аудитории:</b> высокое удержание и активность"
         )
 
     return recs
