@@ -682,8 +682,8 @@ async def cb_add_account(
         )
         return
 
-    accounts = await db.get_tg_accounts(pool, callback.from_user.id)
-    if len(accounts) >= limit:
+    n_accounts = await db.count_tg_accounts(pool, callback.from_user.id)
+    if n_accounts >= limit:
         limit_label = tariffs.format_limit(limit)
         upgrade_plan = _next_account_plan(plan)
         await callback.message.edit_text(
@@ -893,8 +893,8 @@ async def cb_qr_login(
                 "starter", back_callback=AccCb(action="menu")),
         )
         return
-    accounts = await db.get_tg_accounts(pool, user_id)
-    if len(accounts) >= limit:
+    n_accounts = await db.count_tg_accounts(pool, user_id)
+    if n_accounts >= limit:
         limit_label = tariffs.format_limit(limit)
         await callback.message.edit_text(
             _limit_reached_text(limit_label),
@@ -3577,8 +3577,8 @@ async def cb_import_menu(
             ),
         )
         return
-    accounts = await db.get_tg_accounts(pool, callback.from_user.id)
-    if len(accounts) >= limit:
+    n_accounts = await db.count_tg_accounts(pool, callback.from_user.id)
+    if n_accounts >= limit:
         limit_label = tariffs.format_limit(limit)
         upgrade_plan = _next_account_plan(plan)
         await callback.message.edit_text(
@@ -4035,7 +4035,7 @@ async def _finalize_import(
     await state.clear()
 
     plan, limit = await _get_account_limit(pool, message.from_user.id)
-    accounts = await db.get_tg_accounts(pool, message.from_user.id)
+    n_accounts = await db.count_tg_accounts(pool, message.from_user.id)
 
     tg_user_id = info.get("tg_user_id") or 0
     # Пустой номер → `id:<uid>` делает общая запись аккаунта; без uid она
@@ -4105,7 +4105,7 @@ async def _finalize_import(
         )
         return
 
-    if len(accounts) >= limit:
+    if n_accounts >= limit:
         limit_label = tariffs.format_limit(limit)
         upgrade_plan = _next_account_plan(plan)
         await message.answer(

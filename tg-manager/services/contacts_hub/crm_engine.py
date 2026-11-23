@@ -261,14 +261,23 @@ async def get_upcoming_reminders(pool, owner_id: int, limit: int = 20) -> list:
     return result
 
 
-async def get_crm_overdue(pool, owner_id: int) -> list:
-    rows = await pool.fetch(
-        '''SELECT crm.*, uc.first_name, uc.last_name, uc.username
+async def get_crm_overdue(pool, owner_id: int, limit: int | None = None) -> list:
+    """Просроченные напоминания, самые старые первыми.
+
+    `limit` — потолок списка. Без него отдаётся всё: у владельца, который
+    импортировал базу с датами, просроченных бывают тысячи, и экран получал
+    мегабайты строк и рисовал по три кнопки на каждую. Экран и ассистент
+    берут потолок и итог отдельно (`count_crm_overdue`).
+    """
+    sql = '''SELECT crm.*, uc.first_name, uc.last_name, uc.username
            FROM contact_crm crm
            JOIN unified_contacts uc ON uc.id = crm.contact_id
            WHERE crm.owner_id=$1 AND crm.next_reminder_at < NOW()
-           ORDER BY crm.next_reminder_at ASC''',
-        owner_id)
+           ORDER BY crm.next_reminder_at ASC'''
+    if limit is not None:
+        rows = await pool.fetch(sql + " LIMIT $2", owner_id, max(0, int(limit)))
+    else:
+        rows = await pool.fetch(sql, owner_id)
     result = []
     for r in rows:
         d = dict(r)
@@ -279,6 +288,15 @@ async def get_crm_overdue(pool, owner_id: int) -> list:
             or (d.get('username') and '@' + d['username']) or '?')
         result.append(d)
     return result
+
+
+async def count_crm_overdue(pool, owner_id: int) -> int:
+    """Сколько всего просрочено — тем же условием, что и список выше."""
+    return int(await pool.fetchval(
+        '''SELECT COUNT(*) FROM contact_crm crm
+           JOIN unified_contacts uc ON uc.id = crm.contact_id
+           WHERE crm.owner_id=$1 AND crm.next_reminder_at < NOW()''',
+        owner_id) or 0)
 
 
 async def pipeline(pool, owner_id: int) -> dict:
