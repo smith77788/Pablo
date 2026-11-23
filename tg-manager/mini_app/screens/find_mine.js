@@ -36,6 +36,10 @@ const _FM_MORE_Q = {
   bots:     q => { goTab('bots'); _fmFill('botSearch', typeof onBotSearch === 'function' && onBotSearch, q); },
   accounts: q => { goTab('accounts'); _fmFill('accSearch', typeof onAccSearch === 'function' && onAccSearch, q); },
   channels: q => { openChannels(); _fmFill('chSearch', typeof onChSearch === 'function' && onChSearch, q); },
+  // У доски сделок своя строка поиска (#dkQ → dkSetQuery, по имени, компании,
+  // нику и названию сделки). openDeals строит экран синхронно до своего await,
+  // поэтому поле уже есть; запрос доезжает до перерисованной доски.
+  deals:    q => { openDeals(); _fmFill('dkQ', typeof dkSetQuery === 'function' && dkSetQuery, q); },
 };
 function fmOpenMore(key) {
   const box = document.getElementById('moreFindMine');
