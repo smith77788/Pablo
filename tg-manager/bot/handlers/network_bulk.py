@@ -19,6 +19,7 @@ from services.logger import log_exc_swallow
 from bot.utils.op_helpers import safe_answer, terminal_kb
 from services.secret_masking import mask_bot_token
 import html as _html
+from bot.utils.op_helpers import show_no_bots
 
 router = Router()
 log = logging.getLogger(__name__)
@@ -112,7 +113,7 @@ async def cb_bulk_check(
         await callback.answer("⚠️ Не удалось загрузить ботов. Попробуйте ещё раз через минуту.", show_alert=True)
         return
     if not bots:
-        await callback.answer("Нет ботов для проверки.", show_alert=True)
+        await show_no_bots(callback)
         return
     await safe_answer(callback)
     await callback.message.edit_text(f"⏳ Проверяю {len(bots)} токенов...")

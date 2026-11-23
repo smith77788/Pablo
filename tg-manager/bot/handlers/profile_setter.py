@@ -25,6 +25,7 @@ from bot.callbacks import ProfileSetterCb, BmCb
 from bot.utils.op_helpers import terminal_kb
 from bot.utils.owner_error import owner_error
 from bot.utils.op_helpers import cancel_kb
+from bot.utils.op_helpers import show_no_accounts
 
 log = logging.getLogger(__name__)
 router = Router()
@@ -296,7 +297,7 @@ async def cb_setter_confirm(callback: CallbackQuery, state: FSMContext, pool: as
     )
     account_ids = [r["id"] for r in rows]
     if not account_ids:
-        await callback.answer("⚠️ Нет доступных аккаунтов", show_alert=True)
+        await show_no_accounts(callback)
         return
 
     # Локальные операции (версии/пол/роль) — синхронный DB-путь, без очереди/Telegram.

@@ -32,6 +32,7 @@ from bot.utils.op_helpers import safe_answer
 log = logging.getLogger(__name__)
 from bot.utils.owner_error import owner_error  # noqa: E402
 from bot.utils.op_helpers import cancel_kb
+from bot.utils.op_helpers import show_no_accounts
 
 router = Router()
 
@@ -747,7 +748,7 @@ async def cb_group_import_all(callback: CallbackQuery, pool: asyncpg.Pool) -> No
     """Импортировать группы со всех активных аккаунтов."""
     accounts = await _get_active_accounts(pool, callback.from_user.id)
     if not accounts:
-        await callback.answer("Нет активных аккаунтов.", show_alert=True)
+        await show_no_accounts(callback)
         return
     await safe_answer(callback)
 
