@@ -251,6 +251,109 @@ def setup_routes(app: web.Application, pool) -> None:
             log.exception("channel_invite_link ch=%d uid=%d", ch_id, uid)
             return _err("Ошибка получения ссылки", 500)
 
+    async def _settings_target(request: web.Request):
+        """Канал владельца + его аккаунт для чтения/правки настроек.
+
+        (uid, ch, acc, None) или (.., ошибка-ответ)."""
+        uid = _get_uid(request)
+        if not uid:
+            return None, None, None, _err("Unauthorized", 401)
+        try:
+            ch_id = int(request.match_info["ch_id"])
+        except (KeyError, ValueError):
+            return uid, None, None, _err("Неверный идентификатор канала", 400)
+        ch = await _safe_fetchrow(pool,
+            "SELECT channel_id, title, username, type, acc_id, access_hash "
+            "FROM managed_channels WHERE channel_id=$1 AND owner_id=$2", ch_id, uid)
+        if not ch:
+            return uid, None, None, _err("Канал не найден", 404)
+        if not ch.get("acc_id"):
+            return uid, ch, None, _err("У канала нет привязанного аккаунта", 400)
+        acc = await _safe_fetchrow(pool,
+            "SELECT id, session_str, device_model, system_version, app_version, "
+            "lang_code, system_lang_code, "
+            "(SELECT proxy_url FROM user_proxies up WHERE up.id=tg_accounts.proxy_id AND up.is_active=TRUE) AS proxy_url "
+            "FROM tg_accounts WHERE id=$1 AND owner_id=$2 AND is_active=TRUE",
+            int(ch["acc_id"]), uid)
+        if not acc or not acc.get("session_str"):
+            return uid, ch, None, _err("Привязанный аккаунт недоступен", 400)
+        return uid, ch, acc, None
+
+    async def _discussion_groups(uid: int, acc_id: int) -> list[dict]:
+        """Группы владельца, которые ЭТОТ ЖЕ аккаунт может сделать обсуждением."""
+        rows = await _safe_fetch(pool,
+            "SELECT channel_id, title, username FROM managed_channels "
+            "WHERE owner_id=$1 AND acc_id=$2 AND type IN ('supergroup','group') "
+            "AND COALESCE(is_admin, TRUE) ORDER BY title NULLS LAST LIMIT 200",
+            uid, acc_id)
+        return [{"channel_id": int(r["channel_id"]),
+                 "title": r.get("title") or (("@" + r["username"]) if r.get("username") else str(r["channel_id"]))}
+                for r in rows]
+
+    async def channel_settings_get(request: web.Request) -> web.Response:
+        """Настройки канала/группы из Telegram (через аккаунт-владельца)."""
+        uid, ch, acc, bad = await _settings_target(request)
+        if bad is not None:
+            return bad
+        from services import channel_settings as _cs
+        try:
+            snap = await _cs.read_settings(
+                acc["session_str"], int(ch["channel_id"]), acc=dict(acc),
+                access_hash=int(ch.get("access_hash") or 0), username=ch.get("username") or "")
+        except Exception as e:
+            log.warning("channel_settings_get ch=%s: %s", ch["channel_id"], e)
+            return _err(_cs.error_ru(e) or "Не удалось прочитать настройки", 400)
+        groups = [] if snap.get("is_group") else await _discussion_groups(uid, int(acc["id"]))
+        return _json_resp({"ok": True, "settings": snap, "groups": groups,
+                           "perm_labels": _cs.PERM_LABELS})
+
+    async def channel_settings_set(request: web.Request) -> web.Response:
+        """Поменять ОДНУ настройку. Ответ — снимок после правки (что реально стоит)."""
+        uid, ch, acc, bad = await _settings_target(request)
+        if bad is not None:
+            return bad
+        try:
+            body = await request.json()
+        except Exception:
+            return _err("Неверный запрос", 400)
+        from services import channel_settings as _cs
+        from services import infra_memory as _im
+        key = str(body.get("key") or "")
+        is_group = (ch.get("type") or "") in ("supergroup", "group")
+        if "is_group" in body:
+            is_group = bool(body.get("is_group"))
+        value, verr = _cs.validate(key, body.get("value"), is_group=is_group)
+        if verr:
+            return _err(verr, 400)
+        if await _im.is_account_quarantined(pool, int(acc["id"])):
+            return _err("Аккаунт канала под ограничением Telegram — правки отложены, "
+                        "чтобы не усугубить", 409)
+        group_ref = None
+        if key == "discussion" and value:
+            allowed = {g["channel_id"] for g in await _discussion_groups(uid, int(acc["id"]))}
+            if value not in allowed:
+                return _err("Группа должна быть вашей и под тем же аккаунтом, что и канал", 400)
+            g = await _safe_fetchrow(pool,
+                "SELECT access_hash FROM managed_channels WHERE channel_id=$1 AND owner_id=$2",
+                value, uid)
+            group_ref = (value, int((g or {}).get("access_hash") or 0))
+        try:
+            snap = await _cs.apply_setting(
+                acc["session_str"], int(ch["channel_id"]), key, value, acc=dict(acc),
+                access_hash=int(ch.get("access_hash") or 0),
+                username=ch.get("username") or "", group_ref=group_ref)
+        except Exception as e:
+            log.warning("channel_settings_set ch=%s key=%s: %s", ch["channel_id"], key, e)
+            return _err(_cs.error_ru(e) or "Не удалось применить", 400)
+        if key == "username":
+            try:
+                await pool.execute(
+                    "UPDATE managed_channels SET username=$3 WHERE channel_id=$1 AND owner_id=$2",
+                    int(ch["channel_id"]), uid, snap.get("username") or None)
+            except Exception:
+                log.warning("channel_settings_set: username в каталоге не обновлён", exc_info=True)
+        return _json_resp({"ok": True, "settings": snap})
+
     async def channel_detail(request: web.Request) -> web.Response:
         uid = _get_uid(request)
         if not uid:
@@ -1146,6 +1249,8 @@ def setup_routes(app: web.Application, pool) -> None:
     app.router.add_post("/api/miniapp/channel/{ch_id}/post", post_to_channel)
     app.router.add_post("/api/miniapp/channel/{ch_id}/pin", pin_channel_last_post)
     app.router.add_get("/api/miniapp/channel/{ch_id}/invite_link", channel_invite_link)
+    app.router.add_get("/api/miniapp/channel/{ch_id}/settings", channel_settings_get)
+    app.router.add_post("/api/miniapp/channel/{ch_id}/settings", channel_settings_set)
     app.router.add_post("/api/miniapp/channel/add", channel_add)
     app.router.add_post("/api/miniapp/channel/{ch_id}/edit", channel_edit)
     app.router.add_post("/api/miniapp/channel/{ch_id}/promote", channel_promote)

@@ -225,7 +225,8 @@ PROCESS_LOCAL: dict[str, str] = {
     "services/auto_responder.py:_inactivity_sweep_task": "asyncio.Task",
     "services/auto_responder.py:_sales_followup_task": "asyncio.Task",
     "services/auto_responder.py:_cloud_reconcile_task": "asyncio.Task",
-    "services/auto_responder.py:_new_user_notify": "троттлинг уведомлений о новых подписчиках по боту (анти-накрутка); best-effort, потеря при рестарте безвредна",
+    "services/bot_event_notify.py:_buckets": "окно анти-накрутки уведомлений «запустили бота»/«заявка» по источнику; в двух процессах — максимум два сообщения в минуту вместо одного, события не теряются",
+    "services/bot_event_notify.py:_timers": "ссылки на таймеры сводок, чтобы их не собрал GC",
     "services/flood_guard.py:_windows": "скользящее окно скорости новых подписчиков по боту (детектор всплеска); process-local, потеря при рестарте безвредна",
     "services/flood_guard.py:_config_cache": "TTL-кэш конфига защиты по боту; расхождение реплик безвредно (кэш истекает за 30с, источник правды — БД)",
     "services/bg_tasks.py:_bg_tasks": "ссылки на задачи, чтобы их не собрал GC",
@@ -302,6 +303,7 @@ PROCESS_LOCAL: dict[str, str] = {
 # Производное состояние: расхождение стоит лишней работы или устаревшего
 # показания на экране, но не корректности и не доступа.
 CACHE: dict[str, str] = {
+    "services/mini_app_notify_routes.py:_bot_username_cache": "@username главного бота для ссылки «добавить в канал»; одинаков во всех процессах",
     "services/mass_rollout.py:_settings_cache": (
         "ключи канарейки из platform_settings на 30 секунд; источник правды — "
         "база, расхождение между процессами не дольше TTL"),

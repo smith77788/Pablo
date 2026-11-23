@@ -5,13 +5,14 @@ import asyncio
 import logging
 import os
 import time
-from datetime import datetime
+from datetime import datetime, timezone
 
 import aiohttp
 import asyncpg
 from database import db
 from services import automation_events
 from services import bot_api
+from services import bot_event_notify as _ben
 from services import brand_injection
 from services import workflow_runtime as _wf_rt
 from services import quiet_hours as _quiet
@@ -68,6 +69,9 @@ _MANAGED_BOT_ALLOWED_UPDATES = [
     # Касания в HTML-виджетах бота (Bot API 10.4): голос в опросе, оценка,
     # «иду». Ответ ждут 15 секунд — services/bot_widget_runtime.py.
     "widget_query", "shared_widget_query",
+    # Заявка на вступление в канал/группу, где бот админ: без этого типа
+    # Telegram её боту не доставит, и владелец о заявке не узнаёт никогда.
+    "chat_join_request",
 ]
 
 
@@ -133,34 +137,23 @@ def reaction_signal(mr: dict):
         return None, None
     return uid, user
 
-# Троттлинг уведомлений «новый подписчик» ПО БОТУ (анти-накрутка). Раньше каждый
-# новый юзер слал владельцу отдельный DM через main-bot; при накрутке ботами
-# поток из тысяч фейков насыщал main-bot (FloodWait) — и Infragram переставал
-# отвечать всем. Теперь копим счётчик за окно и шлём одно агрегированное
-# уведомление на бота, предупреждая о возможной накрутке.
-# Структура: {bot_id: {"count": int, "last": monotonic}}
-_new_user_notify: dict[int, dict] = {}
-_NEW_USER_NOTIFY_COOLDOWN = 60.0  # не чаще одного уведомления на бота в минуту
+# Уведомления «запустили бота» и «заявка на вступление» — в
+# services/bot_event_notify.py: там же окно анти-накрутки, которое не теряет
+# событий (прежний троттлинг отдавал накопленное только со следующим
+# подписчиком после окна, то есть часто — никогда).
 
 
-def _new_user_notify_decide(bot_id: int) -> int | None:
-    """Сколько новых подписчиков отправить в уведомлении сейчас, либо None если
-    рано (throttle). ЧИСТАЯ по эффекту (только in-memory счётчик процесса).
-
-    Первый подписчик после паузы уведомляется сразу (count=1); последующие в
-    пределах окна копятся и уходят одним агрегированным уведомлением после окна."""
-    now = time.monotonic()
-    st = _new_user_notify.get(bot_id)
-    if st is None:
-        st = {"count": 0, "last": 0.0}
-        _new_user_notify[bot_id] = st
-    st["count"] += 1
-    if now - st["last"] >= _NEW_USER_NOTIFY_COOLDOWN:
-        n = st["count"]
-        st["count"] = 0
-        st["last"] = now
-        return n
-    return None
+def _returned_after_silence(prev_seen, now=None) -> bool:
+    """Повторный /start стоит уведомления, если человек молчал долго. ЧИСТАЯ."""
+    if prev_seen is None:
+        return False
+    now = now or datetime.now(timezone.utc)
+    try:
+        if prev_seen.tzinfo is None:
+            prev_seen = prev_seen.replace(tzinfo=timezone.utc)
+        return (now - prev_seen).total_seconds() >= _ben.RETURN_AFTER_S
+    except (AttributeError, TypeError):
+        return False
 
 
 def _is_dm_update(upd: dict) -> bool:
@@ -1131,6 +1124,19 @@ async def _process_bot(
                                      0.5 if _csig == "opened" else 0.9, _cwho)
                 continue
 
+            # Заявка на вступление в канал/группу, где этот бот админ. Раньше
+            # тип не запрашивался и не разбирался: владелец не узнавал о заявке.
+            cjr = upd.get("chat_join_request")
+            if cjr:
+                if main_bot and bot_row and bot_row.get("added_by"):
+                    try:
+                        await _ben.notify_join_request(
+                            pool, main_bot, int(bot_row["added_by"]), bot_id=bot_id,
+                            cjr=cjr, via_bot=bot_row.get("username") or "")
+                    except Exception:
+                        log_exc_swallow(log, f"auto_responder: заявка на вступление bot={bot_id}")
+                continue
+
             # Человек заблокировал бота или вернулся. Telegram шлёт это сам,
             # в наборе обновлений по умолчанию, — а продукт выбрасывал апдейт
             # не глядя. Из-за этого bot_users.is_blocked не выставлялся НИ
@@ -1234,8 +1240,8 @@ async def _process_bot(
                 if _bi:
                     await _vl_signal(chat_id, _bi, 0.7, from_user)
 
-            # Track user activity — returns True for first-ever message (new user)
-            is_new_user = await db.upsert_user_activity(pool, bot_id, chat_id)
+            # Track user activity — первый ли это контакт и когда писал до этого.
+            is_new_user, _prev_seen = await db.record_user_activity(pool, bot_id, chat_id)
 
             # Notify bot owner about new user
             if is_new_user:
@@ -1243,39 +1249,19 @@ async def _process_bot(
                     "new_user: bot_id=%s chat_id=%s main_bot=%s added_by=%s",
                     bot_id, chat_id, bool(main_bot), bot_row.get("added_by") if bot_row else None,
                 )
-            if is_new_user and main_bot and bot_row and bot_row.get("added_by"):
-                # Анти-накрутка: троттлим уведомления ПО БОТУ, а не по каждому юзеру.
-                # Иначе поток фейков (накрутка) слал бы тысячи DM через main-bot,
-                # клал его в FloodWait и «ронял» Infragram для всех.
-                _n = _new_user_notify_decide(bot_id)
-                if _n is not None:
-                    owner_id = bot_row["added_by"]
-                    bot_name = (
-                        bot_row.get("username")
-                        or bot_row.get("first_name")
-                        or f"id{bot_id}"
-                    )
-                    if _n <= 1:
-                        user_name = (
-                            from_user.get("username")
-                            or from_user.get("first_name")
-                            or f"id{chat_id}"
-                        )
-                        note = (f"👤 <b>Новый пользователь</b> @{user_name} "
-                                f"подписался на @{bot_name}")
-                    else:
-                        note = (f"👤 <b>+{_n} новых подписчиков</b> на @{bot_name} "
-                                f"за последнюю минуту.\n⚠️ Если вы не запускали "
-                                f"продвижение — возможно, идёт накрутка ботами.")
-                    # dedup_key per-bot: уведомления по этому боту делят один слот
-                    # кулдауна (не по каждому юзеру) — второй барьер против флуда.
-                    from services.bg_tasks import spawn
-                    spawn(
-                        db.notify_if_enabled(
-                            pool, main_bot, owner_id, "new_user", note,
-                            dedup_key=f"{bot_id}:new",
-                        )
-                    )
+            # Уведомить владельца: новый человек ИЛИ /start от того, кто давно
+            # молчал. Раньше повторный /start не порождал ничего, а первый
+            # терялся в троттлинге (services/bot_event_notify.py, причины 1–3).
+            if main_bot and bot_row and bot_row.get("added_by") and (
+                    is_new_user or (is_start and _returned_after_silence(_prev_seen))):
+                try:
+                    await _ben.notify_start(
+                        pool, main_bot, int(bot_row["added_by"]), bot_id=bot_id,
+                        bot_name=(bot_row.get("username") or bot_row.get("first_name")
+                                  or f"id{bot_id}"),
+                        event=_ben.start_event(from_user, chat_id, new=is_new_user))
+                except Exception:
+                    log_exc_swallow(log, f"auto_responder: уведомление о запуске bot={bot_id}")
 
             # Register in bot_users so the user appears in broadcast audience
             await db.upsert_users(
