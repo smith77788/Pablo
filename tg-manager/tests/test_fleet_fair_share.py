@@ -85,6 +85,7 @@ def _isolate_op_worker_globals():
 
 
 def _reset():
+    ow._op_shares.clear()       # доли совместного режима, оставленные чужими тестами
     ow._accounts_in_use.clear()
     ow._operation_account_locks.clear()
     ow._active_op_ids.clear()
