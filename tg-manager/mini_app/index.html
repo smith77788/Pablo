@@ -2095,7 +2095,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
   </div>
   <div id="vchatBody" style="flex:1;overflow-y:auto;padding:10px 12px;display:flex;flex-direction:column;gap:8px"></div>
   <div id="vchatComposer" style="display:none;padding:8px 10px;border-top:1px solid var(--sep);gap:8px;align-items:flex-end">
-    <textarea id="vchatInput" rows="1" placeholder="Ответить от вашего имени…" style="flex:1;box-sizing:border-box;padding:9px 12px;border-radius:16px;background:var(--bg3);color:var(--text);border:1px solid var(--border-input);font-size:14px;resize:none;max-height:120px"></textarea>
+    <textarea id="vchatInput" rows="1" onkeydown="sendOnCtrlEnter(event, sendVaultReply)" oninput="autoGrowInput(this)" placeholder="Ответить от вашего имени… (Ctrl+Enter — отправить)" style="flex:1;box-sizing:border-box;padding:9px 12px;border-radius:16px;background:var(--bg3);color:var(--text);border:1px solid var(--border-input);font-size:14px;resize:none;max-height:120px"></textarea>
     <button class="btn btn-p" style="padding:9px 16px;border-radius:16px" onclick="sendVaultReply()" aria-label="Отправить">➤</button>
   </div>
 </div>
@@ -21290,6 +21290,7 @@ async function sendVaultReply() {
   try {
     await api(vaultPath('/api/miniapp/vault/chat/'+VAULT_CHAT+'/reply'), {method:'POST', body: JSON.stringify({text})});
     inp.value = '';
+    autoGrowInput(inp);
     await reloadVaultChat();
     reloadVaultDialogs().then(vaultChatSubtitle).catch(() => {});
   } catch(e) { toast('⚠️ '+errRu(e,'Не отправлено')); }
@@ -34944,6 +34945,27 @@ function empty(ico,txt2,sub,action) {
 function txt(id, html) {
   const el=document.getElementById(id);
   if(el) el.innerHTML=html;
+}
+// Поле ответа в Хранилище — одна строка с resize:none, и длинный ответ
+// прятался в прокрутку одной строки: видно было только последнюю. Растим
+// высоту под текст до потолка (дальше прокрутка), и возвращаем к одной строке
+// после отправки.
+function autoGrowInput(el) {
+  if (!el) return;
+  el.style.height = 'auto';
+  const max = parseInt(el.style.maxHeight) || 120;
+  el.style.height = Math.min(el.scrollHeight, max) + 'px';
+}
+// Ctrl/⌘+Enter в поле ответа отправляет — как в Telegram и почте. В
+// многострочном поле обычный Enter оставляем под перенос строки, поэтому
+// отправка только с модификатором. Вешать на onkeydown поля ответа.
+function sendOnCtrlEnter(ev, fn) {
+  if (ev && ev.key === 'Enter' && (ev.ctrlKey || ev.metaKey)) {
+    ev.preventDefault();
+    if (typeof fn === 'function') fn();
+    return false;
+  }
+  return true;
 }
 function stb(s) {
   return {running:['b-gr','▶ Работает'],pending:['b-or','⏳ Ожидает'],done:['b-bl','✓ Готово'],completed:['b-bl','✓ Готово'],partial:['b-or','⚠ Частично'],empty:['b-gy','∅ Пусто'],paused:['b-or','⏸ Пауза'],draft:['b-gy','✏ Черновик'],failed:['b-rd','✕ Ошибка'],cancelled:['b-gy','— Отменено'],ok:['b-bl','✓ Готово'],success:['b-bl','✓ Готово'],sent:['b-bl','✓ Отправлено'],error:['b-rd','✕ Ошибка'],queued:['b-or','⏳ В очереди'],active:['b-gr','▶ Работает'],stopped:['b-gy','⏹ Остановлено']}[String(s||'').toLowerCase()]||['b-gy',s||'—'];

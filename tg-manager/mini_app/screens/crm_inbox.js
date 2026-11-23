@@ -187,8 +187,8 @@ async function openInboxThread(i) {
     if (canRelay) {
       out += '<div style="padding:0 16px 8px">' +
         '<div class="preset-row" id="ibQuick"></div>' +
-        '<textarea id="ibReplyText" class="input-bc" rows="3" maxlength="4000" placeholder="Ответ через бота…" style="width:100%" ' +
-          'oninput="_ibKeepDraft()">' + esc(loadDraft(_ibDraftKey(t))) + '</textarea>' +
+        '<textarea id="ibReplyText" class="input-bc" rows="3" maxlength="4000" placeholder="Ответ через бота… (Ctrl+Enter — отправить)" style="width:100%" ' +
+          'onkeydown="sendOnCtrlEnter(event, sendInboxReply)" oninput="_ibKeepDraft()">' + esc(loadDraft(_ibDraftKey(t))) + '</textarea>' +
         '<button class="btn" style="margin-top:6px;width:100%" onclick="sendInboxReply()">Отправить через бота</button>' +
         '</div>';
     }
