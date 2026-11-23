@@ -396,7 +396,7 @@ async def cb_persona_set_style(
 ) -> None:
     style_key = callback_data.action.replace("set_style_", "")
     if style_key not in _SPEECH_STYLES:
-        await callback.answer("Неверный стиль", show_alert=True)
+        await callback.answer("⚠️ Кнопка устарела. Откройте раздел заново.", show_alert=True)
         return
     await state.update_data(speech_style=style_key)
     await _ask_backstory(callback, state)

@@ -219,7 +219,7 @@ async def cb_cloner_confirm(cb: CallbackQuery, callback_data: ContentClonerCb, s
         count = int(sub)
         await _do_queue(cb, state, pool, count)
     else:
-        await cb.answer("⚠️ Неверный параметр.", show_alert=True)
+        await cb.answer("⚠️ Кнопка устарела. Откройте раздел заново.", show_alert=True)
 
 
 async def _show_confirm(msg_or_cb, state: FSMContext, count: int, via_message: bool = False) -> None:

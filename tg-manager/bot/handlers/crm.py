@@ -1041,7 +1041,7 @@ async def cb_deal_move(
     # Кнопки, отправленные до обновления, несут старые имена — переводим.
     new_stage = db.normalize_crm_stage(callback_data.tag, None)
     if new_stage not in _PIPELINE_STAGES:
-        await callback.answer("Неверная стадия.", show_alert=True)
+        await callback.answer("⚠️ Кнопка устарела. Откройте раздел заново.", show_alert=True)
         return
 
     await db.move_crm_deal_stage(

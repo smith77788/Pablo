@@ -707,7 +707,7 @@ async def _handle_text_entity(
         try:
             eid = int(username_str)
         except ValueError:
-            await message.answer("❓ Некорректный ID.", reply_markup=_waiting_kb())
+            await message.answer("❓ ID должен состоять из цифр, например 123456789. Отправьте ещё раз.", reply_markup=_waiting_kb())
             return
         if eid < -1_000_000_000:
             etype = "channel"

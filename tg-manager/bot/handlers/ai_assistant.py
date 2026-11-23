@@ -1273,7 +1273,7 @@ async def cb_ai_memory_delete(
     await safe_answer(callback)
     memory_id = callback_data.memory_id
     if not memory_id:
-        await callback.answer("❌ Некорректный ID записи", show_alert=True)
+        await callback.answer("⚠️ Кнопка устарела. Откройте раздел заново.", show_alert=True)
         return
     try:
         deleted = await ai_memory.delete(pool, callback.from_user.id, memory_id)

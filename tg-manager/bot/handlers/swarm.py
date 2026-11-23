@@ -211,7 +211,7 @@ async def cb_swarm_role(
         return
     role = callback_data.action.replace("role_", "")
     if role not in ("entry", "conversion", "retention", "general"):
-        await callback.answer("Неверная роль", show_alert=True)
+        await callback.answer("⚠️ Кнопка устарела. Откройте раздел заново.", show_alert=True)
         return
     try:
         # Check current role before updating
@@ -333,7 +333,7 @@ async def cb_change_mode(
         "stability",
     ]
     if mode not in valid_modes:
-        await callback.answer("Неизвестный режим.", show_alert=True)
+        await callback.answer("⚠️ Кнопка устарела. Откройте раздел заново.", show_alert=True)
         return
     try:
         await db.set_system_mode(pool, mode)

@@ -2583,7 +2583,7 @@ async def cb_ob_type_chosen(
     op_type = callback_data.op_type or ""
     meta = _OP_TYPE_META.get(op_type)
     if not meta:
-        await callback.answer("Неизвестный тип операции", show_alert=True)
+        await callback.answer("⚠️ Кнопка устарела. Откройте раздел заново.", show_alert=True)
         return
 
     # Проверка подписки

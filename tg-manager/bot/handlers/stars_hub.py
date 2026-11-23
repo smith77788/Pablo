@@ -452,7 +452,7 @@ async def cb_create_ctype(callback: CallbackQuery, state: FSMContext) -> None:
     ctype = action_part.replace("create_ctype_", "")
 
     if ctype not in CONTENT_TYPES:
-        await callback.answer("Неверный тип", show_alert=True)
+        await callback.answer("⚠️ Кнопка устарела. Откройте раздел заново.", show_alert=True)
         return
     await state.update_data(content_type=ctype)
     await state.set_state(StarsExperimentFSM.waiting_price_a)

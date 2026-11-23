@@ -1854,7 +1854,7 @@ async def cb_plan_type(
 ) -> None:
     op_type = callback_data.sub
     if op_type not in _OP_TYPE_LABELS:
-        await callback.answer("Неизвестный тип операции", show_alert=True)
+        await callback.answer("⚠️ Кнопка устарела. Откройте раздел заново.", show_alert=True)
         return
     await safe_answer(callback)
     await state.update_data(op_type=op_type)
@@ -2123,7 +2123,7 @@ async def cb_plan_cancel(
     try:
         op_id = int(callback_data.sub or "0")
     except (ValueError, TypeError):
-        await callback.answer("Неверный ID операции", show_alert=True)
+        await callback.answer("⚠️ Кнопка устарела. Откройте раздел заново.", show_alert=True)
         return
 
     uid = callback.from_user.id

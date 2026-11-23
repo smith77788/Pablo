@@ -247,7 +247,7 @@ async def cb_eco_create_type(
 ) -> None:
     eco_type = callback_data.action.replace("create_type_", "")
     if eco_type not in _ECO_TYPES:
-        await callback.answer("Неверный тип", show_alert=True)
+        await callback.answer("⚠️ Кнопка устарела. Откройте раздел заново.", show_alert=True)
         return
 
     data = await state.get_data()
@@ -1816,7 +1816,7 @@ async def cb_eco_dna_type(
 ) -> None:
     dtype = callback_data.action[len("dna_type_") :]
     if dtype not in _DNA_TYPES:
-        await callback.answer("Неверный тип", show_alert=True)
+        await callback.answer("⚠️ Кнопка устарела. Откройте раздел заново.", show_alert=True)
         return
     eco_id = callback_data.eco_id
     await state.update_data(dna_type=dtype)

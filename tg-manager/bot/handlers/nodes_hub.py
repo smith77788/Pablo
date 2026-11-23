@@ -178,7 +178,7 @@ async def cb_nodes_add_type(
 
     node_type = callback_data.action.removeprefix("add_type_")
     if node_type not in NODE_TYPE_LABELS:
-        await callback.answer("Неизвестный тип.", show_alert=True)
+        await callback.answer("⚠️ Кнопка устарела. Откройте раздел заново.", show_alert=True)
         return
 
     await safe_answer(callback)
@@ -477,7 +477,7 @@ async def cb_prov_type(
 ) -> None:
     entity_type = callback_data.action.removeprefix("prov_type_")
     if entity_type not in ENTITY_LABELS:
-        await callback.answer("Неизвестный тип.", show_alert=True)
+        await callback.answer("⚠️ Кнопка устарела. Откройте раздел заново.", show_alert=True)
         return
 
     fsm_data = await state.get_data()
@@ -637,7 +637,7 @@ async def cb_bulk_etype(
 ) -> None:
     entity_type = callback_data.action.removeprefix("bulk_etype_")
     if entity_type not in ENTITY_LABELS:
-        await callback.answer("Неизвестный тип.", show_alert=True)
+        await callback.answer("⚠️ Кнопка устарела. Откройте раздел заново.", show_alert=True)
         return
 
     fsm_data = await state.get_data()

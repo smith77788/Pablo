@@ -1751,11 +1751,11 @@ async def cb_pay_edit(
     callback: CallbackQuery, callback_data: SubCb, state: FSMContext
 ) -> None:
     if not sub_utils.is_platform_admin(callback.from_user.id):
-        await callback.answer("⛔️", show_alert=True)
+        await callback.answer("⛔ Только для администраторов платформы.", show_alert=True)
         return
     key = callback_data.plan or ""  # reused field for the setting key
     if key not in _PAY_SETTING_LABELS:
-        await callback.answer("Неизвестный параметр.", show_alert=True)
+        await callback.answer("⚠️ Кнопка устарела. Откройте раздел заново.", show_alert=True)
         return
     await safe_answer(callback)
 
@@ -1992,7 +1992,7 @@ async def cb_promo_clear(
     callback: CallbackQuery, pool: asyncpg.Pool
 ) -> None:
     if not sub_utils.is_platform_admin(callback.from_user.id):
-        await callback.answer("⛔️", show_alert=True)
+        await callback.answer("⛔ Только для администраторов платформы.", show_alert=True)
         return
     await safe_answer(callback)
     from database.db import set_platform_setting
@@ -2007,7 +2007,7 @@ async def cb_promo_set(
     callback: CallbackQuery, state: FSMContext
 ) -> None:
     if not sub_utils.is_platform_admin(callback.from_user.id):
-        await callback.answer("⛔️", show_alert=True)
+        await callback.answer("⛔ Только для администраторов платформы.", show_alert=True)
         return
     await safe_answer(callback)
     await state.set_state(PromoSettingsFSM.waiting_discount)

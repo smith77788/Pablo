@@ -339,7 +339,7 @@ async def cb_ghost_set_personality(
 ) -> None:
     slug = callback_data.extra
     if slug not in _PERSONALITY:
-        await callback.answer("Неверный тип.", show_alert=True)
+        await callback.answer("⚠️ Кнопка устарела. Откройте раздел заново.", show_alert=True)
         return
     await pool.execute(
         "UPDATE ghost_profiles SET personality=$1, updated_at=NOW() WHERE id=$2 AND owner_id=$3",

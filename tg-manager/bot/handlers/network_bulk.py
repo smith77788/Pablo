@@ -441,7 +441,7 @@ async def cb_netgeo_lang_select(
     """Handle GEO language selection from inline keyboard (netgeo:field:lang_code)."""
     parts = callback.data.split(":", 2)
     if len(parts) != 3:
-        await callback.answer("Неверный формат.", show_alert=True)
+        await callback.answer("⚠️ Кнопка устарела. Откройте раздел заново.", show_alert=True)
         return
     _, field, code = parts
     await safe_answer(callback)
@@ -454,7 +454,7 @@ async def cb_netgeo_lang_select(
         "cmd": (BulkEdit.waiting_localized_commands, f"🤖 Введите <b>команды</b> для языка <code>{code.upper()}</code>:\n\n<code>start - Главное меню\nhelp - Помощь</code>"),
     }
     if field not in _state_map:
-        await callback.answer("Неизвестный тип поля.", show_alert=True)
+        await callback.answer("⚠️ Кнопка устарела. Откройте раздел заново.", show_alert=True)
         return
     next_state, prompt = _state_map[field]
     kb = InlineKeyboardBuilder()

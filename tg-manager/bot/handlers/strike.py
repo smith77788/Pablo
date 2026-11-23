@@ -966,7 +966,7 @@ async def cb_mini_strike_category(
 
     cat = MINI_CATEGORIES.get(category)
     if not cat:
-        await callback.answer("Неизвестная категория.", show_alert=True)
+        await callback.answer("⚠️ Кнопка устарела. Откройте раздел заново.", show_alert=True)
         return
 
     if not target:

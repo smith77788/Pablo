@@ -150,7 +150,7 @@ async def cb_users_list(
 async def cb_filter_plan(callback: CallbackQuery) -> None:
     """Меню фильтра по плану."""
     if not _is_admin(callback.from_user.id):
-        await callback.answer("⛔️", show_alert=True)
+        await callback.answer("⛔ Только для администраторов платформы.", show_alert=True)
         return
 
     await safe_answer(callback)
@@ -183,7 +183,7 @@ async def cb_plan_list(
 ) -> None:
     """Показать пользователей с конкретным планом."""
     if not _is_admin(callback.from_user.id):
-        await callback.answer("⛔️", show_alert=True)
+        await callback.answer("⛔ Только для администраторов платформы.", show_alert=True)
         return
 
     await safe_answer(callback)
@@ -234,7 +234,7 @@ async def cb_plan_list(
 async def cb_banned_list(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
     """Показать забаненных пользователей."""
     if not _is_admin(callback.from_user.id):
-        await callback.answer("⛔️", show_alert=True)
+        await callback.answer("⛔ Только для администраторов платформы.", show_alert=True)
         return
 
     await safe_answer(callback)
@@ -265,7 +265,7 @@ async def cb_user_actions(
 ) -> None:
     """Показать действия над пользователем."""
     if not _is_admin(callback.from_user.id):
-        await callback.answer("⛔️", show_alert=True)
+        await callback.answer("⛔ Только для администраторов платформы.", show_alert=True)
         return
 
     user_id = callback_data.user_id
@@ -336,7 +336,7 @@ async def cb_grant_plan(
 ) -> None:
     """Меню выбора плана для выдачи."""
     if not _is_admin(callback.from_user.id):
-        await callback.answer("⛔️", show_alert=True)
+        await callback.answer("⛔ Только для администраторов платформы.", show_alert=True)
         return
 
     await safe_answer(callback)
@@ -379,7 +379,7 @@ async def cb_plan_months(
 ) -> None:
     """Меню выбора срока подписки."""
     if not _is_admin(callback.from_user.id):
-        await callback.answer("⛔️", show_alert=True)
+        await callback.answer("⛔ Только для администраторов платформы.", show_alert=True)
         return
 
     await safe_answer(callback)
@@ -427,7 +427,7 @@ async def cb_confirm_grant(
 ) -> None:
     """Подтвердить выдачу плана."""
     if not _is_admin(callback.from_user.id):
-        await callback.answer("⛔️", show_alert=True)
+        await callback.answer("⛔ Только для администраторов платформы.", show_alert=True)
         return
 
     user_id = callback_data.user_id
@@ -471,7 +471,7 @@ async def cb_revoke_plan(
 ) -> None:
     """Забрать подписку у пользователя."""
     if not _is_admin(callback.from_user.id):
-        await callback.answer("⛔️", show_alert=True)
+        await callback.answer("⛔ Только для администраторов платформы.", show_alert=True)
         return
 
     user_id = callback_data.user_id
@@ -513,7 +513,7 @@ async def cb_grant_strike(
 ) -> None:
     """Выдать Strike доступ пользователю."""
     if not _is_admin(callback.from_user.id):
-        await callback.answer("⛔️", show_alert=True)
+        await callback.answer("⛔ Только для администраторов платформы.", show_alert=True)
         return
 
     user_id = callback_data.user_id
@@ -555,7 +555,7 @@ async def cb_revoke_strike(
 ) -> None:
     """Забрать Strike доступ у пользователя."""
     if not _is_admin(callback.from_user.id):
-        await callback.answer("⛔️", show_alert=True)
+        await callback.answer("⛔ Только для администраторов платформы.", show_alert=True)
         return
 
     user_id = callback_data.user_id
@@ -583,7 +583,7 @@ async def cb_ban(
 ) -> None:
     """Забанить пользователя."""
     if not _is_admin(callback.from_user.id):
-        await callback.answer("⛔️", show_alert=True)
+        await callback.answer("⛔ Только для администраторов платформы.", show_alert=True)
         return
 
     user_id = callback_data.user_id
@@ -647,7 +647,7 @@ async def cb_unban(
 ) -> None:
     """Разбанить пользователя."""
     if not _is_admin(callback.from_user.id):
-        await callback.answer("⛔️", show_alert=True)
+        await callback.answer("⛔ Только для администраторов платформы.", show_alert=True)
         return
 
     user_id = callback_data.user_id
@@ -711,7 +711,7 @@ async def cb_quick_ban(
 ) -> None:
     """Быстрый бан из списка пользователей — с возвратом к списку."""
     if not _is_admin(callback.from_user.id):
-        await callback.answer("⛔️", show_alert=True)
+        await callback.answer("⛔ Только для администраторов платформы.", show_alert=True)
         return
 
     user_id = callback_data.user_id
@@ -771,7 +771,7 @@ async def cb_quick_grant30(
 ) -> None:
     """Выдать 30 дней Starter из списка пользователей."""
     if not _is_admin(callback.from_user.id):
-        await callback.answer("⛔️", show_alert=True)
+        await callback.answer("⛔ Только для администраторов платформы.", show_alert=True)
         return
 
     user_id = callback_data.user_id
@@ -891,7 +891,7 @@ async def cb_export_csv_users(callback: CallbackQuery, pool: asyncpg.Pool) -> No
 async def cb_main_menu(callback: CallbackQuery, state: FSMContext) -> None:
     """Вернуться в админ-меню."""
     if not _is_admin(callback.from_user.id):
-        await callback.answer("⛔️", show_alert=True)
+        await callback.answer("⛔ Только для администраторов платформы.", show_alert=True)
         return
 
     await state.clear()

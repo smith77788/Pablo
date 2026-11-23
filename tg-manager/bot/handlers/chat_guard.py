@@ -909,7 +909,7 @@ async def cb_toggle(callback: CallbackQuery, callback_data: GuardCb, bot: Bot,
     try:
         s = await cg.toggle_setting(pool, chat_id, callback_data.key)
     except ValueError:
-        await callback.answer("Неизвестная настройка", show_alert=True)
+        await callback.answer("⚠️ Кнопка устарела. Откройте раздел заново.", show_alert=True)
         return
     await callback.answer("Готово")
     try:
