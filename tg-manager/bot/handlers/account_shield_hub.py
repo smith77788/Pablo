@@ -31,7 +31,7 @@ log = logging.getLogger(__name__)
 router = Router()
 
 _ACTION_LABEL = {
-    "ok":    "✅ OK",
+    "ok":    "✅ Всё в порядке",
     "warn":  "⚠️ Предупреждение",
     "cool":  "❄️ Охлаждение",
     "pause": "⏸ Пауза",

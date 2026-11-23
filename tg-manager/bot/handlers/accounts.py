@@ -22,6 +22,8 @@ from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import BufferedInputFile, CallbackQuery, Message
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
+from bot.utils.op_names import op_name as _op_name, status_label as _ost_label  # noqa: E402
+
 log = logging.getLogger(__name__)
 
 _DIALOGS_PAGE_SIZE = 10
@@ -115,7 +117,7 @@ def _display_acc_status_label(acc: dict) -> str:
     status = _display_acc_status(acc)
     labels = {
         "active": "✅ Активен",
-        "cooldown": "⏳ FloodWait / cooldown",
+        "cooldown": "⏳ Пауза от Telegram (флуд-лимит)",
         "spamblock": "⚠️ Спам-ограничения",
         "banned": "❌ Заблокирован",
         "deactivated": "💀 Деактивирован",
@@ -2543,7 +2545,7 @@ async def cb_check_health(
         status_title = "Спам-блокировка"
     elif status == "cooldown":
         status_icon = "⏳"
-        status_title = "FloodWait — временные ограничения"
+        status_title = "Флуд-лимит — временные ограничения"
     elif status == "banned":
         status_icon = "💀"
         status_title = "Аккаунт заблокирован Telegram"
@@ -5300,9 +5302,9 @@ async def cb_account_assets(
     if ops:
         lines.append(f"⚙️ <b>Активные операции ({len(ops)}):</b>")
         for op in ops[:5]:
-            op_type = escape(op.get("op_type") or "")
-            status = op.get("status") or ""
-            lines.append(f"  • {op_type} [{status}]")
+            op_type = escape(_op_name(op.get("op_type")))
+            status = _ost_label(op.get("status"))
+            lines.append(f"  • {op_type} — {status}")
     else:
         lines.append("⚙️ Активных операций нет")
 

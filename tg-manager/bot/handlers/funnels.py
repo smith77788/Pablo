@@ -100,7 +100,7 @@ async def _show_funnel_view(
     dropped = funnel.get("dropped_count") or 0
     active_subs = len(sub_ids)
     text = (
-        f"🔗 <b>Цепочка: {funnel['name']}</b>\n\n"
+        f"🔗 <b>Цепочка: {_html.escape(funnel['name'])}</b>\n\n"
         f"Триггер: {trigger}\n"
         f"Статус: {status}\n"
         f"Шагов: {len(steps)}\n\n"
@@ -519,7 +519,7 @@ async def msg_fn_step_delay(
 
     await message.answer(
         f"✅ Шаг {step_order + 1} добавлен!\n\n"
-        f"🔗 <b>Цепочка: {funnel['name'] if funnel else ''}</b>\n\n"
+        f"🔗 <b>Цепочка: {_html.escape(funnel['name']) if funnel else ''}</b>\n\n"
         f"Триггер: {trigger}\n"
         f"Статус: {status}\n"
         f"Шагов: {len(steps)}\n\n"
@@ -607,7 +607,7 @@ async def cb_fn_broadcast(
         subscriber_ids=user_ids,
     )
     await callback.message.edit_text(
-        f"📢 <b>Рассылка подписчикам «{funnel['name']}»</b>\n\n"
+        f"📢 <b>Рассылка подписчикам «{_html.escape(funnel['name'])}»</b>\n\n"
         f"Подписчиков: <b>{len(user_ids)}</b>\n\n"
         "Введите текст сообщения (HTML поддерживается):",
         parse_mode="HTML",
@@ -775,7 +775,7 @@ async def cb_fn_copy_single(
     )
     kb.adjust(1)
     await callback.message.edit_text(
-        f"📋 <b>Копировать воронку «{funnel['name']}»</b>\n\nВыберите бот назначения:",
+        f"📋 <b>Копировать воронку «{_html.escape(funnel['name'])}»</b>\n\nВыберите бот назначения:",
         parse_mode="HTML",
         reply_markup=kb.as_markup(),
     )
@@ -917,7 +917,7 @@ async def _render_steps_manage(
 
     steps_list = "\n".join(f"  {l}" for l in lines)
     await callback.message.edit_text(
-        f"📝 <b>Управление шагами — «{funnel['name']}»</b>\n\n"
+        f"📝 <b>Управление шагами — «{_html.escape(funnel['name'])}»</b>\n\n"
         f"{steps_list}\n\n"
         f"⬆️/⬇️ — переместить шаг | 👁 — предпросмотр | 🗑 — удалить",
         parse_mode="HTML",
