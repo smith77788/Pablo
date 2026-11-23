@@ -511,7 +511,7 @@ async def _execute_gp_intent(
         log_exc_swallow(log, f"_execute_gp_intent: {exc}")
         await _show_manual_hint(
             callback,
-            f"Не удалось запустить Global Presence: {owner_error(exc, html_escape=False)}",
+            f"Не удалось запустить гео-сеть: {owner_error(exc, html_escape=False)}",
             "gp_factory",
         )
 
