@@ -721,6 +721,10 @@ async def main() -> None:
         default=DefaultBotProperties(parse_mode=ParseMode.HTML),
         session=bot_session,
     )
+    # Экран, собранный из большого списка, длиннее 4096 знаков Telegram
+    # отвергает целиком — защита на сессии режет его по строкам (long_text_guard).
+    from bot.utils import long_text_guard
+    long_text_guard.install(bot)
     # Health-first: биндим $PORT МИНИМАЛЬНЫМ сервером ДО create_pool (миграции могут
     # быть медленными на холодной/большой БД). Railway health-check проходит сразу —
     # «Application failed to respond» становится невозможным. Реальный сервер займёт

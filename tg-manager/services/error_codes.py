@@ -352,7 +352,7 @@ def from_exception(exc: Exception) -> ErrorCode:
         return ErrorCode.TG_FLOOD_LIMIT
     if "message is not modified" in exc_str:
         return ErrorCode.TG_MESSAGE_NOT_MODIFIED
-    if "message too long" in exc_str:
+    if "message too long" in exc_str or "message is too long" in exc_str:
         return ErrorCode.TG_MESSAGE_TOO_LONG
     if "chat not found" in exc_str:
         return ErrorCode.TG_CHAT_NOT_FOUND
