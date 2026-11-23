@@ -170,7 +170,7 @@ def _build_bot_pick_kb(bots: list, selected: list[int]) -> object:
         aud = b.get("audience_count", 0)
         check = "✅ " if bid in selected else "☐ "
         kb.button(
-            text=f"{check}{label} ({num_ru(aud)} юз.)",
+            text=f"{check}{label} ({num_ru(aud)} чел.)",
             callback_data=NetBcCb(action="toggle_bot", bot_id=bid),
         )
     _cap_note(kb, bots, _shown, what="bot")
@@ -298,7 +298,7 @@ async def cb_net_bc_segment(
     elif segment == "unique":
         users = await db.get_unique_network_users(pool, callback.from_user.id)
         total = len(users)
-        desc = f"уникальным пользователям сети ({num_ru(total)} юзеров)"
+        desc = f"уникальным пользователям сети ({num_ru(total)} пользователей)"
     else:
         desc = segment
 
@@ -378,7 +378,7 @@ async def msg_net_bc_text(
         )
         if len(chosen) > 3:
             names += f" +{len(chosen) - 3}"
-        target_desc = f"{len(chosen)} {plural(len(chosen), 'бот', 'бота', 'ботов')}: {names} ({num_ru(total)} юз.)"
+        target_desc = f"{len(chosen)} {plural(len(chosen), 'бот', 'бота', 'ботов')}: {names} ({num_ru(total)} чел.)"
     elif segment == "cluster":
         cluster_name = data.get("cluster_name", "")
         try:
@@ -395,7 +395,7 @@ async def msg_net_bc_text(
             log.exception("msg_net_bc_text: cluster_bots fetch failed")
             cluster_bots = []
         total = sum(b["audience_count"] for b in cluster_bots)
-        target_desc = f"кластер «{_html.escape(cluster_name)}» ({len(cluster_bots)} {plural(len(cluster_bots), 'бот', 'бота', 'ботов')}, {num_ru(total)} юз.)"
+        target_desc = f"кластер «{_html.escape(cluster_name)}» ({len(cluster_bots)} {plural(len(cluster_bots), 'бот', 'бота', 'ботов')}, {num_ru(total)} чел.)"
     else:
         target_desc = segment
 

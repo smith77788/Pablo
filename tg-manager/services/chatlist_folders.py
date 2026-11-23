@@ -22,6 +22,7 @@
 проверяются на живом флоте.
 """
 from __future__ import annotations
+from bot.utils.fmt import plural
 
 # Заголовок папки в Telegram — не длиннее 12 символов (ограничение DialogFilter).
 # Режем заранее, чтобы Telethon-вызов не упал уже на боевой сессии.
@@ -133,7 +134,7 @@ def summarize(record: dict, invite_link: str | None = None,
     """Короткая человеческая сводка по папке — для списка и уведомлений."""
     n = int(record.get("chat_count") or len(record.get("chat_ids") or []))
     title = record.get("title") or "Подборка"
-    head = f"📁 «{title}» — {n} чат(ов) в подборке"
+    head = f"📁 «{title}» — {n} {plural(n, 'чат', 'чата', 'чатов')} в подборке"
     if not invite_link:
         return head + " · ссылка ещё не создана"
     if join_count:

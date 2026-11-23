@@ -17,6 +17,7 @@ import asyncio
 import json
 
 from aiohttp import web
+from bot.utils.fmt import plural
 
 
 def setup_routes(app: web.Application, pool) -> None:
@@ -505,22 +506,22 @@ def setup_routes(app: web.Application, pool) -> None:
             warnings = []
             if proxy_broken:
                 warnings.append(
-                    f"🚫 {proxy_broken} аккаунт(ов) с назначенным, но недоступным прокси — "
+                    f"🚫 {proxy_broken} {plural(proxy_broken, 'аккаунт', 'аккаунта', 'аккаунтов')} с назначенным, но недоступным прокси — "
                     "в инвайт не пойдут (прямое подключение убьёт сессию, AUTH_KEY_DUPLICATED). "
                     "Почините прокси или снимите привязку.")
             if direct:
                 warnings.append(
-                    f"⚠️ {direct} аккаунт(ов) без прокси — работают напрямую (разрешено), "
+                    f"⚠️ {direct} {plural(direct, 'аккаунт', 'аккаунта', 'аккаунтов')} без прокси — работают напрямую (разрешено), "
                     "но выше риск бана и AUTH_KEY_DUPLICATED, если та же сессия активна "
                     "где-то ещё (телефон/другой софт). Для массового инвайта надёжнее прокси.")
             if quarantined:
                 warnings.append(
-                    f"🚫 {quarantined} аккаунт(ов) под риск-пульсом — временно исключены "
+                    f"🚫 {quarantined} {plural(quarantined, 'аккаунт', 'аккаунта', 'аккаунтов')} под риск-пульсом — временно исключены "
                     "(недавнее ограничение). Дайте им отдохнуть.")
             if audience and est_passes and est_passes > 1:
                 warnings.append(
                     f"🔁 Аудитория {audience} при суточном лимите флота ~{per_pass} уйдёт за "
-                    f"~{est_passes} прохода(ов) (по дню на проход). Один проход — это "
+                    f"~{est_passes} {plural(est_passes, 'проход', 'прохода', 'проходов')} (по дню на проход). Один проход — это "
                     "аккаунты × безопасный суточный лимит; лимит растёт по мере прогрева. "
                     "Больше аккаунтов = меньше проходов.")
 

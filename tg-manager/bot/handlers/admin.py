@@ -187,24 +187,24 @@ def _legacy_admin_main_kb(new_error_reports: int = 0):
     kb.button(text="📈 Операции платформы", callback_data="adm:platform_ops")
     kb.button(text="💰 Цены на подписки", callback_data="adm:prices")
     kb.button(text="⚙️ Методы оплаты", callback_data="adm:pay_cfg")
-    kb.button(text="📨 Рассылка всем юзерам", callback_data="adm:broadcast")
+    kb.button(text="📨 Рассылка всем пользователям", callback_data="adm:broadcast")
     _notify_icon = "✅" if _NOTIFY_NEW_USERS else "❌"
     kb.button(
         text=f"🔔 Уведомления о новых {_notify_icon}", callback_data="adm:notify_toggle"
     )
     _free_icon = "✅ ВКЛ" if get_free_mode() else "❌ ВЫКЛ"
     kb.button(text=f"🆓 Бесплатный режим: {_free_icon}", callback_data="adm:free_mode_toggle")
-    kb.button(text="🚫 Заблокировать юзера", callback_data="adm:block_ask")
-    kb.button(text="✅ Разблокировать юзера", callback_data="adm:unblock_ask")
-    kb.button(text="🗑 Удалить данные юзера", callback_data="adm:delete_ask")
+    kb.button(text="🚫 Заблокировать пользователя", callback_data="adm:block_ask")
+    kb.button(text="✅ Разблокировать пользователя", callback_data="adm:unblock_ask")
+    kb.button(text="🗑 Удалить данные пользователя", callback_data="adm:delete_ask")
     kb.button(text="💰 Выдать подписку", callback_data="adm:grant_ask")
     kb.button(text="❌ Забрать подписку", callback_data="adm:revoke_ask")
     kb.button(text="💰 Массовая выдача подписок", callback_data="adm:bulk_grant_ask")
     kb.button(text="⚔️ Выдать доступ к жалобам", callback_data="adm:strike_grant_ask")
     kb.button(text="⚔️ Забрать доступ к жалобам", callback_data="adm:strike_revoke_ask")
     kb.button(text="📁 Экспорт токенов (файл)", callback_data="adm:tokens_file")
-    kb.button(text="📋 Экспорт юзеров (CSV)", callback_data="adm:users_csv")
-    kb.button(text="🔍 Поиск юзера", callback_data="adm:find_user")
+    kb.button(text="📋 Экспорт пользователей (CSV)", callback_data="adm:users_csv")
+    kb.button(text="🔍 Поиск пользователя", callback_data="adm:find_user")
     kb.button(text="⚙️ Системный режим «Рой»", callback_data="adm:swarm_mode")
     kb.button(text="🧹 Очистка данных", callback_data="adm:cleanup_ask")
     kb.button(text="🤖 AI-ключи (провайдеры)", callback_data="adm:ai_keys")
@@ -251,7 +251,7 @@ def _admin_section_kb(section: str, new_error_reports: int = 0):
     kb = InlineKeyboardBuilder()
     if section == "users":
         kb.button(text="👥 Последние пользователи", callback_data="adm:users")
-        kb.button(text="🔍 Найти юзера", callback_data="adm:find_user")
+        kb.button(text="🔍 Найти пользователя", callback_data="adm:find_user")
         kb.button(text="🚫 Заблокировать", callback_data="adm:block_ask")
         kb.button(text="✅ Разблокировать", callback_data="adm:unblock_ask")
         kb.button(text="🗑 Удалить данные", callback_data="adm:delete_ask")
@@ -900,7 +900,7 @@ async def cb_admin(
         _bc_states = {
             "bc_platform": (
                 "broadcast",
-                "📨 <b>Рассылка юзерам платформы</b>\n\n"
+                "📨 <b>Рассылка пользователям платформы</b>\n\n"
                 "Отправьте текст сообщения следующим сообщением.\n"
                 "Его получат все зарегистрированные пользователи платформы.",
             ),

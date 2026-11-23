@@ -36,7 +36,7 @@ def test_a_real_write_failure_still_warns_about_doing_it_twice():
         ("infragram_notifications_undelivered_total", "отчёт не доехал", 2),
     ])
     assert "Защита не записалась" in text and "Postgres" in text
-    assert "строка журнала — 1 раз(а)" in text and "отчёт не доехал — 2 раз(а)" in text
+    assert "строка журнала — 1 раз" in text and "отчёт не доехал — 2 раза" in text
 
 
 def test_never_connected_vault_is_not_a_breakdown():

@@ -11,6 +11,7 @@ build_suggestions — чистая функция (тестируется без
 from __future__ import annotations
 
 import asyncio
+from bot.utils.fmt import plural
 
 _SEV = {"urgent": 0, "warn": 1, "opportunity": 2, "info": 3}
 
@@ -232,7 +233,7 @@ def build_suggestions(snap: dict, dismissed=(), snoozed=None, now: float | None 
 
     bans = fleet.get("bans_24h", 0)
     if bans > 0:
-        add("bans", "warn", f"{bans} бан(ов) за сутки",
+        add("bans", "warn", f"{bans} {plural(bans, 'бан', 'бана', 'банов')} за сутки",
             "Флот теряет аккаунты. Снизьте темп, проверьте прокси/прогрев — "
             "губернатор уже притормозил, но причину стоит устранить.",
             {"kind": "governor"})
@@ -259,7 +260,7 @@ def build_suggestions(snap: dict, dismissed=(), snoozed=None, now: float | None 
     if growth.get("suspicious", 0) > 0:
         top = growth.get("fake_top")
         add("growth_fake", "warn",
-            f"Подозрение на накрутку: {growth['suspicious']} канал(ов)",
+            f"Подозрение на накрутку: {growth['suspicious']} {plural(growth['suspicious'], 'канал', 'канала', 'каналов')}",
             (f"«{top}» и др. — " if top else "")
             + "резкий неорганический скачок подписчиков (боты влетают разом и "
             "осыпаются, мёртвая аудитория режет охваты). Проверьте источник "

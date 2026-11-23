@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from bot.utils.fmt import plural
 
 log = logging.getLogger(__name__)
 
@@ -65,7 +66,7 @@ def build_alert(label: str, assigned: int, streak: int) -> str:
     return (
         "🔌 <b>Прокси не отвечает</b>\n\n"
         f"<b>{label}</b> не отвечает {streak} проверки подряд.\n"
-        f"На нём {assigned} аккаунт(ов) — все их операции сейчас падают по сети.\n\n"
+        f"На нём {assigned} {plural(assigned, 'аккаунт', 'аккаунта', 'аккаунтов')} — все их операции сейчас падают по сети.\n\n"
         "Аккаунты при этом ЦЕЛЫ: дело в прокси, а не в них. "
         "Замените прокси или переназначьте аккаунты на рабочий — "
         "и операции пойдут дальше."
@@ -112,10 +113,10 @@ def plan_auto_failover(stranded: list, free: list) -> dict:
 def build_failover_note(moved: int, stranded: int) -> str:
     """Дописка к уведомлению о смерти прокси: что автомат сделал сам."""
     if moved and not stranded:
-        return (f"\n\n✅ Автопереезд: все {moved} аккаунт(ов) переселены на свободные "
+        return (f"\n\n✅ Автопереезд: все {moved} {plural(moved, 'аккаунт', 'аккаунта', 'аккаунтов')} переселены на свободные "
                 "живые прокси, операции идут дальше.")
     if moved:
-        return (f"\n\n✅ Автопереезд: {moved} аккаунт(ов) переселены на свободные живые "
+        return (f"\n\n✅ Автопереезд: {moved} {plural(moved, 'аккаунт', 'аккаунта', 'аккаунтов')} переселены на свободные живые "
                 f"прокси. {stranded} остались на мёртвом: свободных живых прокси не "
                 "хватило — добавьте прокси.")
     return ("\n\n⚠️ Автопереезд включён, но свободных живых прокси нет — "

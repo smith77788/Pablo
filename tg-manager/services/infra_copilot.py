@@ -21,6 +21,7 @@ import logging
 from dataclasses import dataclass, field
 
 import asyncpg
+from bot.utils.fmt import plural
 
 log = logging.getLogger(__name__)
 
@@ -563,7 +564,7 @@ async def _analyze_operation_patterns(
                 CopilotInsight(
                     category="pattern",
                     severity="warning",
-                    title=f"Высокий failure rate: {len(failed_types)} тип(а) операций",
+                    title=f"Высокий failure rate: {len(failed_types)} {plural(len(failed_types), 'тип', 'типа', 'типов')} операций",
                     explanation=(
                         f"Операции {types_list} за последние 7 дней имеют >30% ошибок. "
                         f"Худший: {worst['op_type']} — {round(worst['fail_rate'] or 0)}% отказов "
@@ -709,7 +710,7 @@ async def _analyze_capacity_risks(
                     severity="critical",
                     title=f"Критически мало готовых аккаунтов: {ready}/{total}",
                     explanation=(
-                        f"Только {ready} аккаунт(а) готовы к работе прямо сейчас. "
+                        f"Только {ready} {plural(ready, 'аккаунт', 'аккаунта', 'аккаунтов')} готовы к работе прямо сейчас. "
                         f"Остальные {total - ready} находятся в кулдауне. "
                         f"Параллельные операции невозможны."
                     ),
@@ -1187,7 +1188,7 @@ def format_copilot_report(
 
     if len(insights) > max_items:
         remaining = len(insights) - max_items
-        lines.append(f"<i>...и ещё {remaining} инсайт(ов)</i>")
+        lines.append(f"<i>...и ещё {remaining} {plural(remaining, 'инсайт', 'инсайта', 'инсайтов')}</i>")
 
     return "\n".join(lines).strip()
 

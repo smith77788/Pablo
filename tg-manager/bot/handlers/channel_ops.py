@@ -1265,7 +1265,7 @@ async def cb_do_bulk_create(
         if age_days < 14:
             blocked_accs.append(f"• {label} — {age_days} дн. в системе (мин. 14)")
         elif ts < 0.35:
-            blocked_accs.append(f"• {label} — trust_score {ts:.2f} (мин. 0.35)")
+            blocked_accs.append(f"• {label} — доверие {ts:.2f} (нужно от 0.35)")
         elif ts < 0.5 or age_days < 30:
             risk_warnings.append(f"• {label} — возраст {age_days} дн., trust={ts:.2f}")
 

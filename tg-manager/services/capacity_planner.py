@@ -16,6 +16,7 @@ from typing import Optional
 
 import asyncpg
 from services.flood_engine import normalize_trust_score
+from bot.utils.fmt import plural
 
 log = logging.getLogger(__name__)
 
@@ -130,7 +131,7 @@ async def plan_operation(
         a for a in accounts if a.get("cooldown_until") and a["cooldown_until"] > now
     ]
     if cooling:
-        warnings.append(f"{len(cooling)} аккаунт(ов) на кулдауне")
+        warnings.append(f"{len(cooling)} {plural(len(cooling), 'аккаунт', 'аккаунта', 'аккаунтов')} на кулдауне")
 
     available = account_count - len(cooling)
     if available <= 0:
@@ -147,7 +148,7 @@ async def plan_operation(
     # Аккаунты с высоким flood_count_7d
     high_flood = [a for a in accounts if (a.get("flood_count_7d") or 0) >= 5]
     if high_flood:
-        warnings.append(f"{len(high_flood)} аккаунт(ов) с высокой частотой флуд-вейтов")
+        warnings.append(f"{len(high_flood)} {plural(len(high_flood), 'аккаунт', 'аккаунта', 'аккаунтов')} с высокой частотой флуд-вейтов")
 
     # Снизить effective rate для аккаунтов с флудами
     avg_trust = sum(

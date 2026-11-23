@@ -37,6 +37,7 @@ from services.account_manager import normalize_telegram_join_ref
 from services import op_status
 from services.logger import log_exc_swallow
 from services import account_status as _acc_status
+from bot.utils.fmt import plural
 
 log = logging.getLogger(__name__)
 
@@ -2244,7 +2245,7 @@ async def staggered_strike(
                         await progress_cb(
                             "strike_infra",
                             f"🕸 {_telegram_target_display(target)}: внешняя "
-                            f"инфраструктура ({len(_domains)} домен(ов)) — "
+                            f"инфраструктура ({len(_domains)} {plural(len(_domains), 'домен', 'домена', 'доменов')}) — "
                             f"APWG / Safe Browsing / хостинг...",
                         )
                     try:

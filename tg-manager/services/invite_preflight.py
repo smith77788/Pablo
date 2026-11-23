@@ -15,6 +15,7 @@ import asyncio
 import logging
 
 import asyncpg
+from bot.utils.fmt import plural
 
 log = logging.getLogger(__name__)
 
@@ -279,7 +280,7 @@ def _verdict(total: int, c: dict) -> str:
                      "«через админку»/автовыдача прав не сработают; сделайте один "
                      "аккаунт админом чата либо используйте обычный инвайт/ссылку.")
     elif c["admin"]:
-        parts.append(f"есть {c['admin']} админ(а) — автовыдача прав остальным сработает.")
+        parts.append(f"есть {c['admin']} {plural(c['admin'], 'админ', 'админа', 'админов')} — автовыдача прав остальным сработает.")
     if not parts:
         return "✅ Флот готов к инвайту."
     return " ".join(parts)

@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import logging
 import math
+from bot.utils.fmt import plural
 
 log = logging.getLogger(__name__)
 
@@ -82,7 +83,7 @@ def _verdict(feasible, days, deadline, cap, n, extra) -> str:
                 f"(до срока {deadline}).")
     parts = [f"⚠️ К сроку не хватает ёмкости: при текущем флоте нужно ~{days} дн."]
     if extra:
-        parts.append(f"Добавьте ~{extra} аккаунт(ов) той же силы")
+        parts.append(f"Добавьте ~{extra} {plural(extra, 'аккаунт', 'аккаунта', 'аккаунтов')} той же силы")
     parts.append("либо прогрейте флот (поднимет лимиты), либо сдвиньте срок.")
     return " ".join(parts)
 
