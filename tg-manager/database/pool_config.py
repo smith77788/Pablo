@@ -25,6 +25,7 @@ def get_pool_config() -> dict:
         DB_POOL_MAX_IDLE:   Max inactive connection lifetime in seconds (default: 300)
         DB_CMD_TIMEOUT:     Query command timeout in seconds (default: 30)
         DB_STATEMENT_CACHE_SIZE: Prepared statement cache size (default: 100)
+        DB_JIT:             JIT Postgres для соединений пула (default: off)
     """
     return {
         "min_size": _int_env("DB_POOL_MIN", 5),
@@ -44,7 +45,33 @@ def get_pool_config() -> dict:
             "DB_CMD_TIMEOUT", 30, minimum=_CMD_TIMEOUT_MIN,
             maximum=_CMD_TIMEOUT_MAX),
         "statement_cache_size": _int_env("DB_STATEMENT_CACHE_SIZE", 100),
+        "server_settings": _server_settings(),
     }
+
+
+def _server_settings() -> dict:
+    """Параметры сессии, которые соединение пула получает при подключении.
+
+    JIT Postgres выключен по умолчанию (`DB_JIT=off`). Он включается, когда
+    оценка стоимости запроса выше `jit_above_cost` (100 000), а оценки у наших
+    агрегатов завышены на порядки: список ботов с подсчётом подписчиков
+    оценивается в 200 000 при настоящих 37 000 строк. Компиляция при этом
+    стоит 20–150 мс на КАЖДЫЙ вызов (кэша скомпилированного кода нет), а
+    выигрыш JIT — на аналитических запросах в миллионы строк, которых у
+    продукта нет. Замер на стенде (1,5 млн подписчиков, 400 тыс. операций):
+    «Итоги» 187 → 33 мс, «Новые пользователи» 471 → 349 мс, «Аналитика»
+    146 → 123 мс, ответ сам по себе не меняется.
+
+    Ставится параметром подключения, а не `SET` после него: `RESET ALL`,
+    которым пул чистит «грязное» соединение (database/lean_reset.py),
+    возвращает параметр к значению подключения, а `SET` бы отменил.
+    `DB_JIT=on` возвращает поведение сервера, пустое значение — не трогать
+    параметр вовсе (на случай пулера, который его не принимает).
+    """
+    jit = os.environ.get("DB_JIT", "off").strip().lower()
+    if jit in ("on", "off"):
+        return {"jit": jit}
+    return {}
 
 
 def _int_env(key: str, default: int) -> int:
@@ -83,10 +110,11 @@ def _float_env(
 def log_pool_config(config: dict) -> None:
     """Log pool configuration at startup for observability."""
     log.info(
-        "DB pool config: min=%d max=%d max_idle=%ds cmd_timeout=%ds cache=%d",
+        "DB pool config: min=%d max=%d max_idle=%ds cmd_timeout=%ds cache=%d jit=%s",
         config["min_size"],
         config["max_size"],
         config["max_inactive_connection_lifetime"],
         config["command_timeout"],
         config["statement_cache_size"],
+        (config.get("server_settings") or {}).get("jit", "сервер"),
     )

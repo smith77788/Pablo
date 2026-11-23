@@ -3675,38 +3675,37 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         # владельца (раньше строка была на КАЖДЫЙ бот — тот же человек десять
         # раз). И без СВОИХ аккаунтов флота: они подписаны на боты доставки, но
         # это не лиды, а собственный флот владельца.
-        rows = await _safe_fetch(pool,
-            """WITH own AS (
-                   SELECT tg_user_id FROM tg_accounts
-                   WHERE owner_id=$1 AND tg_user_id IS NOT NULL
-               ),
-               agg AS (
-                   SELECT bu.user_id,
-                          MAX(bu.first_seen) AS first_seen,
-                          COUNT(DISTINCT bu.bot_id) AS bot_count,
-                          (array_agg(bu.bot_id ORDER BY bu.first_seen DESC NULLS LAST))[1] AS bot_id
-                   FROM bot_users bu
-                   JOIN managed_bots mb ON mb.bot_id = bu.bot_id
-                   WHERE mb.added_by = $1 AND bu.user_id > 0
-                     AND bu.user_id NOT IN (SELECT tg_user_id FROM own)
-                   GROUP BY bu.user_id
-               )
-               SELECT a.user_id, a.first_seen, a.bot_count, a.bot_id,
-                      bu.username, bu.first_name, mb.username AS bot_username
-               FROM agg a
-               JOIN bot_users bu ON bu.user_id = a.user_id AND bu.bot_id = a.bot_id
-               JOIN managed_bots mb ON mb.bot_id = a.bot_id
-               ORDER BY a.first_seen DESC NULLS LAST, a.user_id DESC
-               LIMIT $2 OFFSET $3""", uid, lim, _list_offset(request))
-        total = await _safe_count(pool,
-            """WITH own AS (
-                   SELECT tg_user_id FROM tg_accounts
-                   WHERE owner_id=$1 AND tg_user_id IS NOT NULL
-               )
-               SELECT COUNT(DISTINCT bu.user_id) FROM bot_users bu
-               JOIN managed_bots mb ON mb.bot_id = bu.bot_id
-               WHERE mb.added_by = $1 AND bu.user_id > 0
-                 AND bu.user_id NOT IN (SELECT tg_user_id FROM own)""", uid)
+        #
+        # Скорость. Подписчики берутся по индексу (bot_id, first_seen) через
+        # массив ботов владельца, а имя/ник — из той же строки (DISTINCT ON),
+        # без второго прохода по bot_users. Прежний запрос (агрегат + JOIN
+        # обратно на bot_users, NOT IN) Postgres исполнял двумя полными
+        # проходами по таблице подписчиков ВСЕЙ платформы: на 1,5 млн строк
+        # 290 мс против 31 мс сейчас, ответ тот же строка в строку
+        # (tests/test_new_users_feed_is_fast_postgres.py). Список и счётчик
+        # независимы — идут разом.
+        _from = """
+            FROM bot_users bu
+            WHERE bu.bot_id = ANY(ARRAY(SELECT bot_id FROM managed_bots WHERE added_by = $1))
+              AND bu.user_id > 0
+              AND NOT EXISTS (SELECT 1 FROM tg_accounts ta
+                              WHERE ta.owner_id = $1 AND ta.tg_user_id = bu.user_id)"""
+        rows, total = await asyncio.gather(
+            _safe_fetch(pool,
+                """WITH latest AS (
+                       SELECT DISTINCT ON (bu.user_id)
+                              bu.user_id, bu.first_seen, bu.bot_id, bu.username, bu.first_name,
+                              COUNT(*) OVER (PARTITION BY bu.user_id) AS bot_count"""
+                + _from + """
+                       ORDER BY bu.user_id, bu.first_seen DESC NULLS LAST
+                   )
+                   SELECT l.user_id, l.first_seen, l.bot_count, l.bot_id,
+                          l.username, l.first_name, mb.username AS bot_username
+                   FROM latest l
+                   JOIN managed_bots mb ON mb.bot_id = l.bot_id
+                   ORDER BY l.first_seen DESC NULLS LAST, l.user_id DESC
+                   LIMIT $2 OFFSET $3""", uid, lim, _list_offset(request)),
+            _safe_count(pool, "SELECT COUNT(DISTINCT bu.user_id)" + _from, uid))
         return _json_resp({"users": rows or [], "total": total})
 
     async def new_users_export(request: web.Request) -> web.Response:

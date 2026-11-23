@@ -337,11 +337,27 @@ async def create_pool() -> asyncpg.Pool:
     # Соединение без лишнего похода в базу на каждом возврате в пул: сброс
     # сессии только тому, кто оставил состояние (database/lean_reset.py).
     from database.lean_reset import LeanResetConnection
-    pool = await asyncpg.create_pool(
-        DATABASE_URL,
-        connection_class=LeanResetConnection,
-        **pool_config,
-    )
+    try:
+        pool = await asyncpg.create_pool(
+            DATABASE_URL,
+            connection_class=LeanResetConnection,
+            **pool_config,
+        )
+    except Exception as exc:
+        # Параметр сессии (jit) — ускорение, а не условие работы: пулер
+        # соединений может отказать в незнакомом параметре подключения, и
+        # тогда без повтора не стартует весь продукт. Повторяем без него;
+        # настоящая недоступность базы упадёт и во второй раз.
+        if not pool_config.get("server_settings"):
+            raise
+        log.warning("create_pool с параметрами сессии %s не прошёл (%s) — "
+                    "подключаюсь без них", pool_config["server_settings"], exc)
+        pool_config = {k: v for k, v in pool_config.items() if k != "server_settings"}
+        pool = await asyncpg.create_pool(
+            DATABASE_URL,
+            connection_class=LeanResetConnection,
+            **pool_config,
+        )
     # Ожидание соединения пула — в метрики в момент, когда оно случается
     # (database/pool_metrics.py). Сбой обёртки не мешает старту.
     try:
