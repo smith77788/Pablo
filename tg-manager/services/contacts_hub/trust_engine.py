@@ -273,11 +273,13 @@ async def update_trust_scores(pool, owner_id: int) -> int:
     # `$1::bigint[]`, то есть Postgres отбивал её целиком («operator does not
     # exist: uuid = bigint»), и пересчёт доверия МОЛЧА не делал ничего:
     # владелец видел нули. Тип ключа здесь обязан совпадать со схемой.
-    ids: list = []
-    scores: list[float] = []
-    for c in contacts:
-        ids.append(c['id'])
-        scores.append(compute_trust_score(dict(c), by_contact.get(c['id'], [])))
+    def _score_all():
+        return ([c['id'] for c in contacts],
+                [compute_trust_score(dict(c), by_contact.get(c['id'], [])) for c in contacts])
+
+    # Счёт — в потоке: на десятках тысяч контактов это чистый Python, который
+    # иначе стоит в цикле событий вместе с ботом.
+    ids, scores = await asyncio.to_thread(_score_all)
     # owner_id в условии остаётся: id пришли из выборки по владельцу, но
     # запись без этой проверки — чужая строка при любой будущей ошибке выше.
     await pool.execute(
