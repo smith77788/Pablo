@@ -17,6 +17,7 @@ from bot.utils.op_helpers import terminal_kb
 
 log = logging.getLogger(__name__)
 from bot.utils.fmt import plural  # noqa: E402
+from bot.utils.op_helpers import show_no_accounts
 
 router = Router()
 
@@ -276,7 +277,7 @@ async def _do_queue(cb: CallbackQuery, state: FSMContext, pool: asyncpg.Pool, ms
         owner_id,
     )
     if not acc_row:
-        await cb.answer("⚠️ Нет доступных аккаунтов", show_alert=True)
+        await show_no_accounts(cb)
         return
 
     account_ids = [acc_row["id"]]

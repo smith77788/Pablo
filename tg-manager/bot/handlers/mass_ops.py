@@ -60,6 +60,7 @@ from bot.utils.op_names import status_label as _ost_label  # noqa: E402
 from bot.utils.op_helpers import no_accounts_kb
 from bot.utils.op_helpers import ask_to_confirm
 from bot.utils.op_helpers import cancel_kb
+from bot.utils.op_helpers import show_no_accounts
 
 
 # ── Timing options ──────────────────────────────────────────────────────────
@@ -1938,7 +1939,7 @@ async def cb_bulk_join_accs(
         acc_list_preview = f"  👤 {html.escape(acc_label)}"
 
     if not acc_ids:
-        await callback.answer("Нет активных аккаунтов", show_alert=True)
+        await show_no_accounts(callback)
         return
     await safe_answer(callback)
 
@@ -2302,7 +2303,7 @@ async def cb_bulk_leave_accs(
         bl_acc_list_preview = f"  👤 {html.escape(acc_label)}"
 
     if not acc_ids:
-        await callback.answer("Нет активных аккаунтов", show_alert=True)
+        await show_no_accounts(callback)
         return
     await safe_answer(callback)
 

@@ -77,6 +77,7 @@ from bot.utils.owner_error import owner_error
 
 from bot.utils.fmt import num_ru, plural  # noqa: E402
 from bot.utils.op_helpers import cancel_kb
+from bot.utils.op_helpers import show_no_accounts
 
 router = Router()
 
@@ -2713,7 +2714,7 @@ async def cb_pools_bulk_assign(
     uid = callback.from_user.id
     accounts = await db.get_tg_accounts(pool, uid)
     if not accounts:
-        await callback.answer("Нет аккаунтов.", show_alert=True)
+        await show_no_accounts(callback)
         return
     await safe_answer(callback)
 
@@ -3014,7 +3015,7 @@ async def cb_del_dead_accounts(
     uid = callback.from_user.id
     accounts = await db.get_tg_accounts(pool, uid)
     if not accounts:
-        await callback.answer("Нет аккаунтов.", show_alert=True)
+        await show_no_accounts(callback)
         return
     await safe_answer(callback)
 

@@ -44,6 +44,7 @@ from bot.utils.op_helpers import safe_answer
 log = logging.getLogger(__name__)
 from bot.utils.fmt import num_ru, plural  # noqa: E402
 from bot.utils.op_helpers import no_accounts_kb
+from bot.utils.op_helpers import show_no_accounts
 
 router = Router()
 
@@ -276,7 +277,7 @@ async def cb_chanf_import_all_accs(callback: CallbackQuery, pool: asyncpg.Pool) 
     """Импортировать каналы со ВСЕХ активных аккаунтов."""
     accounts = await _get_active_accounts(pool, callback.from_user.id)
     if not accounts:
-        await callback.answer("Нет активных аккаунтов.", show_alert=True)
+        await show_no_accounts(callback)
         return
     await safe_answer(callback)
 

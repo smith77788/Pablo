@@ -31,6 +31,7 @@ from bot.utils.op_helpers import safe_answer
 from bot.utils.fmt import num_ru  # noqa: E402
 from bot.utils.op_helpers import no_bots_kb
 from bot.utils.op_helpers import cancel_kb
+from bot.utils.op_helpers import show_no_bots
 
 router = Router()
 
@@ -299,7 +300,7 @@ async def cb_cluster_assign_start(
 
     bots = await db.get_bots(pool, callback.from_user.id)
     if not bots:
-        await callback.answer("Нет ботов.", show_alert=True)
+        await show_no_bots(callback)
         return
     await safe_answer(callback)
     cluster = callback_data.cluster or ""

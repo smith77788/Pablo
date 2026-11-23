@@ -41,6 +41,7 @@ from bot.utils.op_helpers import safe_answer
 log = logging.getLogger(__name__)
 from bot.utils.fmt import num_ru, plural  # noqa: E402
 from bot.utils.op_helpers import no_accounts_kb
+from bot.utils.op_helpers import show_no_accounts
 
 router = Router()
 
@@ -1554,7 +1555,7 @@ async def cb_health_export_csv(callback: CallbackQuery, pool: asyncpg.Pool) -> N
     except Exception:
         accounts = []
     if not accounts:
-        await callback.answer("Нет аккаунтов для экспорта", show_alert=True)
+        await show_no_accounts(callback)
         return
     await callback.answer("⏳ Генерирую CSV...")
 

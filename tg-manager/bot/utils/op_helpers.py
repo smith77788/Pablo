@@ -199,6 +199,33 @@ def no_bots_kb(*, back: object | None = None):
     return kb.as_markup()
 
 
+async def show_no_accounts(callback, *, back: object | None = None) -> None:
+    """Экран «нет аккаунтов» вместо всплывашки.
+
+    Всплывашка «Нет аккаунтов.» закрывается, и человек остаётся на том же
+    экране, не зная, где аккаунт добавляется. Здесь тот же ответ — экраном с
+    кнопкой «➕ Добавить аккаунт» первой.
+    """
+    await safe_edit(
+        callback,
+        "📱 <b>Нет активных аккаунтов</b>\n\n"
+        "Для этого действия нужен хотя бы один подключённый Telegram-аккаунт. "
+        "Добавьте его — это займёт пару минут.",
+        reply_markup=no_accounts_kb(back=back),
+    )
+
+
+async def show_no_bots(callback, *, back: object | None = None) -> None:
+    """Экран «нет ботов» вместо всплывашки — с кнопкой «➕ Добавить бота»."""
+    await safe_edit(
+        callback,
+        "🤖 <b>Нет подключённых ботов</b>\n\n"
+        "Для этого действия нужен хотя бы один бот. Подключите его по токену "
+        "от @BotFather.",
+        reply_markup=no_bots_kb(back=back),
+    )
+
+
 async def ask_to_confirm(callback, *, question: str, yes, no,
                          yes_text: str = "🗑 Да, удалить") -> None:
     """Шаг «вы уверены?» перед необратимым действием.

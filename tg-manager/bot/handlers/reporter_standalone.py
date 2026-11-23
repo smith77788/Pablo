@@ -22,6 +22,7 @@ from services.reporter_engine import REPORT_REASONS
 log = logging.getLogger(__name__)
 from bot.utils.op_helpers import terminal_kb  # noqa: E402
 from bot.utils.op_helpers import cancel_kb
+from bot.utils.op_helpers import show_no_accounts
 
 router = Router()
 
@@ -253,7 +254,7 @@ async def cb_reporter_confirm(
     )
     account_ids = [r["id"] for r in rows]
     if not account_ids:
-        await callback.answer("⚠️ Нет доступных аккаунтов", show_alert=True)
+        await show_no_accounts(callback)
         return
 
     params = {

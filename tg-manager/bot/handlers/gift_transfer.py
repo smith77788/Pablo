@@ -26,6 +26,7 @@ from database import db
 from services.logger import log_exc_swallow
 from bot.utils.op_helpers import safe_answer
 from bot.utils.op_helpers import cancel_kb
+from bot.utils.op_helpers import show_no_accounts
 
 log = logging.getLogger(__name__)
 router = Router(name="gift_transfer")
@@ -146,7 +147,7 @@ async def cb_scan_gifts(callback: CallbackQuery, state: FSMContext, pool):
         accounts = []
 
     if not accounts:
-        await callback.answer("Нет аккаунтов", show_alert=True)
+        await show_no_accounts(callback)
         return
 
     kb = InlineKeyboardBuilder()
