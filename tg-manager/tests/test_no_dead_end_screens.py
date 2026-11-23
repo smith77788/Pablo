@@ -392,3 +392,38 @@ def test_no_accounts_kb_leads_to_adding_an_account():
     rows = no_accounts_kb(back=HealthCb(action="menu")).inline_keyboard
     assert rows[0][0].text == "➕ Добавить аккаунт" and rows[0][0].callback_data == "acc:add:0:0:0"
     assert [b.text for b in rows[1]] == ["◀️ Назад", "🏠 Главное меню"]
+
+
+_NO_BOTS = re.compile(r"(У вас (пока )?нет ботов|❤️ Нет ботов|Нет ботов\.\"|Нет ботов для проверки)")
+
+
+def test_no_bots_screen_offers_to_add_one():
+    """«У вас нет ботов. Сначала добавьте бота через 🤖 Мои боты → ➕ Добавить»
+    — и одна кнопка «Назад». В «Массовых операциях» хуже: под таким текстом
+    стояло меню всех массовых действий над нулём ботов."""
+    bad = []
+    for p in sorted(HANDLERS.glob("*.py")):
+        src = p.read_text(encoding="utf-8")
+        tree = ast.parse(src)
+        for fn in ast.walk(tree):
+            if not isinstance(fn, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                continue
+            body = ast.get_source_segment(src, fn) or ""
+            if "no_bots_kb(" in body or 'BotCb(action="add")' in body:
+                continue
+            for call in ast.walk(fn):
+                if not isinstance(call, ast.Call):
+                    continue
+                name = ast.unparse(call.func)
+                if name.endswith(".append") or (name.endswith(".answer") and "message" not in name):
+                    continue
+                if any(isinstance(a, (ast.Constant, ast.JoinedStr)) and _NO_BOTS.search(ast.unparse(a))
+                       for a in call.args):
+                    bad.append(f"{p.name}:{fn.name}:{call.lineno}")
+    assert not bad, "экран «нет ботов» без кнопки добавления:\n" + "\n".join(bad)
+
+
+def test_no_bots_kb_leads_to_adding_a_bot():
+    from bot.utils.op_helpers import no_bots_kb
+    rows = no_bots_kb().inline_keyboard
+    assert rows[0][0].text == "➕ Добавить бота" and rows[0][0].callback_data.startswith("bot:add")

@@ -148,6 +148,7 @@ router = Router()
 
 
 from bot.utils.op_names import op_name as _op_name  # noqa: E402
+from bot.utils.op_helpers import no_bots_kb
 
 def _lock(user_plan: str, required: str) -> str:
     from bot.utils.subscription import PLAN_LEVELS, coerce_plan
@@ -1292,7 +1293,7 @@ async def cb_pick_bot_for(
         await _edit(
             callback,
             f"<b>{title}</b>\n\nУ вас нет ботов. Сначала добавьте бота через <b>🤖 Мои боты → ➕ Добавить</b>.",
-            kb.as_markup(),
+            no_bots_kb(back=BmCb(action=back_action)),
         )
         return
 
@@ -2905,7 +2906,7 @@ async def cb_schedules(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
             callback,
             "<b>📅 Расписание рассылок</b>\n\nУ вас нет ботов.\n"
             "Добавьте бота через <b>🏗 Активы & Сети → 🤖 Мои боты</b>.",
-            kb.as_markup(),
+            no_bots_kb(back=BmCb(action="comms")),
         )
         return
 
