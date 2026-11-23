@@ -22667,7 +22667,12 @@ async function openContactCRM(id) {
       <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px">
         ${Object.entries(stageLabels).map(([k,v])=>`<button class="btn btn-s" style="padding:5px 10px;font-size:12px;${crm.stage===k?'background:var(--btn-solid);color:var(--btn-text);border-color:var(--btn-solid)':''}" onclick="setCrmStage('${id}','${k}')">${v}</button>`).join('')}
       </div>
-      <div style="margin-bottom:10px"><label style="font-size:12px;color:var(--hint)">Сумма сделки ($)</label><input id="crm-value" type="number" value="${crm.deal_value||0}" onchange="saveCrmValue('${id}')" style="width:100%;padding:10px;border-radius:var(--radius);border:1.5px solid var(--border-input);background:var(--bg-input);color:var(--text);font-size:14px;margin-top:4px"><div style="font-size:11px;color:var(--hint);margin-top:3px">Сумма сохраняется, когда уводите фокус с поля.</div></div>
+      <div style="margin-bottom:10px"><label style="font-size:12px;color:var(--hint)">Сумма сделки</label>
+        <div style="display:flex;gap:6px;margin-top:4px">
+          <input id="crm-value" type="number" value="${crm.deal_value||0}" onchange="saveCrmValue('${id}')" style="flex:1;min-width:0;padding:10px;border-radius:var(--radius);border:1.5px solid var(--border-input);background:var(--bg-input);color:var(--text);font-size:14px">
+          <select id="crm-currency" onchange="saveCrmValue('${id}')" style="flex:0 0 auto;padding:10px;border-radius:var(--radius);border:1.5px solid var(--border-input);background:var(--bg-input);color:var(--text);font-size:14px">${crmCurrencyOptions(crm.currency)}</select>
+        </div>
+        <div style="font-size:11px;color:var(--hint);margin-top:3px">Сумма и валюта сохраняются, когда уводите фокус. Валюта у каждой сделки своя — итоги считаются по валютам отдельно.</div></div>
       <div style="margin-bottom:10px"><label style="font-size:12px;color:var(--hint)">Напоминание</label><input id="crm-remind" type="datetime-local" style="width:100%;padding:10px;border-radius:var(--radius);border:1.5px solid var(--border-input);background:var(--bg-input);color:var(--text);font-size:14px;margin-top:4px"></div>
       <div style="margin-bottom:10px"><input id="crm-remind-text" placeholder="Текст напоминания" class="inp"></div>
       <button class="btn btn-p" data-main onclick="saveCrmReminder('${id}')" style="width:100%;margin-bottom:12px">⏰ Сохранить напоминание</button>
@@ -22725,18 +22730,30 @@ async function setCrmStage(id, stage) {
   } catch(e) { toast('⚠️ '+errRu(e,'Ошибка')); }
 }
 
+// Валюты — те же, что в модалке сделки на доске (дублировать список нельзя:
+// расходится). Валюта сделки у каждой строки своя, поэтому итоги в воронке
+// считаются по валютам отдельно (crm_engine.pipeline → by_currency).
+const CRM_CURRENCIES = ['RUB','USD','EUR','KZT','UAH','BYN','UZS','TRY','GBP','CNY'];
+function crmCurrencyOptions(sel) {
+  const cur = (sel || 'RUB').toUpperCase();
+  return CRM_CURRENCIES.map(c => `<option value="${c}"${c===cur?' selected':''}>${c}</option>`).join('');
+}
+
 async function saveCrmValue(id) {
   // Поле «Сумма сделки» раньше рисовалось, но не сохранялось нигде: setCrmStage
   // слал только {stage}, saveCrmReminder — только {remind_at,text}, и введённая
   // сумма терялась при первом же перерисовывании экрана. Сервер её принимает
-  // (upsert_crm, поле deal_value — REAL). Шлём на blur, чтобы сумма легла до
-  // любой смены стадии или перехода.
+  // (upsert_crm, поля deal_value — REAL, currency). Шлём на blur, чтобы сумма
+  // и валюта легли до любой смены стадии или перехода. Валюта обязательна:
+  // «$» в подписи раньше был зашит, и рубли читались как доллары.
   const el = document.getElementById('crm-value');
   if (!el) return;
   const v = parseFloat(el.value);
   const deal_value = isFinite(v) && v >= 0 ? v : 0;
+  const curEl = document.getElementById('crm-currency');
+  const currency = curEl && CRM_CURRENCIES.indexOf(curEl.value) >= 0 ? curEl.value : 'RUB';
   try {
-    await api('/api/miniapp/uch/contacts/'+id+'/crm', {method:'POST', body:JSON.stringify({deal_value})});
+    await api('/api/miniapp/uch/contacts/'+id+'/crm', {method:'POST', body:JSON.stringify({deal_value, currency})});
     toast('💰 Сумма сохранена');
   } catch(e) { toast('⚠️ '+errRu(e,'Ошибка')); }
 }
