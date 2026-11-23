@@ -3907,7 +3907,8 @@ async def handle_import_tdata(
 async def handle_import_tdata_wrong_type(message: Message) -> None:
     await message.answer(
         "⚠️ Отправьте ZIP-файл как документ (не фото, не текст).\n\n"
-        "Используйте вложение → Файл при отправке."
+        "Используйте вложение → Файл при отправке.",
+        reply_markup=cancel_kb(),
     )
 
 
@@ -3995,7 +3996,8 @@ async def handle_import_session_file(
 async def handle_import_session_file_wrong_type(message: Message) -> None:
     await message.answer(
         "⚠️ Отправьте .session файл как документ (не фото, не текст).\n\n"
-        "Используйте вложение → Файл при отправке."
+        "Используйте вложение → Файл при отправке.",
+        reply_markup=cancel_kb(),
     )
 
 

@@ -716,7 +716,7 @@ async def _refs_from_document(message: Message, mode: str):
     from services import invite_list_parser as ilp
     doc = message.document
     if not doc:
-        await message.answer("⚠️ Пришлите файл документом.")
+        await message.answer("⚠️ Пришлите файл документом.", reply_markup=cancel_kb())
         return None
     if doc.file_size and doc.file_size > ilp.MAX_FILE_BYTES:
         await message.answer(f"⚠️ Файл слишком большой "

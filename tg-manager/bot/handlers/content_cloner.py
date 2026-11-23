@@ -18,6 +18,7 @@ from bot.utils.op_helpers import terminal_kb
 log = logging.getLogger(__name__)
 from bot.utils.fmt import plural  # noqa: E402
 from bot.utils.op_helpers import show_no_accounts
+from bot.utils.op_helpers import cancel_kb
 
 router = Router()
 
@@ -88,7 +89,7 @@ async def msg_cloner_source(msg: Message, state: FSMContext) -> None:
     from services.content_cloner_engine import parse_channel_ref
     raw = (msg.text or "").strip()
     if not raw:
-        await msg.answer("⚠️ Введите ссылку или юзернейм канала/группы.")
+        await msg.answer("⚠️ Введите ссылку или юзернейм канала/группы.", reply_markup=cancel_kb())
         return
     source_ref = parse_channel_ref(raw)
     await state.update_data(source_ref=source_ref)
@@ -116,7 +117,7 @@ async def msg_cloner_targets(msg: Message, state: FSMContext) -> None:
     from services.content_cloner_engine import parse_channel_ref
     raw = (msg.text or "").strip()
     if not raw:
-        await msg.answer("⚠️ Введите юзернейм или ссылку канала/группы.")
+        await msg.answer("⚠️ Введите юзернейм или ссылку канала/группы.", reply_markup=cancel_kb())
         return
 
     data = await state.get_data()
@@ -203,7 +204,7 @@ async def cb_cloner_custom_count(cb: CallbackQuery, state: FSMContext) -> None:
 async def msg_cloner_count(msg: Message, state: FSMContext) -> None:
     raw = (msg.text or "").strip()
     if not raw.isdigit() or not (1 <= int(raw) <= 200):
-        await msg.answer("⚠️ Введите число от 1 до 200.")
+        await msg.answer("⚠️ Введите число от 1 до 200.", reply_markup=cancel_kb())
         return
     count = int(raw)
     await _show_confirm(msg, state, count, via_message=True)
