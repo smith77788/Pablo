@@ -512,7 +512,7 @@ async def fsm_waiting_price_b(message: Message, state: FSMContext, pool: asyncpg
     kb.adjust(1)
     await message.answer(
         f"✅ <b>Эксперимент создан!</b>\n\n"
-        f"Название: <b>{exp.name}</b>\n"
+        f"Название: <b>{_html.escape(str(exp.name))}</b>\n"
         f"Вариант A: <b>{exp.price_a} Stars</b>\n"
         f"Вариант B: <b>{exp.price_b} Stars</b>\n\n"
         f"Используйте API record_impression / record_conversion для сбора данных.",

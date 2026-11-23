@@ -1902,7 +1902,7 @@ async def fsm_seo_edit_value(
     )
     if ok:
         await message.answer(
-            f"✅ <b>Обновлено успешно!</b>\nНовое значение: <code>{value[:100]}</code>",
+            f"✅ <b>Обновлено успешно!</b>\nНовое значение: <code>{html.escape(value[:100])}</code>",
             parse_mode="HTML",
             reply_markup=kb.as_markup(),
         )

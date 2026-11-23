@@ -152,7 +152,7 @@ async def comp_got_username(message: Message, state: FSMContext) -> None:
     kb.button(text="❌ Отмена", callback_data=CompCb(action="cancel_fsm"))
     kb.adjust(1)
     await message.answer(
-        f"Введите метку для <b>@{raw}</b> (например: «Главный конкурент»).\n"
+        f"Введите метку для <b>@{_html.escape(raw)}</b> (например: «Главный конкурент»).\n"
         "Или нажмите «Пропустить»:",
         parse_mode="HTML",
         reply_markup=kb.as_markup(),
@@ -207,7 +207,7 @@ async def comp_got_label(
             label,
         )
         await message.answer(
-            f"✅ @{username} <i>({label})</i> добавлен.",
+            f"✅ @{_html.escape(username)} <i>({_html.escape(str(label))})</i> добавлен.",
             parse_mode="HTML",
             reply_markup=kb.as_markup(),
         )

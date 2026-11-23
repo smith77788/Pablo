@@ -79,6 +79,7 @@ _PAY_SETTING_LABELS: dict[str, str] = {
 }
 
 from bot.utils.fmt import num_ru  # noqa: E402
+import html as _html
 
 router = Router()
 
@@ -1534,7 +1535,6 @@ async def cb_request_sub(callback: CallbackQuery, callback_data: SubCb) -> None:
         else callback.from_user.first_name or str(uid)
     )
     # Уходит админам с parse_mode=HTML, а имя пишет сам пользователь.
-    import html as _html
     user_label = _html.escape(user_label)
 
     admin_ids = [
@@ -2082,7 +2082,7 @@ async def msg_promo_until(
     await message.answer(
         f"✅ <b>Акция запущена!</b>\n\n"
         f"Скидка: <b>−{disc}%</b> на 3, 6, 12 месяцев\n"
-        f"Действует до: <b>{raw}</b> (включительно)\n\n"
+        f"Действует до: <b>{_html.escape(raw)}</b> (включительно)\n\n"
         f"<i>Пользователи увидят новые цены немедленно.</i>",
         parse_mode="HTML",
         reply_markup=kb.as_markup(),

@@ -1504,7 +1504,7 @@ async def msg_email_input(
 
     tip_block = f"{tip}\n\n" if tip else ""
     await message.answer(
-        f"📧 Email: <code>{raw}</code>\n"
+        f"📧 Email: <code>{html.escape(raw)}</code>\n"
         f"{smtp_note}\n\n"
         f"{tip_block}"
         "✏️ <b>Напишите пароль приложения в поле сообщения ниже ↓</b>\n\n"

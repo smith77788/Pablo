@@ -4444,7 +4444,7 @@ async def fsm_bm_set_channel_id(message: Message, state: FSMContext, pool: async
     kb.button(text="📢 К настройкам канала", callback_data="adm:bm_channel")
     kb.adjust(1)
     await message.answer(
-        f"✅ <b>Канал сохранён:</b> <code>{value}</code>\n\n"
+        f"✅ <b>Канал сохранён:</b> <code>{_html.escape(value)}</code>\n\n"
         f"Теперь бот будет публиковать посты в этот канал.",
         parse_mode="HTML",
         reply_markup=kb.as_markup(),
@@ -4469,7 +4469,7 @@ async def fsm_bm_write_post(message: Message, state: FSMContext, pool: asyncpg.P
     kb.button(text="❌ Отмена", callback_data="adm:bm_channel")
     kb.adjust(1)
     await message.answer(
-        f"<b>Предпросмотр поста:</b>\n\n{text}\n\n"
+        f"<b>Предпросмотр поста:</b>\n\n{text}\n\n"  # HTML намеренно: пост пишется разметкой
         f"<i>Опубликовать в канал Infragram?</i>",
         parse_mode="HTML",
         reply_markup=kb.as_markup(),
