@@ -626,6 +626,10 @@ def build_dispatcher(storage: BaseStorage) -> Dispatcher:
     # чтобы системные сообщения/команды модерации обрабатывались первыми; когда
     # чат не под охраной, хендлер поднимает SkipHandler и апдейт идёт дальше.
     dp.include_router(chat_guard_handler.router)
+    # Заявки на вступление: уведомление владельцу и кнопки «Одобрить/Отклонить»
+    # (в том числе для заявок, пришедших подключённым ботам).
+    from bot.handlers import join_requests as join_requests_handler
+    dp.include_router(join_requests_handler.router)
     dp.include_router(organism_nudge_handler.router)
     # Manager Mode — создание дочерних ботов в один тап (апдейт managed_bot).
     dp.include_router(managed_bots_handler.router)
@@ -1296,6 +1300,9 @@ async def main() -> None:
         # «Модератор чатов»: my_chat_member — чтобы поймать выдачу боту админки
         # (авто-активация охраны); chat_member — трекинг входов/выходов участников.
         "my_chat_member", "chat_member",
+        # Заявки на вступление в каналы/чаты, где главный бот админ:
+        # без этого типа Telegram их не присылает, и владелец не узнаёт о заявке.
+        "chat_join_request",
         # Manager Mode: managed_bot — Telegram сообщает о создании дочернего бота
         # через нашу ссылку (иначе токен нового бота мы не получим).
         "managed_bot",

@@ -815,6 +815,15 @@ class GuardCb(CallbackData, prefix="guard"):
     key: str = ""        # ключ настройки (для toggle)
 
 
+class JoinReqCb(CallbackData, prefix="jreq"):
+    """Одобрить/отклонить заявку на вступление из уведомления владельцу."""
+
+    action: str          # a — одобрить, d — отклонить
+    bot_id: int = 0      # 0 — главный бот, иначе подключённый (managed_bots)
+    chat_id: int = 0
+    user_id: int = 0
+
+
 class ManagedBotCb(CallbackData, prefix="mbot"):
     """Manager Mode — создание дочерних ботов в один тап (Telegram Managed Bots)."""
 
