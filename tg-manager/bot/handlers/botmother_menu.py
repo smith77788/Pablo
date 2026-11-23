@@ -2267,7 +2267,7 @@ def _analyze_error(error_msg: str) -> dict:
 
     # Peer flood (spam-like behavior)
     if "peer" in msg and ("flood" in msg or "spam" in msg):
-        result["cause"] = "Telegram ограничил операции с этим контактом (peer flood)"
+        result["cause"] = "Telegram ограничил операции с этим контактом (флуд-ограничение по контактам)"
         result["recommendation"] = (
             "Сделайте паузу 12–24 часа. Аккаунт временно ограничен для этого получателя. "
             "Не пытайтесь повторить операцию немедленно."
@@ -2277,7 +2277,7 @@ def _analyze_error(error_msg: str) -> dict:
     # Default — unknown
     result["cause"] = "Не удалось определить точную причину"
     result["recommendation"] = (
-        "Проверьте логи операции (CSV-экспорт), состояние аккаунтов в Health Dashboard. "
+        "Проверьте логи операции (CSV-экспорт), состояние аккаунтов в разделе «❤️ Здоровье акк.». "
         "При повторении ошибки — попробуйте с другими аккаунтами или в другое время."
     )
     return result

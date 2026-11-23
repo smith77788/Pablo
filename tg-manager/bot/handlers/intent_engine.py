@@ -67,7 +67,7 @@ _PRESET_DESCRIPTIONS: dict[str, str] = {
 _NAVIGATE_LABELS: dict[str, str] = {
     "gp_factory": "🌍 Открыть гео-сеть",
     "factory": "🏭 Открыть фабрику",
-    "mass_ops": "⚙️ Открыть Mass Ops",
+    "mass_ops": "⚡ Открыть массовые действия",
     "health_dashboard": "🩺 Открыть здоровье",
     "ecosystems": "🧠 Открыть экосистемы",
     "strike": "⚔️ Открыть массовые жалобы",
@@ -675,7 +675,7 @@ async def _execute_op_intent(
         if not targets:
             await _show_manual_hint(
                 callback,
-                "Для массового вступления укажи список каналов в Mass Ops.",
+                "Для массового вступления укажи список каналов в «⚡ Массовых действиях».",
                 "mass_ops",
             )
             return
@@ -685,7 +685,7 @@ async def _execute_op_intent(
         if not targets:
             await _show_manual_hint(
                 callback,
-                "Для массового выхода укажи список каналов в Mass Ops.",
+                "Для массового выхода укажи список каналов в «⚡ Массовых действиях».",
                 "mass_ops",
             )
             return

@@ -286,3 +286,30 @@ def test_username_probe_sees_a_known_example():
     src = 'kb.button(text="⏭ Без username")\nx = f"Юзер @{username} — пример @username"\n'
     hits = [part for _, part in _russian_literal_parts(src) if _BARE_USERNAME.search(part)]
     assert hits == ['"⏭ Без username"']
+
+
+_ENGLISH_LABELS = re.compile(
+    r"(?<![\w@/_.-])(trust|Trust score|risk|Mass Ops|Health Dashboard|snippet|"
+    r"search authority|authority|invite link|safe pacing|pacing_mode=safe|flood|Join)(?![\w_-])"
+)
+
+
+def test_no_english_labels_in_bot_texts():
+    """«trust 0.42», «risk 70%», «Откройте Mass Ops», «snippet в поиске» —
+    подписи, которых владелец не прочтёт. Названия чужих продуктов
+    (Railway Dashboard, Telegram Trust &amp; Safety) — не подписи, их не трогаем."""
+    bad = []
+    for p in sorted(BOT.rglob("*.py")):
+        if p.name == "ai_tools.py":
+            continue
+        for ln, part in _russian_literal_parts(p.read_text(encoding="utf-8")):
+            text = re.sub(r"<[^>]*>", "", part).replace("Trust &amp; Safety", "")
+            if _ENGLISH_LABELS.search(text):
+                bad.append(f"{p.relative_to(BOT)}:{ln}: {part.strip()[:90]}")
+    assert not bad, "английские подписи в тексте:\n" + "\n".join(bad)
+
+
+def test_english_label_probe_sees_known_examples():
+    for s in ('f"🔴 {name} — trust {t:.2f}"', '"⚙️ Открыть Mass Ops"', '"или invite link"'):
+        assert _ENGLISH_LABELS.search(s), s
+    assert not _ENGLISH_LABELS.search('"доверие {trust_score:.2f}"')

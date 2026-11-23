@@ -1267,7 +1267,7 @@ async def cb_do_bulk_create(
         elif ts < 0.35:
             blocked_accs.append(f"• {label} — доверие {ts:.2f} (нужно от 0.35)")
         elif ts < 0.5 or age_days < 30:
-            risk_warnings.append(f"• {label} — возраст {age_days} дн., trust={ts:.2f}")
+            risk_warnings.append(f"• {label} — возраст {age_days} дн., доверие {ts:.2f}")
 
     if blocked_accs:
         await callback.message.edit_text(
