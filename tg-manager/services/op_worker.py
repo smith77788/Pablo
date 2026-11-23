@@ -14892,6 +14892,14 @@ async def _exec_bulk_dm_adhoc(
             _peer_hints[str(_k).lstrip("@").strip().lower()] = int(_v)
         except (TypeError, ValueError):
             continue
+    # Глубокий поиск получателя по группам (исходные чаты парсинга + группы
+    # аккаунта) — только для адресной ЛС одному человеку: в рассылке на
+    # сотни получателей это сотни поисков участников и прямой путь к флуду.
+    _peer_deep: dict = {}
+    if len(usernames) <= 3:
+        for _k, _v in (params.get("peer_deep") or {}).items():
+            if isinstance(_v, dict):
+                _peer_deep[str(_k).lstrip("@").strip().lower()] = _v
 
     # Риск-пульс (fail-open): не шлём ЛС с аккаунтов под недавним серьёзным
     # ограничением — рассылка с флагнутого аккаунта = быстрый бан. Если все в
@@ -15067,6 +15075,7 @@ async def _exec_bulk_dm_adhoc(
                         "reason": _why, "summary": _why}
             _msg = _expand_spintax(text)  # свой вариант текста этому получателю
             _hint = _peer_hints.get(str(username).lstrip("@").strip().lower())
+            _deep = _peer_deep.get(str(username).lstrip("@").strip().lower())
 
             try:
                 # Получатель только с Telegram ID: адресовать его может лишь
@@ -15081,14 +15090,14 @@ async def _exec_bulk_dm_adhoc(
                             _sent = await account_manager.send_media_via_account(
                                 acc["session_str"], username, caption=_msg, _acc=acc,
                                 media_bytes=media_bytes, media_filename=media_filename,
-                                uniquify=True, access_hash=_hint)
+                                uniquify=True, access_hash=_hint, deep=_deep)
                             result = {"ok": True} if _sent else {"error": "media send failed"}
                         except account_manager.PeerUnresolvedError as _pu:
                             result = {"error": str(_pu), "peer_unresolved": True}
                     else:
                         result = await account_manager.send_dm(
                             acc["session_str"], username, _msg, _acc=acc,
-                            access_hash=_hint,
+                            access_hash=_hint, deep=_deep,
                         )
                     kind = _classify_send_result(result)
                     if kind != "unresolved":

@@ -393,7 +393,7 @@ def _status_label(status: Any) -> str | None:
 
 async def get_user_profile(session_string: str, acc: dict | None, user_id: int,
                            access_hash: int | None = None,
-                           pool=None) -> dict[str, Any]:
+                           pool=None, deep: dict | None = None) -> dict[str, Any]:
     """Профиль пользователя по голому Telegram ID глазами аккаунта флота.
 
     Нужен там, где у контакта нет ни @username, ни телефона: ссылки t.me/<ник>
@@ -416,8 +416,8 @@ async def get_user_profile(session_string: str, acc: dict | None, user_id: int,
         await asyncio.wait_for(client.connect(), timeout=_CONNECT_TIMEOUT)
         try:
             peer = await asyncio.wait_for(
-                resolve_user_peer(client, int(user_id), access_hash),
-                timeout=_ACTION_TIMEOUT * 3)
+                resolve_user_peer(client, int(user_id), access_hash, deep),
+                timeout=_ACTION_TIMEOUT * 8)
         except PeerUnresolvedError as exc:
             return {"ok": False, "code": "unresolved", "error": str(exc)}
         from telethon.tl.functions.users import GetFullUserRequest
@@ -451,6 +451,48 @@ async def get_user_profile(session_string: str, acc: dict | None, user_id: int,
     except Exception as exc:
         code, human = await note_error(pool, acc, exc)
         log.warning("account_console.get_user_profile acc=%s: %s",
+                    (acc or {}).get("id"), exc)
+        return {"ok": False, "code": code, "error": human}
+    finally:
+        if client is not None:
+            try:
+                await client.disconnect()
+            except Exception:
+                pass
+        await _unclaim(_acc_id)
+
+
+async def add_to_contacts(session_string: str, acc: dict | None, user_id: int,
+                          first_name: str, last_name: str = "", *,
+                          access_hash: int | None = None,
+                          deep: dict | None = None,
+                          pool=None) -> dict[str, Any]:
+    """Добавить человека в контакты Telegram этого аккаунта по Telegram ID.
+
+    Человек из адресной книги резолвится аккаунтом по ID в любой следующей
+    сессии, то есть писать ему можно без @username, телефона и переписки.
+    code='unresolved' — аккаунт его не нашёл (ни диалогов, ни общих групп)."""
+    from services.account_manager import (PeerUnresolvedError, _make_client,
+                                          add_user_to_contacts)
+
+    _acc_id, _busy = await _claim(acc)
+    if _busy:
+        return dict(_BUSY_RESULT)
+    client = None
+    try:
+        client = _make_client(session_string, acc)
+        await asyncio.wait_for(client.connect(), timeout=_CONNECT_TIMEOUT)
+        try:
+            await asyncio.wait_for(
+                add_user_to_contacts(client, int(user_id), first_name, last_name,
+                                     access_hash=access_hash, deep=deep),
+                timeout=_ACTION_TIMEOUT * 8)
+        except PeerUnresolvedError as exc:
+            return {"ok": False, "code": "unresolved", "error": str(exc)}
+        return {"ok": True}
+    except Exception as exc:
+        code, human = await note_error(pool, acc, exc)
+        log.warning("account_console.add_to_contacts acc=%s: %s",
                     (acc or {}).get("id"), exc)
         return {"ok": False, "code": code, "error": human}
     finally:

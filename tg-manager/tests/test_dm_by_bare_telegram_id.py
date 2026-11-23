@@ -170,10 +170,12 @@ class _FakePool:
 @pytest.fixture
 def _dm(monkeypatch):
     calls: list[tuple] = []
+    deeps: list = []
     knows: set[int] = set()
 
-    async def _send(session, username, text, _acc=None, access_hash=None):
+    async def _send(session, username, text, _acc=None, access_hash=None, deep=None):
         calls.append((int(_acc["id"]), username, access_hash))
+        deeps.append(deep)
         if int(_acc["id"]) in knows:
             return {"ok": True}
         return {"error": account_manager.PEER_UNRESOLVED_TEXT, "peer_unresolved": True}
@@ -213,7 +215,7 @@ def _dm(monkeypatch):
     from services import contact_opt_out
     monkeypatch.setattr(contact_opt_out, "load_opted_out", _opted)
     op_worker._cancel_cache.clear()
-    return {"calls": calls, "knows": knows, "budget": budget}
+    return {"calls": calls, "knows": knows, "budget": budget, "deeps": deeps}
 
 
 _PARAMS = {"account_ids": [11, 12], "usernames": [str(_TG_ID)], "text": "привет"}
@@ -246,6 +248,79 @@ def test_nobody_knows_the_id_gives_an_honest_reason(_dm):
     assert _dm["budget"] == []
 
 
+def test_deep_hint_reaches_send_for_a_single_contact(_dm):
+    _dm["knows"].add(11)
+    deep = {"chats": ["somegroup"], "name": "Hang"}
+    params = dict(_PARAMS, peer_deep={str(_TG_ID): deep})
+    _run(op_worker._exec_bulk_dm_adhoc(_FakePool(), None, 918, 777, params))
+    assert _dm["deeps"] == [deep]
+
+
+def test_deep_search_is_off_for_a_mass_blast(_dm):
+    """Поиск по группам на сотни получателей — сотни запросов и флуд."""
+    _dm["knows"].update({11, 12})
+    many = [str(_TG_ID + i) for i in range(5)]
+    params = dict(_PARAMS, usernames=many,
+                  peer_deep={r: {"chats": ["g"], "name": "x"} for r in many})
+    _run(op_worker._exec_bulk_dm_adhoc(_FakePool(), None, 918, 777, params))
+    assert _dm["deeps"] and all(d is None for d in _dm["deeps"])
+
+
+# ── Без переписки: поиск в группах и адресная книга ─────────────────────────
+
+class _GroupClient(_FakeClient):
+    """Человек есть только среди участников группы — переписки не было."""
+
+    def __init__(self, member_in: str, name: str):
+        super().__init__()
+        self._member_in = member_in
+        self._name = name
+        self.searches: list[tuple] = []
+
+    async def get_entity(self, ref):
+        return type("Chan", (), {"id": 100, "ref": ref, "participants_count": 50000})()
+
+    async def get_participants(self, entity, search="", limit=None):
+        self.searches.append((getattr(entity, "ref", None), search))
+        if getattr(entity, "ref", None) == self._member_in and search == self._name:
+            self.cache[_TG_ID] = ("peer", _TG_ID)
+        return []
+
+
+def test_send_dm_without_any_chat_finds_him_in_the_source_group(_client):
+    cl = _client["client"] = _GroupClient("hang_group", "Hang")
+    res = _run(account_manager.send_dm(
+        "s", str(_TG_ID), "привет",
+        deep={"chats": ["@other", "hang_group"], "name": "Hang"}))
+    assert res == {"ok": True}, res
+    assert cl.sent_to == [("peer", _TG_ID)]
+    assert ("hang_group", "Hang") in cl.searches
+
+
+def test_big_group_is_not_scanned_without_a_name(_client):
+    cl = _client["client"] = _GroupClient("hang_group", "Hang")
+    res = _run(account_manager.send_dm(
+        "s", str(_TG_ID), "привет", deep={"chats": ["hang_group"], "name": ""}))
+    assert res.get("peer_unresolved") is True
+    assert cl.searches == [], "перебор группы на 50 000 участников — путь к флуду"
+
+
+def test_add_to_contacts_resolves_and_adds(_client):
+    cl = _client["client"] = _GroupClient("hang_group", "Hang")
+    peer = _run(account_manager.add_user_to_contacts(
+        cl, _TG_ID, "Hang", deep={"chats": ["hang_group"], "name": "Hang"}))
+    assert peer == ("peer", _TG_ID)
+    calls = [r for r in cl.requests if r != "dialogs"]
+    assert len(calls) == 2, (
+        f"ожидались contacts.getContacts (резолв) и contacts.addContact: {calls}")
+
+
+def test_add_to_contacts_unknown_person_is_unresolved(_client):
+    cl = _client["client"] = _FakeClient()
+    with pytest.raises(account_manager.PeerUnresolvedError):
+        _run(account_manager.add_user_to_contacts(cl, _TG_ID, "Hang"))
+
+
 # ── Мини-апп ────────────────────────────────────────────────────────────────
 
 def test_profile_button_is_not_a_dead_tg_link():
@@ -256,5 +331,7 @@ def test_profile_button_is_not_a_dead_tg_link():
     assert "openContactProfile()" in html
     src = (_ROOT / "services" / "mini_app_uch.py").read_text(encoding="utf-8")
     assert "/uch/contacts/{contact_id}/tg_profile" in src
+    assert "/uch/contacts/{contact_id}/tg_add" in src
+    assert "openContactTgAdd()" in html
     assert 'label=f"ЛС контакту @{ref}' not in src, (
         "голый ID в подписи с собачкой выглядит как юзернейм")

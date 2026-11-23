@@ -74,6 +74,12 @@ class _Client:
     async def connect(self):
         return None
 
+    async def get_input_entity(self, peer):
+        # Числовой ID теперь резолвится до отправки (account_manager.
+        # resolve_user_peer); здесь получатель «известен» — проверяется
+        # поведение самой отправки.
+        return ("peer", peer)
+
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("exc", [PeerFloodError("PEER_FLOOD"), TimeoutError()])

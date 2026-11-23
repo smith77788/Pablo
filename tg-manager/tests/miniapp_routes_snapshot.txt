@@ -1189,6 +1189,7 @@ POST /api/miniapp/uch/contacts/{contact_id}/media
 POST /api/miniapp/uch/contacts/{contact_id}/message
 POST /api/miniapp/uch/contacts/{contact_id}/opt_out
 POST /api/miniapp/uch/contacts/{contact_id}/rollback/{version_num}
+POST /api/miniapp/uch/contacts/{contact_id}/tg_add
 POST /api/miniapp/uch/filter/delete
 POST /api/miniapp/uch/filter/exclude
 POST /api/miniapp/uch/filter/preview
