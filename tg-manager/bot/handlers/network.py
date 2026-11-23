@@ -64,13 +64,13 @@ async def cb_net_menu(
         f"🤖 Ботов: <b>{ov['total_bots']}</b> | "
         f"🧬 Рой: <b>{ov['swarm_bots']}</b> ({swarm_pct}%)\n"
         f"🌐 Кластеров: <b>{ov['clusters']}</b>\n"
-        f"👤 Уникальных юзеров: <b>{num_ru(ov['unique_users'])}</b>\n"
+        f"👤 Уникальных пользователей: <b>{num_ru(ov['unique_users'])}</b>\n"
         f"📢 Сообщений отправлено: <b>{num_ru(ov['total_sent'])}</b>\n\n"
         "── <b>Управление сетью (💎 подписка)</b> ──\n"
         "📊 Аналитика — сводка по всей сети ботов\n"
         "🏆 Рейтинг — боты по размеру аудитории\n"
         "❤️ Здоровье — проверка доступности ботов\n"
-        "👥 Пересечение — общие юзеры между ботами\n"
+        "👥 Пересечение — общие пользователи между ботами\n"
         "⚖️ Роутинг — распределение нагрузки (💎 подписка)\n"
         "🌐 Кластеры — группировка ботов (💎 подписка)\n\n"
         "── <b>Массовые правки</b> ──\n"
@@ -106,7 +106,7 @@ async def cb_net_analytics(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
     for i, b in enumerate(top3):
         label = f"@{b['username']}" if b["username"] else b["first_name"]
         top3_lines.append(
-            f"  {medals[i]} {label} — {num_ru(b['audience'])} юз. / score {b['score']:.3f}"
+            f"  {medals[i]} {label} — {num_ru(b['audience'])} чел. · оценка {b['score']:.3f}"
         )
 
     kb = InlineKeyboardBuilder()
@@ -191,7 +191,7 @@ async def cb_cluster_view(
         swarm_icon = "🟢" if b["swarm_enabled"] else "⚫"
         role = _ROLE_LABELS.get(b.get("bot_role", "general"), "⚙️")
         lines.append(
-            f"  {swarm_icon} {label} [{role}] — {num_ru(b['audience_count'])} юз. | score {b['score']:.3f}"
+            f"  {swarm_icon} {label} [{role}] — {num_ru(b['audience_count'])} чел. · оценка {b['score']:.3f}"
         )
     _cap_text_note(lines, bots, _shown_t, "ботов")
 
@@ -224,7 +224,7 @@ async def cb_bulk_swarm_on(
         label = f"@{b['username']}" if b["username"] else b["first_name"]
         swarm_icon = "🟢" if b["swarm_enabled"] else "⚫"
         role = _ROLE_LABELS.get(b.get("bot_role", "general"), "⚙️")
-        lines.append(f"  {swarm_icon} {label} [{role}] — {num_ru(b['audience_count'])} юз.")
+        lines.append(f"  {swarm_icon} {label} [{role}] — {num_ru(b['audience_count'])} чел.")
     _cap_text_note(lines, bots, _shown_t, "ботов")
     await callback.message.edit_text(
         "\n".join(lines),
@@ -341,7 +341,7 @@ async def cb_cluster_assign_confirm(
     for b in _shown_t:
         lbl = f"@{b['username']}" if b["username"] else b["first_name"]
         swarm_icon = "🟢" if b["swarm_enabled"] else "⚫"
-        lines.append(f"  {swarm_icon} {lbl} — {num_ru(b['audience_count'])} юз.")
+        lines.append(f"  {swarm_icon} {lbl} — {num_ru(b['audience_count'])} чел.")
     _cap_text_note(lines, bots, _shown_t, "ботов")
     await callback.message.edit_text(
         "\n".join(lines),
@@ -820,19 +820,19 @@ async def cb_net_overlap(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
     lines = [
         "👥 <b>Пересечение аудиторий</b>\n",
         f"Записей в БД: <b>{num_ru(stats['total_entries'])}</b>",
-        f"Уникальных юзеров: <b>{num_ru(stats['unique_users'])}</b>",
+        f"Уникальных пользователей: <b>{num_ru(stats['unique_users'])}</b>",
         f"В нескольких ботах: <b>{num_ru(stats['multi_bot_users'])}</b> ({stats['overlap_pct']}%)\n",
         "<b>Аудитория по ботам:</b>",
     ]
     for b in bots[:10]:
         label = f"@{b['username']}" if b["username"] else b["first_name"]
         cluster = b.get("cluster") or "default"
-        lines.append(f"  • {label} [{cluster}] — {num_ru(b['audience'])} юз.")
+        lines.append(f"  • {label} [{cluster}] — {num_ru(b['audience'])} чел.")
 
     if stats["multi_bot_users"] > 0:
         lines.append(
             f"\n💡 <i>{num_ru(stats['multi_bot_users'])} пользователей присутствуют в нескольких ботах.\n"
-            f"Сетевая рассылка отправит им только 1 сообщение (дедупликация).</i>"
+            f"Сетевая рассылка отправит им только 1 сообщение (без повторов).</i>"
         )
 
     kb = InlineKeyboardBuilder()

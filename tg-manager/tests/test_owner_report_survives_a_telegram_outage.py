@@ -284,4 +284,4 @@ def test_a_real_protective_write_failure_still_leads():
         ("infragram_dm_dedup_write_failures_total", "дедуп ЛС", 1),
     ])
     assert text.startswith("⚠️ <b>Защита не записалась</b>")
-    assert "дважды" in text and "обмен темпом стоит — 1 раз(а)" in text
+    assert "дважды" in text and "обмен темпом стоит — 1 раз" in text

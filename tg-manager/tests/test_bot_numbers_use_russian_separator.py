@@ -66,3 +66,32 @@ def test_no_bracket_plurals_in_bot_texts():
             if re.search(r"(\}|</b>) ?[а-яё]+\((ов|а|ей|а/ов|ы/ов)\)", line):
                 bad.append(f"{p.relative_to(BOT)}:{n}: {line.strip()[:90]}")
     assert not bad, "окончание в скобках:\n" + "\n".join(bad)
+
+
+_BRACKET = r"(\}|</b>) ?[а-яё]+\((ов|а|ей|а/ов|ы/ов)\)"
+
+
+def test_no_bracket_plurals_in_service_texts():
+    """Сервисы присылают владельцу итоги и советы («5 аккаунт(ов) ловят флуд»,
+    «Операция 3 раз(а) прерывалась») — то же окончание в скобках."""
+    services = BOT.parent / "services"
+    bad = []
+    for p in sorted(services.rglob("*.py")):
+        for n, line in enumerate(p.read_text(encoding="utf-8").splitlines(), 1):
+            if line.lstrip().startswith("#"):
+                continue
+            if re.search(_BRACKET, line):
+                bad.append(f"{p.relative_to(services)}:{n}: {line.strip()[:90]}")
+    assert not bad, "окончание в скобках:\n" + "\n".join(bad)
+
+
+def test_bracket_probe_sees_a_known_example():
+    assert re.search(_BRACKET, 'f"{n} аккаунт(ов) на кулдауне"')
+    assert re.search(_BRACKET, '"Операция {n} раз(а) прерывалась"')
+    assert not re.search(_BRACKET, 'f"{n} {plural(n, \'раз\', \'раза\', \'раз\')}"')
+
+
+def test_revive_limit_text_declines():
+    from services.op_worker import _POISON_ERROR, _times
+    assert _times(3) == "3 раза" and _times(5) == "5 раз" and _times(21) == "21 раз"
+    assert "3 раза прерывалась" in _POISON_ERROR.format(n=_times(3))

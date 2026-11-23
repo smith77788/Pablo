@@ -25,6 +25,7 @@
 from __future__ import annotations
 
 import logging
+from bot.utils.fmt import plural
 
 log = logging.getLogger(__name__)
 
@@ -108,7 +109,7 @@ async def build_advice(pool, owner_id: int, *, audience_size: int = 0) -> dict:
         total_floods = sum(int(r["floods"]) for r in flooded)
         advice.append({
             "severity": "danger",
-            "title": f"{len(flooded)} аккаунт(ов) ловят флуд — выведите их из ротации",
+            "title": f"{len(flooded)} {plural(len(flooded), 'аккаунт', 'аккаунта', 'аккаунтов')} ловят флуд — выведите их из ротации",
             "detail": (
                 f"За неделю {total_floods} флуд-событий. Аккаунт, уже помеченный "
                 f"Telegram, при следующей операции добивается быстрее всего: дайте "
@@ -216,7 +217,7 @@ async def build_advice(pool, owner_id: int, *, audience_size: int = 0) -> dict:
     if empty:
         advice.append({
             "severity": "warn",
-            "title": f"{len(empty)} аккаунт(ов) с незаполненным профилем",
+            "title": f"{len(empty)} {plural(len(empty), 'аккаунт', 'аккаунта', 'аккаунтов')} с незаполненным профилем",
             "detail": (
                 "Пустое имя, отсутствие username или аватара — прямой спам-признак, "
                 "и риск-движок за него режет суточный лимит именно этим аккаунтам. "
@@ -235,7 +236,7 @@ async def build_advice(pool, owner_id: int, *, audience_size: int = 0) -> dict:
     if cold:
         advice.append({
             "severity": "warn",
-            "title": f"{len(cold)} аккаунт(ов) не прогреты",
+            "title": f"{len(cold)} {plural(len(cold), 'аккаунт', 'аккаунта', 'аккаунтов')} не прогреты",
             "detail": (
                 "Аккаунт без истории обычных действий, который сразу начинает "
                 "приглашать людей, — самый частый кандидат на ограничение. "
@@ -264,7 +265,7 @@ async def build_advice(pool, owner_id: int, *, audience_size: int = 0) -> dict:
     if exhausted:
         advice.append({
             "severity": "info",
-            "title": f"{len(exhausted)} аккаунт(ов) исчерпали суточный лимит",
+            "title": f"{len(exhausted)} {plural(len(exhausted), 'аккаунт', 'аккаунта', 'аккаунтов')} исчерпали суточный лимит",
             "detail": (
                 "Сегодня они будут пропущены — это не ошибка, а защита. Лимит "
                 "обнуляется в начале следующих суток."
@@ -309,7 +310,7 @@ async def build_advice(pool, owner_id: int, *, audience_size: int = 0) -> dict:
         if naked:
             advice.append({
                 "severity": "danger",
-                "title": f"{len(naked)} аккаунт(ов) работают без прокси",
+                "title": f"{len(naked)} {plural(len(naked), 'аккаунт', 'аккаунта', 'аккаунтов')} работают без прокси",
                 "detail": (
                     "Без прокси аккаунт ходит с общего адреса сервера вместе с "
                     "остальными — изоляции нет вообще. Назначьте прокси до запуска "

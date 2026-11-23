@@ -215,3 +215,25 @@ def test_message_texts_call_modules_in_russian():
     assert not bad, (
         "английские названия модулей в текстах бота:\n" + "\n".join(sorted(set(bad)))
     )
+
+
+_SLANG = re.compile(r"(?<![а-яё])(юзер(ов|ам|а|у|ы)?(?![а-яё])|юз\.)|\bscore \{")
+
+
+def test_no_user_slang_or_score_label_in_bot_texts():
+    """«Рассылка всем юзерам», «1 234 юз. / score 0.812» — жаргон и английская
+    подпись вместо «пользователей», «чел.» и «оценка»."""
+    bad = []
+    for p in sorted(BOT.rglob("*.py")):
+        for n, line in enumerate(p.read_text(encoding="utf-8").splitlines(), 1):
+            if line.lstrip().startswith("#"):
+                continue
+            if _SLANG.search(line):
+                bad.append(f"{p.relative_to(BOT)}:{n}: {line.strip()[:90]}")
+    assert not bad, "жаргон в текстах бота:\n" + "\n".join(bad)
+
+
+def test_slang_probe_sees_known_examples_and_spares_username():
+    assert _SLANG.search('kb.button(text="🚫 Заблокировать юзера")')
+    assert _SLANG.search('f"{label} — {n} юз. / score {s:.3f}"')
+    assert not _SLANG.search('"Введите юзернейм (без @)"')

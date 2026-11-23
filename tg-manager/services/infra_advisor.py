@@ -11,6 +11,7 @@ import asyncpg
 
 from services import account_status as _acc_status
 from services.logger import log_exc_swallow
+from bot.utils.fmt import plural
 
 log = logging.getLogger(__name__)
 
@@ -65,7 +66,7 @@ async def _analyze(pool: asyncpg.Pool, owner_id: int) -> list[dict]:
             {
                 "severity": "warning",
                 "icon": "⏳",
-                "title": f"Долгий кулдаун: {_matched(cooling_long)} аккаунт(ов)",
+                "title": f"Долгий кулдаун: {_matched(cooling_long)} {plural(_matched(cooling_long), 'аккаунт', 'аккаунта', 'аккаунтов')}",
                 "text": f"Аккаунты {names} и другие заблокированы флудом на >6 часов. Снизьте интенсивность операций.",
                 "action": "accounts",
             }
@@ -86,7 +87,7 @@ async def _analyze(pool: asyncpg.Pool, owner_id: int) -> list[dict]:
             {
                 "severity": "warning",
                 "icon": "🌊",
-                "title": f"Высокая флуд-активность: {_matched(flood_heavy)} аккаунт(ов)",
+                "title": f"Высокая флуд-активность: {_matched(flood_heavy)} {plural(_matched(flood_heavy), 'аккаунт', 'аккаунта', 'аккаунтов')}",
                 "text": f"Аккаунт {name} получил {worst['flood_count_7d']} флудов за 7 дней. Аккаунт перегружен — дайте ему отдохнуть.",
                 "action": "accounts",
             }
@@ -109,7 +110,7 @@ async def _analyze(pool: asyncpg.Pool, owner_id: int) -> list[dict]:
             {
                 "severity": "critical",
                 "icon": "🚨",
-                "title": f"Низкое доверие: {_matched(low_trust)} аккаунт(ов)",
+                "title": f"Низкое доверие: {_matched(low_trust)} {plural(_matched(low_trust), 'аккаунт', 'аккаунта', 'аккаунтов')}",
                 "text": f"Аккаунты {names} имеют trust_score < 0.3. Используйте их для некритичных операций или разогрейте.",
                 "action": "warmup",
             }
@@ -377,7 +378,7 @@ async def _analyze(pool: asyncpg.Pool, owner_id: int) -> list[dict]:
                         "icon": "🔌",
                         "title": f"Аккаунты без прокси: {no_proxy_accs} шт",
                         "text": (
-                            f"У вас настроены прокси, но {no_proxy_accs} аккаунт(ов) работают без них. "
+                            f"У вас настроены прокси, но {no_proxy_accs} {plural(no_proxy_accs, 'аккаунт', 'аккаунта', 'аккаунтов')} работают без них. "
                             f"Назначьте прокси для защиты реального IP."
                         ),
                         "action": "proxies",
