@@ -15011,6 +15011,29 @@ async def _exec_bulk_dm_adhoc(
     active_accounts = [dict(r) for r in rows]
     if not active_accounts:
         return {"status": "failed", "reason": "Нет активных аккаунтов"}
+    # Аккаунты, которые уже «видели» получателя (источники контакта), — первыми:
+    # только у них есть access_hash, без которого по голому ID не написать.
+    _pref = [int(x) for x in (params.get("preferred_account_ids") or [])
+             if str(x).lstrip("-").isdigit()]
+    if _pref:
+        _rank = {aid: n for n, aid in enumerate(_pref)}
+        active_accounts.sort(key=lambda a: _rank.get(int(a["id"]), len(_rank)))
+    # Известные access_hash по получателю ({"5422366449": 123…}) — подсказка
+    # резолву; хэш проверяется перед отправкой (он свой у каждого аккаунта).
+    _peer_hints: dict = {}
+    for _k, _v in (params.get("peer_hints") or {}).items():
+        try:
+            _peer_hints[str(_k).lstrip("@").strip().lower()] = int(_v)
+        except (TypeError, ValueError):
+            continue
+    # Глубокий поиск получателя по группам (исходные чаты парсинга + группы
+    # аккаунта) — только для адресной ЛС одному человеку: в рассылке на
+    # сотни получателей это сотни поисков участников и прямой путь к флуду.
+    _peer_deep: dict = {}
+    if len(usernames) <= 3:
+        for _k, _v in (params.get("peer_deep") or {}).items():
+            if isinstance(_v, dict):
+                _peer_deep[str(_k).lstrip("@").strip().lower()] = _v
 
     # Риск-пульс (fail-open): не шлём ЛС с аккаунтов под недавним серьёзным
     # ограничением — рассылка с флагнутого аккаунта = быстрый бан. Если все в
@@ -15054,6 +15077,7 @@ async def _exec_bulk_dm_adhoc(
         ok_count = 0
         err_count = 0
         skip_count = 0     # получатель недостижим (приватность/блок/удалён) — не наша ошибка
+        unresolved_count = 0  # получатель по голому ID не известен ни одному аккаунту
         flood_wait_total = 0.0
         acc_idx = 0
         from services import dm_engine as _dme
@@ -15184,26 +15208,49 @@ async def _exec_bulk_dm_adhoc(
                         "defer_cause": _dme.CAMPAIGN_DAILY_CAP,
                         "reason": _why, "summary": _why}
             _msg = _expand_spintax(text)  # свой вариант текста этому получателю
+            _hint = _peer_hints.get(str(username).lstrip("@").strip().lower())
+            _deep = _peer_deep.get(str(username).lstrip("@").strip().lower())
 
             try:
-                if media_bytes is not None:
-                    # Медиа с подписью — уникализируем под каждого (анти-детект).
-                    _sent = await account_manager.send_media_via_account(
-                        acc["session_str"], username, caption=_msg, _acc=acc,
-                        media_bytes=media_bytes, media_filename=media_filename,
-                        uniquify=True)
-                    result = {"ok": True} if _sent else {"error": "media send failed"}
-                else:
-                    result = await account_manager.send_dm(
-                        acc["session_str"], username, _msg, _acc=acc
-                    )
+                # Получатель только с Telegram ID: адресовать его может лишь
+                # аккаунт, который его «видел». Не знает этот — пробуем
+                # следующий из ротации; сообщение при этом не уходило, поэтому
+                # дубля не бывает и бюджет ЛС не тратится.
+                _tried_ids: set[int] = set()
+                while True:
+                    if media_bytes is not None:
+                        # Медиа с подписью — уникализируем под каждого (анти-детект).
+                        try:
+                            _sent = await account_manager.send_media_via_account(
+                                acc["session_str"], username, caption=_msg, _acc=acc,
+                                media_bytes=media_bytes, media_filename=media_filename,
+                                uniquify=True, access_hash=_hint, deep=_deep)
+                            result = {"ok": True} if _sent else {"error": "media send failed"}
+                        except account_manager.PeerUnresolvedError as _pu:
+                            result = {"error": str(_pu), "peer_unresolved": True}
+                    else:
+                        result = await account_manager.send_dm(
+                            acc["session_str"], username, _msg, _acc=acc,
+                            access_hash=_hint, deep=_deep,
+                        )
+                    kind = _classify_send_result(result)
+                    if kind != "unresolved":
+                        break
+                    _tried_ids.add(int(acc["id"]))
+                    _alt, _ = _pick_acc(
+                        [a for a in active_accounts if int(a["id"]) not in _tried_ids],
+                        0, sent_by_acc, per_acc_cap)
+                    if _alt is None:
+                        break
+                    acc = _alt
 
-                kind = _classify_send_result(result)
                 _err_text = str(result.get("error") or "")
                 # Построчная запись ЛС: по ней дневной лимит ЛС-кампаний видит
                 # и разовые рассылки (иначе аккаунт получал лимит дважды).
-                await _record_budget_actions(pool, owner_id, int(acc["id"]), "dm",
-                                             result=kind, operation_id=op_id)
+                # Неразрешённый ID — сообщение не отправлялось, бюджет не тратим.
+                if kind != "unresolved":
+                    await _record_budget_actions(pool, owner_id, int(acc["id"]), "dm",
+                                                 result=kind, operation_id=op_id)
 
                 if kind == "sent":
                     ok_count += 1
@@ -15254,6 +15301,15 @@ async def _exec_bulk_dm_adhoc(
                     err_count += 1
                     await _log_step(i + 1, username, "error", f"сессия мертва · акк {acc['id']}")
                     log.info("bulk_dm_adhoc: dead session acc %s, removed from pool", acc["id"])
+                elif kind == "unresolved":
+                    # Ни один аккаунт не знает получателя по ID. Это не сбой
+                    # флота: нужен @username, телефон или общий чат.
+                    err_count += 1
+                    unresolved_count += 1
+                    await _log_step(
+                        i + 1, username, "error",
+                        f"нет доступа по ID ни у одного из {len(_tried_ids)} акк. "
+                        f"(нет @username/общих чатов/переписки)")
                 elif kind == "skip":
                     # Получатель недостижим навсегда (приватность/чёрный список/
                     # удалён). Аккаунт здоров — не трогаем его и не считаем это
@@ -15297,6 +15353,11 @@ async def _exec_bulk_dm_adhoc(
         # «Недоступен» ≠ «ошибка»: закрытые ЛС и удалённые аккаунты получателей
         # смешивались с настоящими сбоями и создавали ложную картину проблем флота.
         _skip_note = f" · 🔒 {skip_count} недоступны (закрытые ЛС/удалены)" if skip_count else ""
+        if unresolved_count:
+            _skip_note += (f" · 🆔 {unresolved_count} без доступа по ID: ни один выбранный "
+                           f"аккаунт не знает получателя (нет @username, телефона, "
+                           f"общего чата или переписки) — напишите с аккаунта, где он "
+                           f"есть в диалогах/группах, или добавьте @username/телефон")
         return {
             "status": "done",
             "ok": ok_count,
