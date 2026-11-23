@@ -60,6 +60,27 @@ function wfEdges(steps) {
   return out;
 }
 
+// Шаги, до которых не ведёт ни один переход от первого шага. Такой шаг не
+// получит ни одного человека: обычно это ветка, на которую забыли сослаться
+// после правки номеров. На схеме его видно только по пустому «👥», поэтому
+// говорим прямо и обводим красным.
+function wfUnreachable(steps) {
+  const n = steps.length;
+  if (!n) return [];
+  const seen = new Set([0]);
+  const queue = [0];
+  const edges = wfEdges(steps);
+  while (queue.length) {
+    const i = queue.shift();
+    for (const e of edges) {
+      if (e.from === i && e.to !== 'end' && !seen.has(e.to)) { seen.add(e.to); queue.push(e.to); }
+    }
+  }
+  const out = [];
+  for (let i = 0; i < n; i++) if (!seen.has(i)) out.push(i);
+  return out;
+}
+
 function _wfmSvg(steps, stats, editable) {
   const n = steps.length;
   const W = 230, BX = 4, BH = 50, GAP = 28, LANE = 14;
@@ -72,6 +93,7 @@ function _wfmSvg(steps, stats, editable) {
   const height = yOf(endIdx) + 36;
   const reached = i => (((stats || {}).steps || {})[String(i)] || {}).reached;
   const dropped = i => (((stats || {}).steps || {})[String(i)] || {}).dropped;
+  const lost = new Set(wfUnreachable(steps));
   let svg = `<svg viewBox="0 0 ${width} ${height}" width="100%" style="max-width:${width}px;display:block" role="img" aria-label="Схема сценария">
     <defs><marker id="wfmArr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="var(--hint)"/></marker></defs>`;
   // Последовательные стрелки (без подписи) — короткие вертикальные.
@@ -103,7 +125,7 @@ function _wfmSvg(steps, stats, editable) {
     // Шаг на схеме — дверь в его правку: увидев на схеме ошибку в ветке,
     // владелец закрывал схему и искал тот же шаг в столбце по номеру.
     const open = editable ? `<g style="cursor:pointer" role="button" tabindex="0" aria-label="Изменить шаг ${i + 1}" onclick="wfMapEditStep(${i})">` : '<g>';
-    svg += `${open}<rect x="${BX}" y="${y}" width="${W}" height="${BH}" rx="10" fill="var(--bg2)" stroke="var(--border-strong)"/>
+    svg += `${open}<rect x="${BX}" y="${y}" width="${W}" height="${BH}" rx="10" fill="var(--bg2)" stroke="${lost.has(i) ? 'var(--red)' : 'var(--border-strong)'}"${lost.has(i) ? ' stroke-dasharray="5 3" stroke-width="1.5"' : ''}/>
       <text x="${BX + 10}" y="${y + 19}" font-size="12" font-weight="700" fill="var(--text)">${i + 1}. ${_WFM_ICON[t] || '•'} ${esc(_WFM_NAME[t] || t || 'Шаг')}</text>
       <text x="${BX + 10}" y="${y + 37}" font-size="11" fill="var(--hint)">${esc(body)}</text>
       ${r != null ? `<text x="${BX + W - 10}" y="${y + 19}" font-size="11" text-anchor="end" fill="var(--hint)">👥 ${num(r)}</text>` : ''}
@@ -151,7 +173,15 @@ async function openWorkflowMap(wfId) {
   // сценарию.
   const editable = !d.legacy_kind && typeof _currentWfId !== 'undefined' && Number(_currentWfId) === Number(wfId)
     && typeof openWfAddStepModal === 'function';
-  txt('wfMapBody', '<div style="overflow-x:auto;-webkit-overflow-scrolling:touch">' + _wfmSvg(steps, d.stats, editable) + '</div>' +
+  const lost = wfUnreachable(steps);
+  const warn = lost.length
+    ? '<div style="margin-bottom:8px;background:var(--bg2);border-left:3px solid var(--red);border-radius:8px;padding:8px 10px;font-size:12px;line-height:1.4">⚠️ ' +
+      (lost.length === 1 ? 'Шаг ' : 'Шаги ') + lost.map(i => i + 1).join(', ') +
+      (lost.length === 1 ? ' недостижим' : ' недостижимы') +
+      ': к ' + (lost.length === 1 ? 'нему' : 'ним') + ' не ведёт ни один переход, и до ' + (lost.length === 1 ? 'него' : 'них') +
+      ' никто не дойдёт. Сошлитесь на ' + (lost.length === 1 ? 'него' : 'них') + ' из ветки или кнопки — или удалите.</div>'
+    : '';
+  txt('wfMapBody', warn + '<div style="overflow-x:auto;-webkit-overflow-scrolling:touch">' + _wfmSvg(steps, d.stats, editable) + '</div>' +
     '<div class="hint" style="margin-top:8px">' + (editable ? 'Нажмите на шаг, чтобы изменить его. ' : '') + 'Короткая стрелка — следующий шаг. Дуга справа — переход или ветка, подпись — условие перехода. 👥 — сколько людей дошли до шага, ↘ — сколько ушли после него, не дойдя до конца (ошибка, истёк срок, остановлен).</div>');
 }
 
