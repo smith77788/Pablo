@@ -26,6 +26,8 @@ from bot.utils.subscription import require_plan, locked_text
 from database import db
 from bot.utils.op_helpers import safe_answer, terminal_kb
 
+from bot.utils.fmt import num_ru  # noqa: E402
+
 router = Router()
 log = logging.getLogger(__name__)
 
@@ -893,7 +895,7 @@ async def cb_crm_dashboard(
     lines = [
         "💼 <b>CRM — Дашборд</b>\n",
         f"Всего сделок: <b>{total_deals}</b>",
-        f"Выигранных: <b>{stats['won']['count']}</b>  (💰 {won_val:,.0f})",
+        f"Выигранных: <b>{stats['won']['count']}</b>  (💰 {num_ru(round(won_val))})",
         f"Проигранных: <b>{stats['lost']['count']}</b>",
         "",
         "<b>По стадиям:</b>",
@@ -1005,7 +1007,7 @@ async def cb_deal_view(
     # Название, контакт и заметки сделки собираются из имени и полей,
     # которые прислал подписчик (сценарии, авто-сделки): только экранированными.
     contact = html.escape(deal["contact"] or "—")
-    val = f"{deal['value']:,.0f}" if deal["value"] else "—"
+    val = num_ru(round(deal['value'])) if deal["value"] else "—"
     notes = html.escape((deal["notes"] or "—")[:200])
 
     lines = [
@@ -1063,7 +1065,7 @@ async def cb_deal_move(
         f"📄 <b>{html.escape(deal['title'] or '')}</b>\n",
         f"Стадия: {stage_label}",
         f"Контакт: {html.escape(deal['contact'] or '—')}",
-        f"Сумма: {deal['value']:,.0f}" if deal["value"] else "Сумма: —",
+        f"Сумма: {num_ru(round(deal['value']))}" if deal["value"] else "Сумма: —",
     ]
     if activities:
         lines.append("\n<b>Активность:</b>")
@@ -1184,7 +1186,7 @@ async def _finish_deal_creation(
     )
     kb.button(text="💼 Воронка", callback_data=CrmCb(action="pipeline"))
     kb.adjust(1)
-    val_str = f"{value:,.0f}" if value else "не указана"
+    val_str = num_ru(round(value)) if value else "не указана"
     await message.answer(
         f"✅ <b>Сделка создана!</b>\n\n"
         f"Название: <b>{title}</b>\n"

@@ -33,6 +33,8 @@ from bot.utils.op_helpers import safe_answer
 log = logging.getLogger(__name__)
 from bot.utils.owner_error import owner_error  # noqa: E402
 
+from bot.utils.fmt import num_ru  # noqa: E402
+
 router = Router(name="ad_intelligence_hub")
 
 _PAGE_SIZE = 10
@@ -309,7 +311,7 @@ async def cb_adi_top_channels(
         lines.append(
             f"{i}. <b>{title}</b> (@{uname})\n"
             f"   👥 {subs} · охват {er} · качество {qs:.0f}/100\n"
-            f"   💰 ~{price:,} ₽ за пост · 📝 {r['ad_posts_count']} рекл. постов\n"
+            f"   💰 ~{num_ru(price)} ₽ за пост · 📝 {r['ad_posts_count']} рекл. постов\n"
         )
         # Кликабельная кнопка деталей на каждый канал (handler placement_detail уже есть)
         kb.button(
@@ -384,7 +386,7 @@ async def cb_adi_placement_detail(
         f"📈 Охват поста: <b>{_fmt_er(r['er_rate'])}</b> от подписчиков\n"
         f"⭐ Качество: <b>{qs:.1f}/100</b> {_quality_label(qs)}\n"
         f"{_quality_bar(qs)}\n\n"
-        f"💰 Оценка цены поста: <b>~{r['ad_price_est']:,} ₽</b>\n"
+        f"💰 Оценка цены поста: <b>~{num_ru(r['ad_price_est'])} ₽</b>\n"
         f"📝 Рекламных постов найдено: <b>{r['ad_posts_count']}</b>\n"
         f"🗓 Последняя реклама: <b>{last_ad}</b>\n"
         f"🔄 Сканирование: <b>{scanned}</b>\n"
@@ -483,7 +485,7 @@ async def msg_adi_budget_input(
         return
 
     if not recs:
-        budget_str = f"до {budget:,} ₽" if budget > 0 else "без ограничения бюджета"
+        budget_str = f"до {num_ru(budget)} ₽" if budget > 0 else "без ограничения бюджета"
         await message.answer(
             f"📭 Нет рекомендаций ({budget_str}).\n\n"
             "Добавь больше каналов в базу для получения рекомендаций.",
@@ -492,7 +494,7 @@ async def msg_adi_budget_input(
         )
         return
 
-    budget_str = f"до {budget:,} ₽" if budget > 0 else "без ограничения"
+    budget_str = f"до {num_ru(budget)} ₽" if budget > 0 else "без ограничения"
     lines = [f"💡 <b>Рекомендации для размещения</b> ({budget_str})\n"]
 
     for i, rec in enumerate(recs[:10], 1):
@@ -507,7 +509,7 @@ async def msg_adi_budget_input(
         lines.append(
             f"{i}. <b>{title}</b> (@{uname})\n"
             f"   👥 {subs} · охват {er} · качество {qs:.0f}/100\n"
-            f"   💰 ~{price:,} ₽ · индекс выгоды: <b>{roi:.1f}</b>\n"
+            f"   💰 ~{num_ru(price)} ₽ · индекс выгоды: <b>{roi:.1f}</b>\n"
         )
 
     if len(recs) > 10:
@@ -644,7 +646,7 @@ async def msg_adi_niche_input(
     lines.append(f"📦 Каналов проанализировано: <b>{report['total_channels']}</b>")
     lines.append(f"⭐ Среднее качество каналов: <b>{report['avg_quality']}/100</b>")
     lines.append(
-        f"💰 Средняя цена поста: <b>~{report['avg_price']:,} ₽</b>"
+        f"💰 Средняя цена поста: <b>~{num_ru(report['avg_price'])} ₽</b>"
     )
     lines.append(f"📝 Всего рекламных постов: <b>{report['total_ad_posts']}</b>\n")
 
@@ -658,7 +660,7 @@ async def msg_adi_niche_input(
             price = ch["ad_price_est"]
             lines.append(
                 f"{i}. @{uname} · 👥{subs} · охват {er} · "
-                f"⭐{qs:.0f} · 💰~{price:,} ₽"
+                f"⭐{qs:.0f} · 💰~{num_ru(price)} ₽"
             )
 
     if report["active_advertisers"]:

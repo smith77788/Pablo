@@ -19,6 +19,8 @@ from services.audience_dna import AudienceDNA, generate_recommendations
 from bot.utils.op_helpers import safe_answer
 
 log = logging.getLogger(__name__)
+from bot.utils.fmt import num_ru  # noqa: E402
+
 router = Router()
 
 
@@ -71,7 +73,7 @@ def _format_dna_report(dna: AudienceDNA, bot_name: str) -> str:
         f"📈 <b>Средняя вовлечённость:</b> {er_str}\n"
         f"⚠️ <b>Риск оттока:</b> {dna.churn_risk_pct:.0f}% {risk_emoji}\n\n"
         f"🏷️ <b>Топ-темы аудитории:</b>\n{topics}\n\n"
-        f"👥 <b>Пользователей проанализировано:</b> {dna.total_users_analyzed:,}\n"
+        f"👥 <b>Пользователей проанализировано:</b> {num_ru(dna.total_users_analyzed)}\n"
         f"🕐 <b>Актуальность данных:</b> {computed_str}"
     )
 
@@ -307,7 +309,7 @@ async def cb_dna_history(
             f"{prefix} — {ts}\n"
             f"   ⏰ Пик: {hours_str}\n"
             f"   📈 ER: {er_str}  ⚠️ Отток: {churn_str}\n"
-            f"   👥 Пользователей: {snap.total_users_analyzed:,}"
+            f"   👥 Пользователей: {num_ru(snap.total_users_analyzed)}"
         )
 
     # Delta between latest and previous

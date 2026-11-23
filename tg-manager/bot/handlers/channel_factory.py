@@ -42,6 +42,8 @@ from bot.utils.op_helpers import safe_answer
 
 
 log = logging.getLogger(__name__)
+from bot.utils.fmt import num_ru  # noqa: E402
+
 router = Router()
 
 _PRO = "pro"
@@ -1671,7 +1673,7 @@ async def cb_chanf_stats_chan(
         f"Тип: {type_label}\n"
         f"ID: <code>{ch_id}</code>\n"
         f"Username: {uname_line}\n"
-        f"Участников: <b>{members:,}</b>"
+        f"Участников: <b>{num_ru(members)}</b>"
     )
 
     kb = InlineKeyboardBuilder()

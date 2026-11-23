@@ -24,6 +24,8 @@ from bot.utils.op_helpers import safe_answer, terminal_kb
 from services.security import sanitize_search_query
 
 log = logging.getLogger(__name__)
+from bot.utils.fmt import num_ru  # noqa: E402
+
 router = Router()
 
 _TYPE_ICON = {"channel": "📢", "group": "👥", "user": "👤", "bot": "🤖"}
@@ -138,7 +140,7 @@ async def msg_search_query(message: Message, state: FSMContext, pool: asyncpg.Po
         if r.get("scam"):
             badges += " ⚠️scam"
         parts = r.get("participants")
-        parts_s = f" · 👥{parts:,}" if isinstance(parts, int) else ""
+        parts_s = f" · 👥{num_ru(parts)}" if isinstance(parts, int) else ""
         lines.append(f"{icon} <b>{title}</b>{uname_s}{badges}{parts_s}")
 
     kb = InlineKeyboardBuilder()

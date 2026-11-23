@@ -40,6 +40,8 @@ _ADVISOR_ACTION_BUTTONS: dict[str, tuple[str, object]] = {
 }
 
 log = logging.getLogger(__name__)
+from bot.utils.fmt import num_ru  # noqa: E402
+
 router = Router()
 
 _PAGE = 10
@@ -394,7 +396,7 @@ async def cb_infra_audit(
         )
         return
 
-    lines = [f"📋 <b>Лог операций</b> (всего: {total:,})\n"]
+    lines = [f"📋 <b>Лог операций</b> (всего: {num_ru(total)})\n"]
     if bad_proxy_count > 0:
         lines.append(f"⚠️ Плохих прокси (< 50% успех): <b>{bad_proxy_count}</b>\n")
     for r in rows:
@@ -773,7 +775,7 @@ async def cb_asset_registry(callback: CallbackQuery, pool: asyncpg.Pool) -> None
         "<b>🤖 Боты</b>",
         f"   Всего: <b>{bot.get('total', 0)}</b>  |  "
         f"Активных: <b>{bot.get('active', 0)}</b>",
-        f"   Аудитория: <b>{int(bot.get('total_users', 0)):,}</b> пользователей",
+        f"   Аудитория: <b>{num_ru(int(bot.get('total_users', 0)))}</b> пользователей",
         "",
         "<b>📡 Каналы</b>",
         f"   Подключено: <b>{chan_total}</b>",

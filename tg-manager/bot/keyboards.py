@@ -49,6 +49,7 @@ from bot.callbacks import (
     TaskCb,
     BotFactCb,
 )
+from bot.utils.fmt import num_ru  # noqa: E402
 
 PAGE_SIZE: int = 5
 
@@ -1365,7 +1366,7 @@ def network_clusters_menu(clusters: list) -> InlineKeyboardMarkup:
     kb = InlineKeyboardBuilder()
     for c in clusters:
         kb.button(
-            text=f"🌐 {c['cluster']} — {c['bot_count']} бот. · {c['total_audience']:,} юз.",
+            text=f"🌐 {c['cluster']} — {c['bot_count']} бот. · {num_ru(c['total_audience'])} юз.",
             callback_data=ClusterCb(action="view", cluster=c["cluster"]),
         )
     kb.button(text="◀️ Назад", callback_data=NetworkCb(action="menu"))

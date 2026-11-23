@@ -44,6 +44,8 @@ from bot.utils.op_helpers import safe_answer, terminal_kb
 from bot.utils.owner_error import owner_error
 
 log = logging.getLogger(__name__)
+from bot.utils.fmt import num_ru  # noqa: E402
+
 router = Router()
 
 _PAGE_SIZE = 10
@@ -137,7 +139,7 @@ async def cb_parser_menu(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
 
     await callback.message.edit_text(
         "🔍 <b>Парсер аудитории</b>\n\n"
-        f"Всего в базе: <b>{total:,}</b> пользователей\n"
+        f"Всего в базе: <b>{num_ru(total)}</b> пользователей\n"
         f"Запусков парсера: <b>{runs}</b>\n\n"
         "Извлекайте аудиторию из каналов и групп для дальнейшей работы.\n"
         "• <b>Участники</b> — все подписчики канала/группы\n"
@@ -389,7 +391,7 @@ async def _start_parse(
     await msg_target.answer(
         f"⏳ <b>Разбор {kind} поставлен в очередь</b>\n\n"
         f"Источник: <code>{html.escape(source)}</code>\n"
-        f"Лимит: <b>{limit:,}</b>"
+        f"Лимит: <b>{num_ru(limit)}</b>"
         + (f"\nСрок: <b>{days_back} дн.</b>" if windowed else "")
         + f"\nОперация: <code>#{op_id}</code>\n\n"
         "Итог придёт сообщением: сколько найдено, а если разбор оборвался — "
@@ -432,7 +434,7 @@ async def cb_parser_runs(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
         kind = PARSE_TYPE_LABELS.get(r["parse_type"], r["parse_type"])
         lines.append(
             f"{status_icon} <code>{html.escape(r['source_ref'])}</code> "
-            f"[{html.escape(kind)}] — {r['total_found']:,} найдено\n"
+            f"[{html.escape(kind)}] — {num_ru(r['total_found'])} найдено\n"
             f"   <i>{started}</i>"
         )
         # Причина обрыва — рядом с запуском: «0 найдено» без неё не отличить
@@ -441,7 +443,7 @@ async def cb_parser_runs(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
             lines.append(f"   ⚠️ {html.escape(str(r['error'])[:200])}")
         if r["status"] == "done" and r["total_found"] > 0:
             kb.button(
-                text=f"📥 {r['source_ref'][:20]} ({r['total_found']:,})",
+                text=f"📥 {r['source_ref'][:20]} ({num_ru(r['total_found'])})",
                 callback_data=ParserCb(action="export", run_id=r["id"]),
             )
 
@@ -487,7 +489,7 @@ async def _render_ops(callback: CallbackQuery, pool: asyncpg.Pool, state: FSMCon
         if r["id"] in selected:
             mark = f"✅{selected.index(r['id']) + 1} "
         kb.button(
-            text=f"{mark}{r['source_ref'][:22]} ({r['total_found']:,})",
+            text=f"{mark}{r['source_ref'][:22]} ({num_ru(r['total_found'])})",
             callback_data=ParserCb(action="ops_pick", run_id=r["id"]),
         )
     kb.adjust(1)
@@ -565,7 +567,7 @@ async def _run_ops_and_report(
     kb.adjust(1)
     await callback.message.edit_text(
         f"✅ <b>{verb}</b>\n\nСоздана база #{res['run_id']} — "
-        f"<b>{res['count']:,}</b> пользователей.",
+        f"<b>{num_ru(res['count'])}</b> пользователей.",
         parse_mode="HTML", reply_markup=kb.as_markup())
 
 
@@ -625,20 +627,20 @@ async def cb_parser_ops_gender(
     total = res["total"] or 1
     kb = InlineKeyboardBuilder()
     if res["m"]:
-        kb.button(text=f"📥 Экспорт 👨 ({res['m']:,})",
+        kb.button(text=f"📥 Экспорт 👨 ({num_ru(res['m'])})",
                   callback_data=ParserCb(action="gexp_m", run_id=run_id))
     if res["f"]:
-        kb.button(text=f"📥 Экспорт 👩 ({res['f']:,})",
+        kb.button(text=f"📥 Экспорт 👩 ({num_ru(res['f'])})",
                   callback_data=ParserCb(action="gexp_f", run_id=run_id))
     kb.button(text="🧬 К операциям", callback_data=ParserCb(action="ops"))
     kb.button(text="◀️ В меню", callback_data=ParserCb(action="menu"))
     kb.adjust(1)
     await callback.message.edit_text(
         "🚻 <b>Определение пола</b> <i>(оценка по имени)</i>\n\n"
-        f"👨 Мужчины: <b>{res['m']:,}</b> ({res['m'] * 100 // total}%)\n"
-        f"👩 Женщины: <b>{res['f']:,}</b> ({res['f'] * 100 // total}%)\n"
-        f"❔ Неизвестно: <b>{res['unknown']:,}</b> ({res['unknown'] * 100 // total}%)\n\n"
-        f"Всего размечено: <b>{res['total']:,}</b>\n"
+        f"👨 Мужчины: <b>{num_ru(res['m'])}</b> ({res['m'] * 100 // total}%)\n"
+        f"👩 Женщины: <b>{num_ru(res['f'])}</b> ({res['f'] * 100 // total}%)\n"
+        f"❔ Неизвестно: <b>{num_ru(res['unknown'])}</b> ({res['unknown'] * 100 // total}%)\n\n"
+        f"Всего размечено: <b>{num_ru(res['total'])}</b>\n"
         "Можно выгрузить только нужный пол для таргет-рассылки.",
         parse_mode="HTML", reply_markup=kb.as_markup())
 
@@ -679,7 +681,7 @@ async def cb_parser_gender_export(
     await callback.message.answer_document(
         BufferedInputFile(csv_bytes, filename=f"audience_{lbl}_{len(rows)}.csv"),
         caption=f"📥 <b>Экспорт ({'👨 муж' if gender == 'm' else '👩 жен'})</b>\n"
-                f"{len(rows):,} пользователей",
+                f"{num_ru(len(rows))} пользователей",
         parse_mode="HTML",
     )
 
@@ -725,7 +727,7 @@ async def cb_parser_audience(
         )
         return
 
-    lines = [f"📊 <b>Аудитория</b> (всего: {total:,})\n"]
+    lines = [f"📊 <b>Аудитория</b> (всего: {num_ru(total)})\n"]
     for u in users:
         uname = (
             f"@{html.escape(u['username'])}"
@@ -832,7 +834,7 @@ async def cb_parser_export(
     fname = f"audience_{run_id or 'all'}_{len(users)}.csv"
     await callback.message.answer_document(
         BufferedInputFile(csv_bytes, filename=fname),
-        caption=f"📥 <b>Экспорт аудитории</b>\n{len(users):,} пользователей",
+        caption=f"📥 <b>Экспорт аудитории</b>\n{num_ru(len(users))} пользователей",
         parse_mode="HTML",
     )
 
@@ -859,7 +861,7 @@ async def cb_parser_clear(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
         total = 0
     await callback.message.edit_text(
         f"⚠️ <b>Очистить всю аудиторию?</b>\n\n"
-        f"Будет удалено: <b>{total:,}</b> пользователей\n"
+        f"Будет удалено: <b>{num_ru(total)}</b> пользователей\n"
         "<i>Это действие необратимо</i>",
         parse_mode="HTML",
         reply_markup=kb.as_markup(),
@@ -873,7 +875,7 @@ async def cb_parser_confirm_clear(callback: CallbackQuery, pool: asyncpg.Pool) -
 
     deleted = await delete_audience(pool, callback.from_user.id)
     await callback.message.edit_text(
-        f"🗑 <b>Аудитория очищена</b>\n\nУдалено: <b>{deleted:,}</b> пользователей",
+        f"🗑 <b>Аудитория очищена</b>\n\nУдалено: <b>{num_ru(deleted)}</b> пользователей",
         parse_mode="HTML",
         reply_markup=_back_kb().as_markup(),
     )

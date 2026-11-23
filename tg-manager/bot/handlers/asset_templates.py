@@ -895,7 +895,7 @@ async def cb_delete_confirm(
         )
         return
     await callback.message.edit_text(
-        f"🗑️ Вы уверены, что хотите удалить шаблон <b>«{tpl['name']}»</b>?",
+        f"🗑️ Вы уверены, что хотите удалить шаблон <b>«{html.escape(str(tpl['name']))}»</b>?",
         parse_mode="HTML",
         reply_markup=_delete_confirm_kb(
             callback_data.tpl_id, callback_data.asset_type or ""

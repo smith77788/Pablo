@@ -29,6 +29,8 @@ from bot.utils.op_helpers import safe_answer, terminal_kb
 log = logging.getLogger(__name__)
 from bot.utils.owner_error import owner_error  # noqa: E402
 
+from bot.utils.fmt import num_ru  # noqa: E402
+
 router = Router()
 
 _STATUS_EMOJI = {
@@ -482,12 +484,12 @@ async def cb_dm_target_parsed(
 
     kb = InlineKeyboardBuilder()
     kb.button(
-        text=f"🗂 Вся аудитория ({total_all:,} чел.)",
+        text=f"🗂 Вся аудитория ({num_ru(total_all)} чел.)",
         callback_data=DmCb(action="target_parsed_pick", campaign_id=0),
     )
     for r in runs:
         started = r["started_at"].strftime("%d.%m %H:%M") if r["started_at"] else "—"
-        label = f"{r['source_ref'][:18]} [{r['parse_type']}] {r['total_found']:,} чел. {started}"
+        label = f"{r['source_ref'][:18]} [{r['parse_type']}] {num_ru(r['total_found'])} чел. {started}"
         kb.button(
             text=label,
             callback_data=DmCb(action="target_parsed_pick", campaign_id=r["id"]),
@@ -550,9 +552,9 @@ async def _dm_offer_gender(callback: CallbackQuery, state: FSMContext, pool: asy
         kb = InlineKeyboardBuilder()
         kb.button(text="👥 Все", callback_data=DmCb(action="target_gender_all"))
         if m_cnt:
-            kb.button(text=f"👨 Только муж. ({m_cnt:,})", callback_data=DmCb(action="target_gender_m"))
+            kb.button(text=f"👨 Только муж. ({num_ru(m_cnt)})", callback_data=DmCb(action="target_gender_m"))
         if f_cnt:
-            kb.button(text=f"👩 Только жен. ({f_cnt:,})", callback_data=DmCb(action="target_gender_f"))
+            kb.button(text=f"👩 Только жен. ({num_ru(f_cnt)})", callback_data=DmCb(action="target_gender_f"))
         kb.adjust(1)
         await _edit(
             callback,

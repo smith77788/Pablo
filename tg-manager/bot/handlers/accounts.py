@@ -75,6 +75,8 @@ from services.account_manager import (
 )
 from bot.utils.owner_error import owner_error
 
+from bot.utils.fmt import num_ru  # noqa: E402
+
 router = Router()
 
 # ── Plan limits ────────────────────────────────────────────────────────────────
@@ -2209,7 +2211,7 @@ async def cb_channels(
         title = escape(dialog.get("title") or "Без названия")
         members = dialog.get("members") or dialog.get("participants_count") or 0
         chat_id = dialog.get("id") or 0
-        lines.append(f"  • {title}" + (f" — {members:,} участн." if members else ""))
+        lines.append(f"  • {title}" + (f" — {num_ru(members)} участн." if members else ""))
         kb.button(
             text=f"📤 {title[:28]}",
             callback_data=AccCb(
@@ -3328,7 +3330,7 @@ async def cb_dialogs(
         title = escape(dialog.get("title") or "Без названия")
         d_type = _type_labels.get(dialog.get("type", ""), "💬")
         members = dialog.get("members") or 0
-        members_str = f" · {members:,} уч." if members else ""
+        members_str = f" · {num_ru(members)} уч." if members else ""
         lines.append(f"  • {d_type} {title}{members_str}")
 
     kb = InlineKeyboardBuilder()
@@ -4705,7 +4707,7 @@ async def cb_scan_assets(
         for ch in channels[:20]:
             title = escape(ch["title"][:35] or "Без названия")
             uname = f" @{ch['username']}" if ch.get("username") else ""
-            members = f" — {ch['members']:,} подп." if ch.get("members") else ""
+            members = f" — {num_ru(ch['members'])} подп." if ch.get("members") else ""
             crown = "👑" if ch.get("is_creator") else "🔧"
             lines.append(f"  {crown} {title}{uname}{members}")
         if len(channels) > 20:
@@ -4716,7 +4718,7 @@ async def cb_scan_assets(
         for gr in groups[:20]:
             title = escape(gr["title"][:35] or "Без названия")
             uname = f" @{gr['username']}" if gr.get("username") else ""
-            members = f" — {gr['members']:,} уч." if gr.get("members") else ""
+            members = f" — {num_ru(gr['members'])} уч." if gr.get("members") else ""
             crown = "👑" if gr.get("is_creator") else "🔧"
             lines.append(f"  {crown} {title}{uname}{members}")
         if len(groups) > 20:

@@ -40,6 +40,8 @@ from bot.utils.owner_error import owner_error
 from bot.utils.op_names import run_status as _run_status  # noqa: E402
 
 log = logging.getLogger(__name__)
+from bot.utils.fmt import num_ru  # noqa: E402
+
 router = Router()
 
 _TPL_PAGE_SIZE = 5
@@ -989,7 +991,7 @@ async def _show_avatar_step(callback: CallbackQuery, state: FSMContext) -> None:
         )
     else:
         space = avatar_factory.variant_space(current)
-        note = f"Комбинаций в этом стиле: <b>{space:,}</b>".replace(",", " ")
+        note = f"Комбинаций в этом стиле: <b>{num_ru(space)}</b>".replace(",", " ")
 
     font_warn = (
         ""

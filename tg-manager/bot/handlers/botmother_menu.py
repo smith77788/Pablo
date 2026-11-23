@@ -142,6 +142,8 @@ from bot.utils.op_helpers import safe_answer, terminal_kb
 
 log = logging.getLogger(__name__)
 
+from bot.utils.fmt import num_ru  # noqa: E402
+
 router = Router()
 
 
@@ -3710,7 +3712,7 @@ async def cb_topology(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
             swarm = "🧬" if b.get("swarm_enabled") else "  "
             role_icon = role_icons.get(b.get("bot_role", "general"), "⚙️")
             lines.append(
-                f"  {swarm}{role_icon} {html.escape(bname)} ({users:,} польз.)"
+                f"  {swarm}{role_icon} {html.escape(bname)} ({num_ru(users)} польз.)"
             )
 
     if channels:
