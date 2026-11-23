@@ -54,17 +54,9 @@ log = logging.getLogger(__name__)
 router = Router()
 
 
-def _op_name(op_type) -> str:
-    """Название операции по-русски (реестр operation_bus) вместо кода
-    «mass_invite»: владелец английского не читает."""
-    from services import operation_bus as _ob
-    meta = _ob.OP_REGISTRY.get(str(op_type or ""), {})
-    return meta.get("description") or "Операция"
+from bot.utils.op_names import op_name as _op_name  # noqa: E402
 
-
-def _ost_label(status) -> str:
-    from services import op_status as _os
-    return _os.label(status)
+from bot.utils.op_names import status_label as _ost_label  # noqa: E402
 
 
 # ── Timing options ──────────────────────────────────────────────────────────
