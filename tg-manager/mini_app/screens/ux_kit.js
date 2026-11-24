@@ -133,3 +133,106 @@ if (document.readyState === 'loading') {
 } else {
   uxInit();
 }
+
+// ── «Закреплённые» и «Недавние» в каталоге ─────────────────────────────────
+// Каталог — 80+ разделов в 11 категориях, шесть экранов прокрутки. Человек
+// изо дня в день пользуется пятью-шестью из них, и каждый раз искал их заново:
+// ни закрепить своё, ни увидеть, где был вчера, было нельзя (поиск по каталогу
+// помогает, только если помнишь название).
+//
+// Храним в localStorage, а не на сервере: это привычка устройства, и ради неё
+// не стоит ни ручки, ни таблицы. Пункт описывается тремя полями — подпись,
+// значок и ТОТ ЖЕ обработчик, что у плитки каталога: так закреплённое ведёт
+// ровно туда же, куда плитка, и не разъедется с ней при переименовании экрана.
+const UX_NAV_KEY = 'infragram_nav_memory';
+const UX_RECENT_MAX = 6;
+const UX_PINNED_MAX = 12;
+
+function uxNavMemory() {
+  try {
+    const raw = JSON.parse(localStorage.getItem(UX_NAV_KEY) || '{}');
+    return { pinned: Array.isArray(raw.pinned) ? raw.pinned : [],
+             recent: Array.isArray(raw.recent) ? raw.recent : [] };
+  } catch (_) { return { pinned: [], recent: [] }; }
+}
+
+function uxNavSave(mem) {
+  try { localStorage.setItem(UX_NAV_KEY, JSON.stringify(mem)); } catch (_) {}
+  // Каталог собирается один раз и кэшируется — после правки памяти его надо
+  // собрать заново, иначе изменения видно только после перезагрузки.
+  const body = document.getElementById('navBody');
+  if (body) body.dataset.built = '';
+}
+
+function uxNavRemember(lbl, ico, handler) {
+  if (!lbl || !handler) return;
+  const mem = uxNavMemory();
+  mem.recent = [{ lbl, ico: ico || '•', h: handler }]
+    .concat(mem.recent.filter(x => x && x.lbl !== lbl))
+    .slice(0, UX_RECENT_MAX);
+  uxNavSave(mem);
+}
+
+function uxNavPinned(lbl) {
+  return uxNavMemory().pinned.some(x => x && x.lbl === lbl);
+}
+
+// Закрепить/открепить. Закрытый потолок намеренно: «закреплено всё» — это
+// снова каталог, только сверху.
+function uxNavPin(lbl, ico, handler) {
+  const mem = uxNavMemory();
+  if (mem.pinned.some(x => x && x.lbl === lbl)) {
+    mem.pinned = mem.pinned.filter(x => x && x.lbl !== lbl);
+    if (typeof toast === 'function') toast('☆ Откреплено: ' + lbl);
+  } else if (mem.pinned.length >= UX_PINNED_MAX) {
+    if (typeof toast === 'function') toast('⚠️ Закреплено уже ' + UX_PINNED_MAX + ' — открепите лишнее');
+    return;
+  } else {
+    mem.pinned = mem.pinned.concat([{ lbl, ico: ico || '•', h: handler }]);
+    if (typeof toast === 'function') toast('⭐ Закреплено: ' + lbl);
+  }
+  uxNavSave(mem);
+  if (typeof buildDrawer === 'function') buildDrawer();
+  if (typeof markDrawerActive === 'function') markDrawerActive();
+}
+
+// Разметка блоков «Закреплённые» и «Недавние» для каталога. Отдаём строкой —
+// её вставляет buildDrawer, одно место сборки меню.
+function uxNavBlocks() {
+  const mem = uxNavMemory();
+  const row = (it, star) => {
+    const h = String(it.h || '').replace(/"/g, '&quot;');
+    return `<div class="nav-item" onclick="closeDrawer(); ${h}">` +
+      `<span class="ni-ico">${uxNavEsc(it.ico)}</span>` +
+      `<span class="ni-body"><span>${uxNavEsc(it.lbl)}</span></span>` +
+      `<span class="ni-pin" role="button" tabindex="0" aria-label="${star ? 'Открепить' : 'Закрепить'}" ` +
+      `onclick="event.stopPropagation(); uxNavPin('${uxNavQ(it.lbl)}','${uxNavQ(it.ico)}','${uxNavQ(it.h)}')">` +
+      `${star ? '★' : '☆'}</span></div>`;
+  };
+  let html = '';
+  if (mem.pinned.length) {
+    html += '<div class="nav-cat">⭐ Закреплённые</div>' + mem.pinned.map(it => row(it, true)).join('');
+  }
+  const recent = mem.recent.filter(it => !mem.pinned.some(p => p.lbl === it.lbl));
+  if (recent.length) {
+    html += '<div class="nav-cat">🕘 Недавние</div>' + recent.map(it => row(it, false)).join('');
+  }
+  return html;
+}
+
+function uxNavEsc(s) {
+  return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+// Значение внутри одинарных кавычек атрибута onclick="...". Порядок важен:
+// сначала HTML-сущности (иначе собственный «&» испортил бы уже готовую
+// сущность), потом экранирование для строки JS. Двойную кавычку не
+// превращаем в &quot;, а выбрасываем: браузер развернул бы сущность ДО того,
+// как JS увидит строку, и атрибут порвался бы ровно так, как однажды уже
+// рвался список сообществ (CLAUDE.md).
+function uxNavQ(s) {
+  return String(s == null ? '' : s)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/"/g, '')
+    .replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+}

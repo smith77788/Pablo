@@ -426,6 +426,8 @@ html.tg-back .hdr > .back{display:none}
    Замер на экране 360px показал значки 14–21px: промах по 🗑 в списке
    удаляет не то, что человек целил. */
 /* Общая механика экранов (screens/ux_kit.js): полоска «нет сети» и «наверх». */
+.ni-pin{margin-left:auto;flex:0 0 auto;display:inline-flex;align-items:center;justify-content:center;min-width:36px;min-height:36px;font-size:15px;color:var(--hint);cursor:pointer;border-radius:10px}
+.ni-pin:active{background:var(--sep)}
 .ux-netbar{position:fixed;left:0;right:0;top:0;z-index:70;padding:6px 12px;text-align:center;font-size:12px;font-weight:600;background:var(--orange,#e0b268);color:#1b1b1b}
 .ux-top{position:fixed;right:14px;bottom:calc(72px + env(safe-area-inset-bottom,0px));z-index:60;width:42px;height:42px;border:0;border-radius:50%;background:var(--bg3);color:var(--text);font-size:18px;line-height:42px;box-shadow:0 2px 10px rgba(0,0,0,.35);cursor:pointer}
 .ux-top:active{opacity:.7}
@@ -10888,6 +10890,11 @@ function buildDrawer() {
    ['broadcasts','✉️','Сообщения'],['more','🧭','Разделы']].forEach(([tab,ico,lbl])=>{
     html += `<div class="nav-item" data-tab="${tab}" onclick="navGo('${tab}',null)"><span class="ni-ico">${ico}</span>${esc(lbl)}</div>`;
   });
+  // 1.5) Своё: закреплённое и недавнее (screens/ux_kit.js). Каталог — 80+
+  //      разделов, а человек ходит в пять-шесть; раньше их искали заново
+  //      каждый день. В `seen` эти пункты НЕ добавляем: они не заменяют
+  //      каталог, а стоят над ним ярлыками.
+  if (typeof uxNavBlocks === 'function') html += uxNavBlocks();
   // 2) Полный каталог — динамически из экрана «Ещё» (все секции и плитки), НО
   //    без дублей: верхние вкладки (Дашборд/Боты/Аккаунты/Рассылки/Все функции)
   //    и повторяющиеся ярлыки не выводятся повторно; секция «Быстрые действия»
@@ -10923,7 +10930,13 @@ function buildDrawer() {
         const descHtml = desc ? `<span class="ni-desc">${esc(desc)}</span>` : '';
         // has-desc: у пункта с пояснением значок выравнивается по ПЕРВОЙ строке,
         // иначе он повисал между названием и пояснением.
-        items += `<div class="nav-item${desc?' has-desc':''}" onclick="closeDrawer(); ${handler}"><span class="ni-ico">${ico}</span><span class="ni-body"><span>${esc(lbl)}</span>${descHtml}</span></div>`;
+        // Переход запоминается (блок «Недавние»), а звезда закрепляет пункт
+        // наверху каталога — обе памяти живут в screens/ux_kit.js.
+        const q = (typeof uxNavQ === 'function') ? uxNavQ : (x => String(x));
+        const remember = `uxNavRemember('${q(lbl)}','${q(ico)}','${q(handler)}')`;
+        const pinned = (typeof uxNavPinned === 'function') && uxNavPinned(lbl);
+        const star = `<span class="ni-pin" role="button" tabindex="0" aria-label="${pinned?'Открепить':'Закрепить'}" onclick="event.stopPropagation(); uxNavPin('${q(lbl)}','${q(ico)}','${q(handler)}')">${pinned?'★':'☆'}</span>`;
+        items += `<div class="nav-item${desc?' has-desc':''}" onclick="closeDrawer(); ${remember}; ${handler}"><span class="ni-ico">${ico}</span><span class="ni-body"><span>${esc(lbl)}</span>${descHtml}</span>${star}</div>`;
       });
       if (items) html += `<div class="nav-cat">${esc((sec.textContent||'').trim())}</div>` + items;  // категорию — только если есть непустые пункты
     });
