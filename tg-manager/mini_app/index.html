@@ -2111,6 +2111,8 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
     <span class="vfilter" data-f="edited_only" onclick="setVaultFilter('edited_only')">✏️ Изменённые</span>
   </div>
   <div id="vchatBody" style="flex:1;overflow-y:auto;padding:10px 12px;display:flex;flex-direction:column;gap:8px"></div>
+  <!-- Быстрые ответы: шаблоны одним касанием (screens/quick_replies.js) -->
+  <div id="vchatQuick" class="preset-row" style="display:none;flex-wrap:nowrap;overflow-x:auto;padding:6px 10px 0;margin:0"></div>
   <div id="vchatComposer" style="display:none;padding:8px 10px;border-top:1px solid var(--sep);gap:8px;align-items:flex-end">
     <textarea id="vchatInput" rows="1" onkeydown="sendOnCtrlEnter(event, sendVaultReply)" oninput="autoGrowInput(this)" placeholder="Ответить от вашего имени… (Ctrl+Enter — отправить)" style="flex:1;box-sizing:border-box;padding:9px 12px;border-radius:16px;background:var(--bg3);color:var(--text);border:1px solid var(--border-input);font-size:14px;resize:none;max-height:120px"></textarea>
     <button class="btn btn-p" style="padding:9px 16px;border-radius:16px" onclick="sendVaultReply()" aria-label="Отправить">➤</button>
@@ -8396,7 +8398,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
     <div class="field">
       <label>Текст сообщения</label>
       <textarea id="netbcText" rows="5" maxlength="4096" placeholder="Сообщение получат подписчики выбранных ботов…"></textarea>
-      <div class="field-note"><span id="netbcLen">0</span>/4096 · один текст — всем отмеченным ботам</div>
+      <div class="field-note"><span id="netbcLen">0</span>/4096 · один текст — всем отмеченным ботам · <a href="#" onclick="openTemplates('netbcText');return false" style="color:var(--accent)">📝 Вставить шаблон</a></div>
     </div>
     <!-- Выбор ботов: раньше рассылка уходила только ВСЕМ ботам сразу, хотя
          сервер (bot_ids) выбор умел давно — не было списка на экране. -->
@@ -8443,6 +8445,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
     <div class="field">
       <label>Текст сообщения</label>
       <textarea id="schText" rows="5" maxlength="4096" placeholder="Текст рассылки…"></textarea>
+      <div class="field-note"><a href="#" onclick="openTemplates('schText');return false" style="color:var(--accent)">📝 Вставить шаблон</a></div>
     </div>
     <div class="field">
       <label>Дата и время (по вашим часам)</label>
@@ -8474,8 +8477,9 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
     </div>
     <div class="field">
       <label>Текст шаблона</label>
+      <div class="preset-row" id="tplVars" aria-label="Вставить подстановку"></div>
       <textarea id="tplText" rows="6" maxlength="4096" placeholder="Поддерживается HTML: &lt;b&gt;жирный&lt;/b&gt;, &lt;i&gt;курсив&lt;/i&gt;…"></textarea>
-      <div class="field-note"><span id="tplLen">0</span>/4096 · варианты {Привет|Здравствуйте}, подстановки {name}</div>
+      <div class="field-note"><span id="tplLen">0</span>/4096 · кнопки выше вставляют подстановку: {name} — имя получателя, {А|Б} — один из вариантов</div>
       <div id="tplPreview" style="display:none;font-size:12px;color:var(--hint);background:var(--bg2);border-radius:8px;padding:8px;margin-top:6px;white-space:pre-wrap"></div>
       <span class="chip" style="margin-top:6px" onclick="previewTpl()">🎲 Как увидит получатель</span>
     </div>
@@ -8956,7 +8960,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
     <div class="field">
       <label>Текст поста</label>
       <textarea id="chPostText" rows="6" maxlength="4096" placeholder="Введите текст публикации…"></textarea>
-      <div class="field-note"><span id="chPostLen">0</span>/4096</div>
+      <div class="field-note"><span id="chPostLen">0</span>/4096 · <a href="#" onclick="openTemplates('chPostText');return false" style="color:var(--accent)">📝 Вставить шаблон</a></div>
     </div>
     <div class="field">
       <label>Когда опубликовать</label>
@@ -17056,10 +17060,13 @@ async function loadTemplates(more) {
     }
     txt('tplList', items.map(t=>{
       const txt2 = (t.template?.text || '').substring(0, 60);
+      const tr = (typeof tplTraits === 'function') ? tplTraits(t.template?.text) : {};
+      const badges = (tr.personal ? ' <span class="badge b-bl" title="Подставит имя получателя">👤 с именем</span>' : '')
+        + (tr.variants ? ' <span class="badge b-gy" title="Каждый раз — свой вариант текста">🎲 варианты</span>' : '');
       return `<div class="li">
         <div class="ava ava-green">📝</div>
         <div class="li-body" onclick="openTplEdit(${t.id})" style="cursor:pointer">
-          <div class="li-name">${esc(t.name||'Шаблон')}</div>
+          <div class="li-name">${esc(t.name||'Шаблон')}${badges}</div>
           <div class="li-sub">${esc(txt2)}${txt2.length===60?'…':''}</div>
         </div>
         <div class="li-right">
@@ -17092,12 +17099,7 @@ function previewTpl() {
   const raw = document.getElementById('tplText').value;
   const el = document.getElementById('tplPreview');
   if (!raw.trim()) { el.style.display='none'; return; }
-  let t = raw.replace(/\{name\}/g, 'Иван').replace(/\{first_name\}/g, 'Иван')
-    .replace(/\{last_name\}/g, 'Петров').replace(/\{username\}/g, '@ivan');
-  let guard = 0;
-  while (t.indexOf('{')>=0 && t.indexOf('}')>=0 && guard++ < 50) {
-    t = t.replace(/\{([^{}]+)\}/g, (m,g)=>{ const p=g.split('|'); return p[Math.floor(Math.random()*p.length)]; });
-  }
+  const t = tplFill(raw, {name: 'Иван Петров', username: 'ivan'});
   el.textContent = '🎲 ' + t + '\n(имя — пример; нажмите ещё раз для другого варианта)';
   el.style.display = 'block';
 }
@@ -17109,10 +17111,11 @@ function useTpl(id, name, text) {
     ta.value = text;
     // Обновить счётчик длины: у mpText/cmpText/bcastText свои input-слушатели.
     ta.dispatchEvent(new Event('input', {bubbles:true}));
-    const lenId = {bcastText:'bcastLen', mpText:'mpLen', cmpText:'cmpLen'}[TPL_TARGET];
+    const lenId = {bcastText:'bcastLen', mpText:'mpLen', cmpText:'cmpLen', netbcText:'netbcLen', chPostText:'chPostLen'}[TPL_TARGET];
     const lenEl = lenId && document.getElementById(lenId);
     if (lenEl) lenEl.textContent = text.length;
   }
+  if (typeof tplNoteUse === 'function') tplNoteUse(id);
   back();
   toast('📝 Шаблон «'+name+'» вставлен');
 }
@@ -17122,6 +17125,7 @@ async function deleteTpl(id, _el) {
   try {
     await api('/api/miniapp/template/'+id, {method:'DELETE'});
     toast('✅ Удалено'); loadTemplates();
+    if (typeof tplCachesReset === 'function') tplCachesReset();
   } catch(e) { toast('⚠️ '+errRu(e,'Ошибка')); }
 }
 
@@ -17136,6 +17140,7 @@ function openTplModal() {
   document.getElementById('tplBtn').disabled=false;
   document.getElementById('tplBtn').textContent='💾 Сохранить';
   document.getElementById('tplMbg').classList.add('show');
+  if (typeof tplRenderVarsBar === 'function') tplRenderVarsBar();
   tg.HapticFeedback?.impactOccurred('medium');
 }
 function closeTplModal() { document.getElementById('tplMbg').classList.remove('show'); }
@@ -17159,6 +17164,7 @@ async function saveTpl() {
     closeTplModal();
     tg.HapticFeedback?.notificationOccurred('success');
     toast('✅ Шаблон сохранён');
+    if (typeof tplCachesReset === 'function') tplCachesReset();
     loadTemplates();
   } catch(e) {
     errEl.textContent='Ошибка: '+errRu(e); errEl.style.display='block';
@@ -21180,6 +21186,7 @@ async function openVaultChat(chatId) {
   }
   const comp = document.getElementById('vchatComposer');
   comp.style.display = VAULT_CAN_REPLY ? 'flex' : 'none';
+  if (typeof vaultQuickReplies === 'function') vaultQuickReplies();
   await reloadVaultChat();
 }
 
@@ -38173,6 +38180,7 @@ function renderAudSegChart(segments) {
 <script src="screens/bot_mesh.js"></script>
 <script src="screens/crm_inbox.js"></script>
 <script src="screens/vault_dialogs.js"></script>
+<script src="screens/quick_replies.js"></script>
 <script src="screens/vault_connect.js"></script>
 <script src="screens/resource_actions.js"></script>
 <script src="screens/money_funnel.js"></script>
