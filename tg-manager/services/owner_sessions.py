@@ -152,11 +152,41 @@ def _when(dt) -> str:
         return ""
 
 
-def build_alert(meta: dict, kind: str, why: str, at=None) -> str:
+def owner_identity(owner_id: int | None) -> list[str]:
+    lines = []
+    if owner_id is not None:
+        uid = int(owner_id)
+        lines.append(f'Аккаунт владельца: <a href="tg://user?id={uid}">Telegram ID {uid}</a>')
+    lines.append("Это вход в панель Infragram, а не новое устройство подключённого Telegram-аккаунта.")
+    return lines
+
+
+def session_details(row: dict, owner_id: int) -> str:
+    """Public session fields only; never reveal sid or pairing credentials."""
+    lines = ["🔎 <b>Сведения о входе в Infragram</b>", *owner_identity(owner_id), "",
+             f"Сеанс: <b>№{int(row['id'])}</b>",
+             f"Устройство: {html.escape(row.get('device_label') or 'Неизвестное устройство')}",
+             f"Способ: {html.escape(KIND_RU.get(row.get('kind'), 'Неизвестно'))}",
+             f"Откуда: {html.escape(' · '.join(str(row.get(k) or '') for k in ('country', 'ip')).strip(' ·') or 'неизвестно')}",
+             f"Первый вход: {_when(row.get('created_at')) or 'неизвестно'}",
+             f"Последняя активность: {_when(row.get('last_seen_at')) or 'неизвестно'}",
+             "Состояние: " + ("завершён" if row.get('revoked_at') else "не завершён")]
+    return "\n".join(lines)
+
+
+async def get_session(pool, owner_id: int, session_id: int) -> dict | None:
+    row = await pool.fetchrow(
+        """SELECT id, kind, device_label, ip, country, created_at, last_seen_at, revoked_at
+           FROM owner_sessions WHERE owner_id=$1 AND id=$2""",
+        int(owner_id), int(session_id))
+    return dict(row) if row else None
+
+
+def build_alert(meta: dict, kind: str, why: str, at=None, *, owner_id: int | None = None) -> str:
     where = " · ".join(x for x in (meta.get("country"), meta.get("ip")) if x)
     head = ("🔐 <b>Вход в Infragram с нового устройства</b>" if why == "device"
             else "🌍 <b>Вход в Infragram из новой страны</b>")
-    lines = [head, "",
+    lines = [head, "", *owner_identity(owner_id),
              f"Устройство: <b>{html.escape(meta.get('label') or 'неизвестно')}</b>",
              f"Способ: {html.escape(KIND_RU.get(kind, kind))}"]
     if where:
@@ -230,8 +260,10 @@ async def _alert(pool, owner_id: int, sid: str, kind: str, meta: dict, why: str)
     from database import db
     bot = None
     try:
-        sess_id = await pool.fetchval("SELECT id FROM owner_sessions WHERE sid=$1", sid)
+        sess_id = await pool.fetchval("SELECT id FROM owner_sessions WHERE sid=$1 AND owner_id=$2", sid, owner_id)
         kb = InlineKeyboardBuilder()
+        kb.button(text="🔎 Посмотреть сеанс",
+                  callback_data=OwnSessCb(action="view", session_id=int(sess_id or 0)))
         kb.button(text="🚫 Это не я — завершить вход",
                   callback_data=OwnSessCb(action="kill", session_id=int(sess_id or 0)))
         kb.adjust(1)
@@ -239,7 +271,7 @@ async def _alert(pool, owner_id: int, sid: str, kind: str, meta: dict, why: str)
         # Секретное слово в хвост (services/owner_safeword): тревога без него —
         # подделка, по ссылке переходить нельзя.
         from services import owner_safeword
-        text = build_alert(meta, kind, why) + await owner_safeword.line(pool, owner_id)
+        text = build_alert(meta, kind, why, owner_id=owner_id) + await owner_safeword.line(pool, owner_id)
         await db.notify_if_enabled(pool, bot, owner_id, "restriction", text,
                                    reply_markup=kb.as_markup(),
                                    dedup_key=f"owner_login:{sid}")
@@ -253,7 +285,7 @@ async def _alert(pool, owner_id: int, sid: str, kind: str, meta: dict, why: str)
                 log.debug("owner_sessions: закрытие бота: %s", exc)
 
 
-async def list_sessions(pool, owner_id: int, limit: int = 50) -> list[dict]:
+async def list_sessions(pool, owner_id: int, limit: int = 50, *, strict: bool = False) -> list[dict]:
     try:
         rows = await pool.fetch(
             """SELECT id, sid, kind, device_label, ip, country, created_at,
@@ -263,6 +295,8 @@ async def list_sessions(pool, owner_id: int, limit: int = 50) -> list[dict]:
             int(owner_id), int(limit))
     except Exception as exc:
         log.warning("owner_sessions.list owner=%s: %s", owner_id, exc)
+        if strict:
+            raise
         return []
     return [dict(r) for r in rows]
 

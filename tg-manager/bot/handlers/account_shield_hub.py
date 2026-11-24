@@ -441,6 +441,30 @@ async def cb_shield_autopsy(callback: CallbackQuery, pool: asyncpg.Pool) -> None
 
 # ─── «Это не я» под тревогой о входе владельца ────────────────────────────────
 
+@router.callback_query(OwnSessCb.filter(F.action == "view"))
+async def cb_owner_session_view(callback: CallbackQuery, callback_data: OwnSessCb,
+                                pool: asyncpg.Pool) -> None:
+    from services import owner_sessions
+    await safe_answer(callback)
+    kb = InlineKeyboardBuilder()
+    try:
+        row = await owner_sessions.get_session(pool, callback.from_user.id,
+                                               int(callback_data.session_id or 0))
+    except Exception:
+        text = "⚠️ Не удалось загрузить сеанс. Попробуйте ещё раз."
+        kb.button(text="🔄 Повторить", callback_data=callback_data)
+    else:
+        if row is None:
+            text = "Сеанс не найден или принадлежит другому владельцу."
+        else:
+            text = owner_sessions.session_details(row, callback.from_user.id)
+            if not row.get("revoked_at"):
+                kb.button(text="🚫 Это не я — завершить вход",
+                          callback_data=OwnSessCb(action="kill", session_id=int(row["id"])))
+    kb.adjust(1)
+    await callback.message.answer(text, parse_mode="HTML", reply_markup=kb.as_markup())
+
+
 @router.callback_query(OwnSessCb.filter(F.action == "kill"))
 async def cb_owner_session_kill(callback: CallbackQuery, callback_data: OwnSessCb,
                                 pool: asyncpg.Pool) -> None:

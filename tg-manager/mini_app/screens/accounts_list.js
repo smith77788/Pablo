@@ -70,7 +70,33 @@ function _accUnfiltered() {
     && !ACC_POOL_FILTER && !ACC_GEO_FILTER && !ACC_TAG_FILTER;
 }
 
+// Вход владельца в Infragram относится ко всему приложению, не к строке флота.
+async function loadAccOwnerSessions() {
+  const box = document.getElementById('accOwnerSessions');
+  const status = document.getElementById('accOwnerSessionsStatus');
+  if (!box || !status) return;
+  const sequence = (Number(box.dataset.request) || 0) + 1;
+  box.dataset.request = String(sequence);
+  status.textContent = 'Проверка входов…';
+  try {
+    const data = await api('/api/miniapp/owner/sessions');
+    if (box.dataset.request !== String(sequence)) return;
+    if (data.unavailable || !Array.isArray(data.sessions)) throw new Error('Недоступно');
+    const live = data.sessions.filter(session => !session.revoked);
+    const count = data.tracked ? live.filter(session => !session.current).length : live.length;
+    const prefix = data.sessions.length >= Number(data.limit || 50) ? 'не менее ' : '';
+    status.textContent = data.tracked
+      ? 'Других незавершённых входов: ' + prefix + count + '. Проверьте устройства.'
+      : 'Незавершённых входов: ' + prefix + count + '. Текущий вход не распознан.';
+  } catch (error) {
+    if (box.dataset.request !== String(sequence)) return;
+    status.textContent = 'Не удалось проверить входы. Обновите проверку или откройте список входов.';
+  }
+
+}
+
 async function loadAccounts() {
+  loadAccOwnerSessions();
   fleetToolsInit('accounts');
   loadAccTags();
   // Экран открывается последними данными, а не спиннером: ответ по сотне
@@ -139,6 +165,7 @@ async function loadAccounts() {
 // Перезагрузить срез с сервера (offset=0). Серверная фильтрация — срез считается
 // по ВСЕЙ таблице, не по загруженным 100.
 async function reloadAccounts() {
+  loadAccOwnerSessions();
   try {
     const ad = await api(_accQuery(0));
     catalogResourceMenus.account = ad.resource_menu === true;

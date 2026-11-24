@@ -3047,7 +3047,10 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         cur = _current_sid(request)
         # Потолок назван здесь: экран показывает последние 50 входов и
         # говорит об этом сам (как список связанных браузеров).
-        rows = await _os.list_sessions(pool, uid, limit=50)
+        try:
+            rows = await _os.list_sessions(pool, uid, limit=50, strict=True)
+        except Exception:
+            return _err("Не удалось загрузить входы в Infragram. Попробуйте ещё раз.", 503)
         return _json_resp({"limit": 50, "sessions": [
             {"id": r["id"], "kind": r["kind"], "kind_ru": _os.KIND_RU.get(r["kind"], r["kind"]),
              "label": r["device_label"] or "Неизвестное устройство",

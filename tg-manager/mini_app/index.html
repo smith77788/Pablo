@@ -1824,6 +1824,12 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
     </div>
   </div>
   <div class="sb">
+    <div class="card" id="accOwnerSessions" style="margin:0 0 12px;padding:12px">
+      <div style="font-weight:600">🔐 Входы в Infragram</div>
+      <div id="accOwnerSessionsStatus" role="status" aria-live="polite" style="font-size:13px;margin:6px 0">Проверка входов…</div>
+      <div style="font-size:12px;color:var(--hint);margin-bottom:8px">Это входы владельца в приложение. Устройства Telegram-аккаунтов смотрите в карточке нужного аккаунта.</div>
+      <div class="actions" style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn btn-o" onclick="openDevices()">Посмотреть входы</button><button class="btn btn-s" onclick="loadAccOwnerSessions()">Обновить</button></div>
+    </div>
     <div class="copilot-wrap" style="display:none;margin:0 0 10px">
       <div class="sec-row" style="margin:0 0 8px"><div class="sec" style="margin:0">🧭 Что делать дальше</div><span class="sec-btn" onclick="loadNextActions(true)">Обновить</span></div>
       <div class="copilot-list"></div>
@@ -23377,6 +23383,7 @@ async function resolveConflict(id, resolution, value) {
 // устройства и откуда. Чужой вход завершается здесь же; о входе с нового
 // устройства приходит сообщение в бот.
 function ownSessHtml(s) {
+  if (s && s.unavailable) return '<div class="sec">Входы в Infragram</div><div style="padding:12px">Не удалось проверить входы. <button class="btn btn-o" onclick="openDevices()">Повторить</button></div>';
   const list = (s && s.sessions) || [];
   const live = list.filter(x => !x.revoked);
   const others = live.filter(x => !x.current);
@@ -23500,6 +23507,7 @@ async function ownSessRevoke(id) {
     await api('/api/miniapp/owner/sessions/revoke', {method:'POST', body:JSON.stringify({id})});
     tg.HapticFeedback?.notificationOccurred('success');
     toast('🚪 Вход завершён');
+    loadAccOwnerSessions();
     openDevices();
   } catch(e) { toast('⚠️ '+errRu(e,'Не удалось завершить вход')); }
 }
@@ -23510,6 +23518,7 @@ async function ownSessRevokeOthers() {
     const r = await api('/api/miniapp/owner/sessions/revoke', {method:'POST', body:JSON.stringify({others:true})});
     tg.HapticFeedback?.notificationOccurred('success');
     toast('🚪 Завершено входов: ' + Number(r.revoked||0));
+    loadAccOwnerSessions();
     openDevices();
   } catch(e) { toast('⚠️ '+errRu(e,'Не удалось завершить входы')); }
 }
@@ -23566,7 +23575,7 @@ async function openDevices() {
   try {
     const [d, s, g, w] = await Promise.all([
       api('/api/miniapp/devices'),
-      api('/api/miniapp/owner/sessions').catch(() => ({sessions: []})),
+      api('/api/miniapp/owner/sessions').catch(() => ({unavailable: true})),
       api('/api/miniapp/owner/guard').catch(() => ({has_pin: false})),
       api('/api/miniapp/owner/safeword').catch(() => ({phrase: ''})),
     ]);
@@ -23615,6 +23624,7 @@ async function revokeDevice(id) {
   try {
     const r = await api('/api/miniapp/devices/revoke', {method:'POST', body:JSON.stringify({id})});
     toast(r.ok ? 'Доступ отозван' : 'Это устройство уже было отозвано');
+    loadAccOwnerSessions();
     openDevices();
   } catch(e) { toast('⚠️ '+errRu(e,'Ошибка')); }
 }
