@@ -28,9 +28,11 @@ function sumSetDays(days) {
   loadSummary.lastData = null;
   loadSummary();
 }
+// Переключатель периода стоит ВНУТРИ блока итогов, прямо под заголовком:
+// отдельной группой под блоком он выпадал из отступов экрана (прилипал к
+// левому краю) и читался как чужой раздел, а не как настройка этих чисел.
 function _sumPeriodRow(days) {
-  return UI.group('Период', _SUM_PERIODS.map(d =>
-    UI.button((d === days ? '✓ ' : '') + d + ' дней', 'sumSetDays', d)).join(' '));
+  return UI.segmented(_SUM_PERIODS.map(d => ({ value: d, label: d + ' дней' })), days, 'sumSetDays');
 }
 
 // Деньги в разных валютах не складываются: крупным числом показываем основную
@@ -138,8 +140,8 @@ function renderSummary(d) {
     ? { label: 'Все ' + d.attention_total + ' →', fn: 'sumOpen', args: ['attention'] } : null;
   const attention = UI.group('Требует внимания', att, more);
   wrap.innerHTML =
-    UI.block('📊 Итоги за ' + days + ' дней', statsHtml + attention,
-      { label: 'Подробнее →', fn: 'sumOpen', args: ['attention'] }) + _sumPeriodRow(days);
+    UI.block('📊 Итоги за ' + days + ' дней', _sumPeriodRow(days) + statsHtml + attention,
+      { label: 'Подробнее →', fn: 'sumOpen', args: ['attention'] });
 }
 
 async function loadSummary() {

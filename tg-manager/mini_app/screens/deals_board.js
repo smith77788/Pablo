@@ -50,7 +50,7 @@ function _dkStyles() {
     '.dk-colhdr{padding:10px 12px 8px;border-bottom:1px solid var(--sep)}' +
     '.dk-colname{font-size:13px;font-weight:700;display:flex;align-items:center;gap:6px}' +
     '.dk-cnt{font-size:11px;font-weight:600;color:var(--hint);background:var(--bg-input);border-radius:10px;padding:1px 7px}' +
-    '.dk-add{margin-left:auto;width:24px;height:24px;border-radius:50%;background:var(--bg-input);color:var(--accent);' +
+    '.dk-add{margin-left:auto;width:36px;height:36px;border-radius:50%;background:var(--bg-input);color:var(--accent);' +
       'display:inline-flex;align-items:center;justify-content:center;font-size:15px;line-height:1;cursor:pointer;flex:0 0 auto}' +
     '.dk-add:active{opacity:.7}' +
     '.dk-sum{font-size:11px;color:var(--hint);margin-top:3px;min-height:14px}' +
@@ -250,7 +250,7 @@ function _dkRender() {
     return '<div class="dk-col" data-stage="' + esc(col.stage) + '">' +
       '<div class="dk-colhdr" style="background:' + (DK_TONE[col.stage] || 'transparent') + ';border-radius:var(--radius-lg) var(--radius-lg) 0 0">' +
         '<div class="dk-colname">' + esc(col.label) + ' <span class="dk-cnt">' + num(total) + '</span>' +
-          '<span class="dk-add" role="button" tabindex="0" aria-label="Добавить сделку в «' + esc(col.label) + '»" ' +
+          '<span class="dk-add icon-tap" role="button" tabindex="0" aria-label="Добавить сделку в «' + esc(col.label) + '»" ' +
             'title="Добавить сюда" onclick="dkAddToStage(\'' + esc(col.stage) + '\')">＋</span></div>' +
         '<div class="dk-sum">' + _dkMoney(col.by_currency) + '</div>' +
       '</div>' +

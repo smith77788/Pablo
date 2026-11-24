@@ -77,9 +77,17 @@ const UI = (() => {
   function sections(items) { return `<div class="ui-sections">${items.map(sectionTile).join('')}</div>`; }
   function ok(text) { return `<div class="ui-ok"><span>✅</span><span>${uiEsc(text)}</span></div>`; }
   function uiEmpty(text) { return `<div class="ui-empty">${uiEsc(text)}</div>`; }
+  // Переключатель из 2–4 вариантов (период, режим показа): активный подсвечен
+  // и помечен aria-pressed, нажатие зовёт fn(value). Кнопки по 32px — пальцем
+  // попадают и на телефоне.
+  function segmented(options, active, fn) {
+    return `<div class="ui-seg" role="group">` + options.map(o =>
+      `<button type="button" class="ui-seg-btn${o.value === active ? ' on' : ''}" aria-pressed="${o.value === active}" ` +
+      `onclick="${call(fn, o.value)}">${uiEsc(o.label)}</button>`).join('') + `</div>`;
+  }
   function skeleton(n) { return `<div class="ui-stats">${'<div class="ui-skel"></div>'.repeat(n || 4)}</div>`; }
   // Внутренние имена с префиксом ui*: function esc/num уже объявлены в
   // index.html, и одноимённые объявления ловит test_miniapp_no_dup_functions.
   return { esc: uiEsc, call, num: uiNum, block, group, stat, stats, alert, button, sectionTile, sections, ok,
-           empty: uiEmpty, skeleton };
+           empty: uiEmpty, skeleton, segmented };
 })();

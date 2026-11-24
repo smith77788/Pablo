@@ -523,6 +523,10 @@ body.wide .ib-row.on{background:var(--accent-soft)}
 .sec{padding:16px 16px 6px;font-size:11px;font-weight:700;color:var(--hint);text-transform:uppercase;letter-spacing:.08em;display:flex;align-items:center;gap:6px}
 .sec-row{display:flex;align-items:center;justify-content:space-between;padding:12px 16px 6px}
 .sec-row .sec{padding:0}
+/* Строка «что здесь делают» под заголовком раздела каталога. Отступ слева —
+   как у .sec (16px): с прежним «padding:0 2px» подпись прилипала к краю экрана
+   и не стояла под своим заголовком. */
+.sec-desc[data-section]{font-size:12px;line-height:1.4;color:var(--hint);margin:-2px 0 10px;padding:0 16px}
 /* Ссылка раздела («Подробнее →», «Все →») — строка высотой 18px, попасть в неё
    пальцем трудно. Отрицательные поля гасят добавленный паддинг, поэтому
    область нажатия вырастает до 32px, а вёрстка не сдвигается ни на пиксель. */
@@ -2447,7 +2451,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 
     <!-- 📊 Итоги — состав раздела: services/task_sections.py -->
     <div class="sec" data-section="overview">📊 Итоги</div>
-    <div class="sec-desc" data-section="overview" style="font-size:11px;opacity:.6;margin:-6px 0 8px;padding:0 2px">Результат за неделю, операции, аудитория и конкуренты.</div>
+    <div class="sec-desc" data-section="overview">Результат за неделю, операции, аудитория и конкуренты.</div>
     <div class="mgmt-grid" data-section="overview">
       <!-- «Дашборд» и «Сводка» — вкладки одного модуля (SCREEN_MODULES.overview). -->
       <div class="mgmt-tile" onclick="openUnifiedDashboard()">
@@ -2475,7 +2479,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 
     <!-- 👥 Аудитория — состав раздела: services/task_sections.py -->
     <div class="sec" data-section="audience">👥 Аудитория</div>
-    <div class="sec-desc" data-section="audience" style="font-size:11px;opacity:.6;margin:-6px 0 8px;padding:0 2px">Собрать людей, вести базу контактов и приглашать в свои каналы.</div>
+    <div class="sec-desc" data-section="audience">Собрать людей, вести базу контактов и приглашать в свои каналы.</div>
     <div class="mgmt-grid" data-section="audience">
       <div class="mgmt-tile" onclick="openNewUsers()">
         <div class="mgmt-tile-ico">🆕</div>
@@ -2530,7 +2534,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 
     <!-- ✉️ Сообщения — состав раздела: services/task_sections.py -->
     <div class="sec" data-section="messages">✉️ Сообщения</div>
-    <div class="sec-desc" data-section="messages" style="font-size:11px;opacity:.6;margin:-6px 0 8px;padding:0 2px">Рассылки, публикации, расписание, воронки и шаблоны текста.</div>
+    <div class="sec-desc" data-section="messages">Рассылки, публикации, расписание, воронки и шаблоны текста.</div>
     <div class="mgmt-grid" data-section="messages">
       <!-- «Рассылки» — один модуль. «Публикация / рассылка», «Единая кампания»,
            «Рассылка по сети ботов», «Расписание» и «A/B Тесты» были отдельными
@@ -2570,7 +2574,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 
     <!-- 📡 Каналы и боты — состав раздела: services/task_sections.py -->
     <div class="sec" data-section="channels">📡 Каналы и боты</div>
-    <div class="sec-desc" data-section="channels" style="font-size:11px;opacity:.6;margin:-6px 0 8px;padding:0 2px">Свои каналы, группы и боты: создать, оформить, продвинуть в поиске.</div>
+    <div class="sec-desc" data-section="channels">Свои каналы, группы и боты: создать, оформить, продвинуть в поиске.</div>
     <div class="mgmt-grid" data-section="channels">
       <div class="mgmt-tile" onclick="goTab('bots')">
         <div class="mgmt-tile-ico">🤖</div>
@@ -2647,7 +2651,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 
     <!-- 💰 Продажи — состав раздела: services/task_sections.py -->
     <div class="sec" data-section="sales">💰 Продажи</div>
-    <div class="sec-desc" data-section="sales" style="font-size:11px;opacity:.6;margin:-6px 0 8px;padding:0 2px">Клиенты, сделки, ИИ-менеджер продаж и оплаты.</div>
+    <div class="sec-desc" data-section="sales">Клиенты, сделки, ИИ-менеджер продаж и оплаты.</div>
     <div class="mgmt-grid" data-section="sales">
       <!-- Один «CRM»: клиенты, сделки, воронка денег, когорты (SCREEN_MODULES.crm). -->
       <div class="mgmt-tile" onclick="openCrmHub()">
@@ -2684,7 +2688,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 
     <!-- 📱 Аккаунты — состав раздела: services/task_sections.py -->
     <div class="sec" data-section="accounts">📱 Аккаунты</div>
-    <div class="sec-desc" data-section="accounts" style="font-size:11px;opacity:.6;margin:-6px 0 8px;padding:0 2px">Telegram-аккаунты, прокси, прогрев и защита от бана.</div>
+    <div class="sec-desc" data-section="accounts">Telegram-аккаунты, прокси, прогрев и защита от бана.</div>
     <div class="mgmt-grid" data-section="accounts">
       <div class="mgmt-tile" onclick="goTab('accounts')">
         <div class="mgmt-tile-ico">📱</div>
@@ -2753,7 +2757,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 
     <!-- ⚙️ Настройки — состав раздела: services/task_sections.py -->
     <div class="sec" data-section="settings">⚙️ Настройки</div>
-    <div class="sec-desc" data-section="settings" style="font-size:11px;opacity:.6;margin:-6px 0 8px;padding:0 2px">Тариф, интеграции, ключи API и рабочие пространства.</div>
+    <div class="sec-desc" data-section="settings">Тариф, интеграции, ключи API и рабочие пространства.</div>
     <div class="mgmt-grid" data-section="settings">
       <div class="mgmt-tile" onclick="openSettings()">
         <div class="mgmt-tile-ico">⚙️</div>
@@ -2780,7 +2784,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 
     <!-- 🧪 Лаборатория — состав раздела: services/task_sections.py -->
     <div class="sec" data-section="lab" data-lab="1">🧪 Лаборатория</div>
-    <div class="sec-desc" data-section="lab" style="font-size:11px;opacity:.6;margin:-6px 0 8px;padding:0 2px">Экспериментальные инструменты. Работают, но ещё не стали частью основных разделов.</div>
+    <div class="sec-desc" data-section="lab">Экспериментальные инструменты. Работают, но ещё не стали частью основных разделов.</div>
     <div class="mgmt-grid" data-section="lab">
       <div class="mgmt-tile" onclick="openGhost()">
         <div class="mgmt-tile-ico">👻</div>
@@ -10422,6 +10426,12 @@ function liveOpRows(items) {
     document.querySelectorAll('[data-op-bar="' + id + '"]').forEach(el => {
       el.style.width = pct + '%';
     });
+    // Оценка «сколько ещё» пересчитывается вместе с числами, иначе она
+    // застывала бы на момент открытия экрана.
+    document.querySelectorAll('[data-op-eta="' + id + '"]').forEach(el => {
+      const t = _opEta(done, total, el.getAttribute('data-op-start'));
+      el.textContent = t ? ' · ' + t : '';
+    });
   });
 }
 
@@ -15639,7 +15649,7 @@ function renderOps() {
           <div class="ava ava-orange">⚙️</div>
           <div class="li-body">
             <div class="li-name">${esc(o.label||opRu(o.op_type)||'операция')}${(o.scheduled_for&&new Date(o.scheduled_for)>new Date())?' <span class="badge b-or">⏰</span>':''}</div>
-            <div class="li-sub">${(o.scheduled_for&&new Date(o.scheduled_for)>new Date())?'⏰ запланировано на '+new Date(o.scheduled_for).toLocaleString('ru-RU'):`<span data-op-cnt="${o.id}">${num(dDone)+'/'+num(o.total_items||0)}</span> · `+ago(o.created_at)}</div>
+            <div class="li-sub">${(o.scheduled_for&&new Date(o.scheduled_for)>new Date())?'⏰ запланировано на '+new Date(o.scheduled_for).toLocaleString('ru-RU'):`<span data-op-cnt="${o.id}">${num(dDone)+'/'+num(o.total_items||0)}</span>`+_opEtaSpan(o)+' · '+ago(o.created_at)}</div>
           </div>
           <div style="display:flex;align-items:center;gap:6px">
             <span class="badge ${bc}">${bl}</span>
@@ -15693,7 +15703,7 @@ async function openOpDetail(opId) {
       <div class="lst" style="margin:12px 16px 0">
         <div class="row"><div class="row-body"><div class="row-name">Тип</div><div class="row-val">${esc(o.label || opRu(o.op_type) || '')}</div></div></div>
         <div class="row"><div class="row-body"><div class="row-name">Статус</div><div class="row-val"><span class="badge ${bc}">${bl}</span></div></div></div>
-        <div class="row"><div class="row-body"><div class="row-name">Прогресс</div><div class="row-val"><span data-op-cnt="${o.id}">${num(dDone)} / ${num(o.total_items||0)}</span> (<span data-op-pct="${o.id}">${pct}</span>%)</div></div></div>
+        <div class="row"><div class="row-body"><div class="row-name">Прогресс</div><div class="row-val"><span data-op-cnt="${o.id}">${num(dDone)} / ${num(o.total_items||0)}</span> (<span data-op-pct="${o.id}">${pct}</span>%)${_opEtaSpan(o)}</div></div></div>
         <div class="row"><div class="row-body"><div class="row-name">Создано</div><div class="row-val">${o.created_at?new Date(o.created_at).toLocaleString('ru-RU'):''}</div></div></div>
         ${(o.scheduled_for&&new Date(o.scheduled_for)>new Date())?`<div class="row"><div class="row-body"><div class="row-name">⏰ Запланировано</div><div class="row-val" style="color:var(--orange)">${new Date(o.scheduled_for).toLocaleString('ru-RU')}</div></div></div>`:''}
         ${o.started_at?`<div class="row"><div class="row-body"><div class="row-name">Начато</div><div class="row-val">${new Date(o.started_at).toLocaleString('ru-RU')}</div></div></div>`:''}
@@ -15842,6 +15852,25 @@ function _opDuration(sec) {
   if (h) return h+' ч '+m+' мин';
   if (m) return m+' мин '+s+' с';
   return s+' с';
+}
+// Сколько ещё ждать: по средней скорости с начала прогона. Владелец видел
+// «12/340» и не знал, ждать пять минут или до вечера. Оценка честно
+// грубая («≈», паузы от FloodWait в неё входят) и не показывается, пока
+// данных мало: по первым двум целям за десять секунд она врала бы в разы.
+function _opEta(done, total, startedAt, nowMs) {
+  done = +done || 0; total = +total || 0;
+  const t0 = startedAt ? Date.parse(startedAt) : NaN;
+  if (!(total > done) || done < 3 || !isFinite(t0)) return '';
+  const sec = ((nowMs || Date.now()) - t0) / 1000;
+  if (!(sec >= 30)) return '';
+  const left = (total - done) * sec / done;
+  if (left < 60) return '≈ меньше минуты';
+  return '≈ ещё ' + _opDuration(Math.round(left / 60) * 60).replace(/ 0 (мин|с)$/, '');
+}
+function _opEtaSpan(o) {
+  if (o.status !== 'running') return '';
+  const t = _opEta(o.done_items, o.total_items, o.started_at);
+  return `<span data-op-eta="${o.id}" data-op-start="${esc(o.started_at || '')}">${t ? ' · ' + esc(t) : ''}</span>`;
 }
 function _opSpeed(done, sec) {
   const perMin = done / Math.max(sec/60, 1/60);
