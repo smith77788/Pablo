@@ -153,7 +153,19 @@
   }
   function rgba(h, a) { var c = rgb(h); return 'rgba(' + c[0] + ',' + c[1] + ',' + c[2] + ',' + a + ')'; }
 
+  // Ручной выбор владельца сильнее темы клиента: в Telegram тема одна на всё
+  // приложение, а мини-апп у него открыт часами — работать в светлой теме
+  // ночью (или наоборот) человек не обязан.
+  var THEME_KEY = 'infragram_theme';
+  function savedScheme() {
+    try {
+      var v = localStorage.getItem(THEME_KEY);
+      return (v === 'light' || v === 'dark') ? v : '';
+    } catch (_) { return ''; }
+  }
   function scheme() {
+    var own = savedScheme();
+    if (own) return own;
     if (inTelegram() && (tg.colorScheme === 'light' || tg.colorScheme === 'dark')) return tg.colorScheme;
     return (mq && mq.matches) ? 'dark' : (mq ? 'light' : 'dark');
   }
@@ -232,6 +244,15 @@
 
   window.__applyTheme = apply;
   window.__themeScheme = function () { return root.getAttribute('data-theme') || 'dark'; };
+  // 'auto' — снять свой выбор и снова слушать клиента.
+  window.__setTheme = function (mode) {
+    try {
+      if (mode === 'light' || mode === 'dark') localStorage.setItem(THEME_KEY, mode);
+      else localStorage.removeItem(THEME_KEY);
+    } catch (_) {}
+    apply();
+  };
+  window.__themeMode = function () { return savedScheme() || 'auto'; };
   apply();
   try { if (tg && tg.onEvent) tg.onEvent('themeChanged', apply); } catch (_) {}
   try {
@@ -8203,6 +8224,14 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
     <!-- Валюта жила только в «Когортах и LTV», а часовой пояс брался молча у
          телефона — «Тихие часы» на компьютере в другом поясе работали не в те
          часы. Выгрузка и удаление своих данных были только командами бота. -->
+    <div class="sec" style="margin-top:16px">Оформление</div>
+    <div class="card" style="padding:12px 16px">
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;padding:4px 0">
+        <span style="font-size:14px">🎨 Тема</span>
+        <div id="set-theme"></div>
+      </div>
+      <div style="font-size:11px;color:var(--hint)">«Авто» — как в Telegram. Выбор сохраняется на этом устройстве.</div>
+    </div>
     <div class="sec" style="margin-top:16px">Регион и деньги</div>
     <div class="card" style="padding:12px 16px">
       <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;padding:8px 0;border-bottom:1px solid var(--sep)">
@@ -35605,6 +35634,25 @@ async function mirrorDisconnect() {
   }
 }
 
+// Переключатель темы. Рисуем из кода, а не разметкой: подпись выбранного
+// пункта должна совпадать с тем, что реально применено, а применяет тему
+// бутстрап в начале документа (он же знает про «авто»).
+function renderThemeRow() {
+  const box = document.getElementById('set-theme');
+  if (!box || typeof UI === 'undefined' || !UI.segmented) return;
+  const mode = (typeof window.__themeMode === 'function') ? window.__themeMode() : 'auto';
+  box.innerHTML = UI.segmented(
+    [{ value: 'auto', label: 'Авто' }, { value: 'light', label: '☀️ Светлая' },
+     { value: 'dark', label: '🌙 Тёмная' }],
+    mode, 'setAppTheme');
+}
+
+function setAppTheme(mode) {
+  if (typeof window.__setTheme === 'function') window.__setTheme(mode);
+  renderThemeRow();
+  try { tg.HapticFeedback?.impactOccurred('light'); } catch(_) {}
+}
+
 async function openSettings() {
   push('s-settings');
   const uid = window._tgUid || (tg.initDataUnsafe?.user?.id);
@@ -35626,6 +35674,7 @@ async function openSettings() {
   try { renderFullscreenRow(); } catch(_) {}
   try { loadMirror(); } catch(_) {}
   try { renderFormMemoryStatus(); } catch(_) {}
+  try { renderThemeRow(); } catch(_) {}
   document.getElementById('m-settings-val').textContent = '⚙️';
   try {
     // Источник правды — бэкенд (notification_settings + get_proxy_policy). Раньше
