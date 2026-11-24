@@ -1815,6 +1815,27 @@ def _geo_code(raw) -> str:
     return cc if len(cc) == 2 and cc.isalpha() and cc.isascii() else ""
 
 
+def _page_meta(offset: int, limit: int, shown: int, total=None) -> dict:
+    """Конверт страницы — ОДНА форма на все списки мини-аппа.
+
+    Экран должен уметь ответить на два вопроса: сколько строк он показывает и
+    есть ли ещё. Раньше каждый список отвечал по-своему (где-то `has_more`,
+    где-то `shown`, где-то ничего), и экраны, у которых формы не было вовсе,
+    рисовали первые тридцать строк как «всё, что есть»: тридцать из восьмидесяти
+    на экране выглядят ровно как восемьдесят из восьмидесяти.
+
+    `total=None` допустим — не у каждого списка счёт по всей выборке дёшев. Тогда
+    «есть ещё» определяется по полной странице, и фронт (UI.more) пишет только
+    показанное, не выдумывая итог.
+    """
+    has_more = (offset + shown) < int(total) if total is not None else shown >= limit
+    out = {"offset": int(offset), "limit": int(limit), "shown": int(shown),
+           "has_more": bool(has_more)}
+    if total is not None:
+        out["total"] = int(total)
+    return out
+
+
 def _list_limit(request: web.Request, default: int, maximum: int) -> int:
     """Потолок списка: по умолчанию короткий, по просьбе экрана — больший.
 
@@ -9162,22 +9183,37 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             return _err("Не удалось сохранить", 500)
 
     async def payments_history(request: web.Request) -> web.Response:
+        """История оплат владельца, страницами и с общим числом.
+
+        Было `LIMIT 20` без слова о том, что платежей больше: двадцать первая
+        оплата для владельца не существовала, а именно её он и ищет, когда
+        сверяет списанное с продлениями. Счёт по всей истории здесь дёшев
+        (строк единицы-десятки) и нужен: «показано 20 из 34» — это ответ, а
+        «показано 20» — нет.
+        """
         uid = _get_uid(request)
         if not uid:
             return _err("Unauthorized", 401)
+        limit = _list_limit(request, 20, 200)
+        offset = _list_offset(request)
         try:
+            total = await _safe_count(
+                pool, "SELECT COUNT(*) FROM payments WHERE user_id=$1", uid)
             rows = await pool.fetch(
                 """SELECT plan, period_months, amount_usd, currency, status, created_at
                    FROM payments
                    WHERE user_id=$1
-                   ORDER BY created_at DESC
-                   LIMIT 20""",
-                uid,
+                   ORDER BY created_at DESC, id DESC
+                   LIMIT $2 OFFSET $3""",
+                uid, limit, offset,
             )
-            return _json_resp([dict(r) for r in rows])
+            return _json_resp({
+                "items": [dict(r) for r in rows],
+                "page": _page_meta(offset, limit, len(rows), total),
+            })
         except Exception as e:
             log.warning("payments_history uid=%d: %s", uid, e)
-            return _json_resp([])
+            return _json_resp({"items": [], "page": _page_meta(offset, limit, 0, 0)})
 
     async def referral(request: web.Request) -> web.Response:
         uid = _get_uid(request)

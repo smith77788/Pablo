@@ -15005,6 +15005,7 @@ function chGrowthHtml(g) {
 // их всего, есть срез по статусу (неудачные ищут именно так) и догрузка.
 const BCAST_PAGE = 30;
 let BCAST_ROWS = [], BCAST_TOTAL = 0, BCAST_COUNTS = {}, BCAST_FILTER = '', BCAST_LOADING = false;
+let PAY_ROWS = [], PAY_PAGE = null;   // история оплат: страницы и конверт
 let BCAST_SEARCH = '', _bcastSearchT = null, BCAST_FOUND = null;
 function _bcastQuery(offset, limit) {
   let u = '/api/miniapp/broadcasts?limit=' + (limit || BCAST_PAGE) + '&offset=' + offset;
@@ -36001,28 +36002,49 @@ function renderBillingPlans() {
       </div>
     `).join(''));
 }
-async function _billingHistory() {
+async function _billingHistory(more) {
+  // История оплат листается. Раньше экран брал первые двадцать строк и
+  // показывал их как всю историю: владелец, сверяющий списания с продлениями,
+  // не мог дойти до двадцать первой оплаты вообще.
+  if (!more) { PAY_ROWS = []; PAY_PAGE = null; }
   try {
-    const hist = await api('/api/miniapp/payments');
-    if (!hist || !hist.length) {
-      txt('billingHistory', empty('💳','Платежей нет','История оплат появится здесь'));
-    } else {
-      txt('billingHistory', hist.map(p=>`
-        <div class="row">
-          <div class="row-ico" style="background:rgba(52,211,153,.12)">💳</div>
-          <div class="row-body">
-            <div class="row-name">${esc(({paid:'Подписка',starter:'Подписка',pro:'Подписка',enterprise:'Подписка',strike:'Массовые жалобы',host_server:'Аренда сервера'})[p.plan]||p.plan||'—')}${Number(p.period_months)>0?' · '+p.period_months+' мес.':''}</div>
-            <div class="row-val">${p.currency||'—'} · $${p.amount_usd||0}</div>
-            <div class="row-val" style="color:var(--hint)">${ago(p.created_at)}</div>
-          </div>
-          <div class="row-right"><span class="badge ${p.status==='confirmed'?'b-gr':'b-gy'}">${({confirmed:'✓ Оплачен',pending:'⏳ Ждёт оплаты',confirming:'⏳ Подтверждается',expired:'Истёк',failed:'Ошибка'})[p.status]||'—'}</span></div>
-        </div>
-      `).join(''));
-    }
+    const d = await api('/api/miniapp/payments?limit=20&offset=' + PAY_ROWS.length);
+    PAY_ROWS = PAY_ROWS.concat(d.items || []);
+    PAY_PAGE = d.page || null;
+    _billingHistoryRender();
   } catch(e) {
+    if (PAY_ROWS.length) { toast('⚠️ ' + errRu(e, 'Не удалось подгрузить')); return; }
     txt('billingHistory', empty('⚠️','Ошибка загрузки истории',errRu(e),{label:'↺ Повторить',fn:'openBilling()'}));
   }
 }
+
+function _billingHistoryRender() {
+  if (!PAY_ROWS.length) {
+    txt('billingHistory', empty('💳','Платежей нет','История оплат появится здесь'));
+    return;
+  }
+  const PLANS = {paid:'Подписка',starter:'Подписка',pro:'Подписка',enterprise:'Подписка',
+                 strike:'Массовые жалобы',host_server:'Аренда сервера'};
+  const ST = {confirmed:'✓ Оплачен',pending:'⏳ Ждёт оплаты',confirming:'⏳ Подтверждается',
+              expired:'Истёк',failed:'Ошибка'};
+  txt('billingHistory', PAY_ROWS.map(p => `
+        <div class="row">
+          <div class="row-ico" style="background:rgba(52,211,153,.12)">💳</div>
+          <div class="row-body">
+            <div class="row-name">${esc(PLANS[p.plan]||p.plan||'—')}${Number(p.period_months)>0?' · '+esc(p.period_months)+' мес.':''}</div>
+            <div class="row-val">${esc(p.currency||'—')} · $${esc(p.amount_usd||0)}</div>
+            <div class="row-val" style="color:var(--hint)">${esc(ago(p.created_at))}</div>
+          </div>
+          <div class="row-right"><span class="badge ${p.status==='confirmed'?'b-gr':'b-gy'}">${esc(ST[p.status]||'—')}</span></div>
+        </div>
+      `).join('')
+    + UI.more({shown: PAY_ROWS.length, total: PAY_PAGE ? PAY_PAGE.total : null,
+               maybeMore: !!(PAY_PAGE && PAY_PAGE.has_more), fn: 'billingHistoryMore',
+               allLabel: 'Показаны все платежи'}));
+}
+
+function billingHistoryMore() { _billingHistory(true); }
+
 function initPayment(planKey, label, price) {
   // Имя бота — только из конфигурации сервера. Раньше при неизвестном имени
   // открывался @infragram_bot — чужой бот, которому человек понёс бы деньги.

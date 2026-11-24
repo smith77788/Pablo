@@ -77,3 +77,9 @@
 .ui-skel{background:var(--ui-surface);border-radius:var(--ui-r);min-height:76px;animation:uiPulse 1.2s ease-in-out infinite}
 @keyframes uiPulse{0%,100%{opacity:.55}50%{opacity:1}}
 @media (prefers-reduced-motion:reduce){.ui-skel{animation:none}}
+
+/* Догрузка списка: честная подпись «показано N из M» и одна кнопка */
+.ui-more{display:flex;align-items:center;justify-content:space-between;gap:var(--ui-s2);margin-top:var(--ui-s2);padding:var(--ui-s2) var(--ui-s3);background:var(--ui-surface);border:1px solid var(--ui-line);border-radius:var(--ui-r)}
+.ui-more-note{font-size:var(--ui-fs-xs);color:var(--ui-muted)}
+.ui-more-btn{min-height:36px;padding:0 var(--ui-s3);border:1px solid var(--ui-line);border-radius:var(--ui-r-sm);background:var(--ui-surface-2);color:var(--ui-text);font:inherit;font-size:var(--ui-fs-sm);font-weight:var(--ui-fw-b);cursor:pointer;white-space:nowrap}
+.ui-more-btn[disabled]{opacity:.5;pointer-events:none}
