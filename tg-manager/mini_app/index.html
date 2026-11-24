@@ -586,7 +586,17 @@ div[style*="background:var(--bg2)"]{border:1px solid var(--border)}
    уезжала за край экрана — нажать её на узком телефоне было нечем. Ужимается
    КОЛОНКА, а сами кнопки сохраняют размер (у них свой flex-shrink:0), то
    есть перенос происходит ровно так, как и описано выше. */
+/* Но ужиматься колонка может только до самой широкой своей кнопки:
+   min-width:0 пускал её уже кнопки, и кнопка, которая сама не ужимается,
+   вылезала из колонки ВЛЕВО — поверх имени. Так «Объединить» в дублях
+   контактов и «Выключить» в умных тегах закрывали название строки. У
+   переносящегося flex-контейнера min-content — это ширина самого широкого
+   элемента, то есть перенос по-прежнему происходит, а наезда нет. Только
+   для колонки действий .li-right: в колоночной строке (.li с
+   flex-direction:column) соседний блок — ряд чипов с многоточием, и его
+   min-content — полная длина имени, что выталкивало строку за край. */
 .li-body + div{min-width:0;flex-shrink:1;flex-wrap:wrap;justify-content:flex-end;row-gap:4px}
+.li-body + .li-right:not(.col){min-width:min-content}
 /* Колоночный вариант колонки действий. Ужимать его НЕЛЬЗЯ: в колоночном flex
    поперечная ось — горизонтальная, и ужатие сводит контейнер почти к нулю, а
    кнопки внутри сохраняют ширину и вылезают за него. Проверено обходом: с
@@ -757,7 +767,11 @@ div[style*="background:var(--bg2)"]{border:1px solid var(--border)}
 @keyframes mbin{from{opacity:0}to{opacity:1}}
 .modal{background:var(--bg2);border-radius:var(--radius-xl) var(--radius-xl) 0 0;padding:20px 16px calc(var(--safe-b) + 20px);width:100%;max-height:85vh;overflow-y:auto;animation:min .3s var(--spring);position:relative;box-shadow:0 -8px 40px rgba(0,0,0,.4)}
 @keyframes min{from{transform:translateY(100%)}to{transform:none}}
-.modal-title{font-size:17px;font-weight:700;margin-bottom:14px;text-align:center;letter-spacing:-.2px}
+/* Поля по 36px с обеих сторон — место под крестик .modal-x (30px + 14px от
+   края минус отступ окна): длинный заголовок «📅 Новая запланированная
+   рассылка» уходил последней буквой под крестик. Симметрично — чтобы
+   заголовок остался по центру. */
+.modal-title{font-size:17px;font-weight:700;margin-bottom:14px;text-align:center;letter-spacing:-.2px;padding:0 36px}
 .modal-x{position:absolute;top:14px;right:14px;width:30px;height:30px;border-radius:50%;background:var(--bg);display:flex;align-items:center;justify-content:center;cursor:pointer;color:var(--hint);font-size:14px;border:1px solid var(--border);transition:transform .15s var(--spring)}
 .modal-x:active{opacity:.6;transform:scale(.88)}
 .field{margin-bottom:12px}
@@ -834,6 +848,26 @@ div[style*="background:var(--bg2)"]{border:1px solid var(--border)}
      при width:auto, поэтому auto схлопывал их до надписи, хотя в разметке
      они заданы как width:100% — кнопки во всю ширину. calc даёт ровно
      ширину экрана за вычетом двух отступов. */
+  width:calc(100% - 32px) !important;margin-left:16px !important;margin-right:16px !important
+}
+/* Прозрачная обёртка содержимого экрана (.sb-pass). Правила выше смотрят
+   только на ПРЯМЫХ детей тела экрана, и любая обёртка с id выключала их для
+   всего, что внутри: так кнопки и поиск на вкладках «Аккаунты» и «Боты» (их
+   завернули в #accTools/#botTools, чтобы прятать на пустом списке) снова
+   легли от края до края под карточками счётчиков с отступом 16px. Тело
+   экранов, которые строит JS (интеграции, продажи, защита от накрутки,
+   отчёт ЛС…), — тоже обёртка с id, и там то же самое. Обёртка с этим
+   классом для правил отступа невидима: её дети получают тот же кант, что
+   дети самого тела экрана. Блок с фоном отступает полями, а не паддингом —
+   иначе фон всё равно лежал бы от края до края. */
+.sb-pass > .field{padding-left:16px;padding-right:16px}
+.sb-pass > .card,.sb-pass > .row,.sb-pass > .kpi-card,
+.sb-pass > div:not([class]):not([id]),.sb-pass > details:not([class]):not([id]),
+.sb-pass > label,.sb-pass > .field-note,.sb-pass > .hint,
+.sb > .field-note,.sub-sb > .field-note,.sb > label,.sub-sb > label{margin-left:16px !important;margin-right:16px !important}
+.sb-pass > div:not([class]):not([id]){flex-wrap:wrap}
+.sb-pass > button{display:flex;align-items:center;justify-content:center;white-space:normal;text-align:center}
+.sb-pass > button,.sb-pass > input:not([type=checkbox]):not([type=radio]),.sb-pass > select,.sb-pass > textarea{
   width:calc(100% - 32px) !important;margin-left:16px !important;margin-right:16px !important
 }
 /* Чекбоксы и радио — НЕ текстовые поля. Правило выше писалось под ввод текста
@@ -1592,7 +1626,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
     <!-- Инструменты списка прячутся, пока ботов нет (renderBots): десять
          действий над пустотой выталкивали «подключите первого бота» за край
          экрана, и новичок не понимал, с чего начать. -->
-    <div id="botTools">
+    <div id="botTools" class="sb-pass">
     <!-- Массовые действия по ботам -->
     <div style="display:flex;gap:8px;padding:0 0 6px">
       <button class="btn btn-p" onclick="goTab('broadcasts')" style="flex:1 1 auto;font-size:13px;padding:10px 6px">📢 Рассылка</button>
@@ -1744,7 +1778,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
     <!-- Инструменты списка прячутся, пока аккаунтов нет (renderAccounts):
          шесть нулевых счётчиков и семь действий над пустотой выталкивали
          «Добавьте аккаунт» за нижний край экрана. -->
-    <div id="accTools">
+    <div id="accTools" class="sb-pass">
     <!-- KPI status bar -->
     <div class="acc-kpi" id="accKpi">
       <div class="acc-kpi-card on" onclick="filterAcc('all',this)" data-filter="all">
@@ -2429,7 +2463,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
     <!-- Статус аккаунта -->
     <div class="acc-status-bar">
       <div class="asb-item">💳 <span id="planVal">—</span></div>
-      <div class="asb-item">📡 <span id="sseVal">—</span></div>
+      <div class="asb-item" title="Живые обновления экрана">📡 <span id="sseVal">Подключение…</span></div>
       <div class="asb-item tap" onclick="goRef()">🎁 <span id="refVal">Реферал</span> ›</div>
     </div>
 
@@ -4517,7 +4551,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
   <div class="sub-sb">
     <div id="semSettings"></div>
     <div style="display:flex;gap:8px;margin:8px 0">
-      <input id="semQ" type="search" placeholder="Поиск: имя, @username, город, интерес…" style="flex:1"
+      <input id="semQ" class="inp" type="search" placeholder="Поиск: имя, @username, город, интерес…" style="flex:1"
              oninput="semSearchSoon()" onkeydown="if(event.key==='Enter')retrySemFacts()">
     </div>
     <div class="lst" id="semfactsList"><div class="spin-wrap"><div class="spin"></div></div></div>
@@ -4622,7 +4656,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
     <div class="hdr-title">👥 Люди воронки</div>
     <div class="hdr-meta"><div class="hdr-user" id="fppl-title"></div></div>
   </div>
-  <div class="sub-sb"><div id="fpplBody"><div class="spin-wrap"><div class="spin"></div></div></div></div>
+  <div class="sub-sb"><div id="fpplBody" class="sb-pass"><div class="spin-wrap"><div class="spin"></div></div></div></div>
 </div>
 
 <!-- ══════════════════════ OPERATIONS ══════════════════════ -->
@@ -5098,7 +5132,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
   </div>
   <div class="filter-chips mod-tabs" data-module="templates" data-tab="texts" role="tablist" aria-label="Вкладки модуля «Шаблоны»"></div>
   <div class="sub-sb">
-    <input id="tplSearch" placeholder="🔍 Поиск по названию и тексту" oninput="_tplSearchDebounced()" style="margin-bottom:8px" aria-label="Поиск шаблонов">
+    <input id="tplSearch" class="inp" placeholder="🔍 Поиск по названию и тексту" oninput="_tplSearchDebounced()" style="margin-bottom:8px" aria-label="Поиск шаблонов">
     <div class="lst" id="tplList"><div class="spin-wrap"><div class="spin"></div></div></div>
   </div>
 </div>
@@ -5160,8 +5194,8 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 
     <div class="sec">Мои ссылки <span id="lnkCount" style="opacity:.6"></span></div>
     <div style="display:flex;gap:6px;padding:0 6px 6px">
-      <input id="lnkSearch" placeholder="🔍 Код, название, адрес или тег" oninput="_lnkSearchDebounced()" style="flex:1;min-width:0" aria-label="Поиск ссылок">
-      <select id="lnkSort" onchange="lnkLoad()" style="width:auto" aria-label="Порядок">
+      <input id="lnkSearch" class="inp" placeholder="🔍 Код, название, адрес или тег" oninput="_lnkSearchDebounced()" style="flex:1;min-width:0" aria-label="Поиск ссылок">
+      <select id="lnkSort" class="inp" onchange="lnkLoad()" style="width:auto" aria-label="Порядок">
         <option value="recent">Новые</option>
         <option value="clicks">По переходам</option>
       </select>
@@ -5640,7 +5674,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
         <span class="chip" onclick="cleanerSelectAll(false)">⬜ Снять</span>
       </span>
     </div>
-    <input id="cleanerSearch" placeholder="🔍 Имя, @ник или телефон" oninput="renderCleanerAccounts()" style="margin-bottom:6px">
+    <input id="cleanerSearch" class="inp" placeholder="🔍 Имя, @ник или телефон" oninput="renderCleanerAccounts()" style="margin-bottom:6px">
     <div class="lst" id="cleanerAccList"><div class="spin-wrap"><div class="spin"></div></div></div>
     <div id="cleanerErr" style="color:var(--red);font-size:13px;margin:6px 0"></div>
     <button class="btn btn-d" id="cleanerBtn" onclick="submitCleaner()" style="width:100%;margin-top:6px" disabled>Выберите аккаунты</button>
@@ -6553,7 +6587,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
       просите запомнить в чате.
     </div>
     <div style="display:flex;gap:8px;margin:0 0 8px">
-      <input id="aiMemQ" type="search" placeholder="Поиск по записям и #тегам" style="flex:1"
+      <input id="aiMemQ" class="inp" type="search" placeholder="Поиск по записям и #тегам" style="flex:1"
              oninput="aiMemSearchSoon()" onkeydown="if(event.key==='Enter')openAiMemory(false, true)">
     </div>
     <div class="filter-chips" id="aiMemKinds" role="tablist" aria-label="Тип записи" style="margin-bottom:6px"></div>
@@ -7241,7 +7275,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
     <div class="hdr-meta"><div class="hdr-user" id="dmr-title"></div></div>
   </div>
   <div class="sub-sb">
-    <div id="dmrBody"><div class="spin-wrap"><div class="spin"></div></div></div>
+    <div id="dmrBody" class="sb-pass"><div class="spin-wrap"><div class="spin"></div></div></div>
   </div>
 </div>
 
@@ -7450,7 +7484,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
     <div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div>
     <div class="hdr-title">⚖️ Протокол</div>
   </div>
-  <div class="sub-sb"><div id="notaryCert"><div class="spin-wrap"><div class="spin"></div></div></div></div>
+  <div class="sub-sb"><div id="notaryCert" class="sb-pass"><div class="spin-wrap"><div class="spin"></div></div></div></div>
 </div>
 
 <div class="screen" id="s-folders">
@@ -7560,7 +7594,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
     <div class="hdr-title" id="expdetail-title">🧪 Эксперимент</div>
   </div>
   <div class="sub-sb">
-    <div id="expdetailBody"></div>
+    <div id="expdetailBody" class="sb-pass"></div>
   </div>
 </div>
 
@@ -7717,7 +7751,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
     <div class="hdr-title" id="webhook-title">🔗 Вебхук</div>
   </div>
   <div class="sub-sb">
-    <div id="webhookBody"><div class="spin-wrap"><div class="spin"></div></div></div>
+    <div id="webhookBody" class="sb-pass"><div class="spin-wrap"><div class="spin"></div></div></div>
   </div>
 </div>
 
@@ -7820,7 +7854,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
     <div id="mailboxOAuthButtons"></div>
     <div class="field-note">Вход открывается на сайте Google. Пароль Infragram не получает. После подключения вернитесь сюда и обновите список. OAuth не снимает сетевые ограничения SMTP на хостинге.</div>
     <div class="sec">Подключить почту</div>
-    <form onsubmit="connectMailbox(event)" autocomplete="off">
+    <form class="field mb-form" onsubmit="connectMailbox(event)" autocomplete="off">
       <label for="mailboxProvider">Почтовый провайдер</label>
       <select id="mailboxProvider" class="inp" required></select>
       <label for="mailboxEmail">Адрес вашего ящика</label>
@@ -9502,7 +9536,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
     <div class="hdr-title">👥 Люди сегмента</div>
     <div class="hdr-meta"><div class="hdr-user" id="audseg-title"></div></div>
   </div>
-  <div class="sub-sb"><div id="audsegBody"><div class="spin-wrap"><div class="spin"></div></div></div></div>
+  <div class="sub-sb"><div id="audsegBody" class="sb-pass"><div class="spin-wrap"><div class="spin"></div></div></div></div>
 </div>
 
 <div class="screen" id="s-audience-analytics">
@@ -10210,7 +10244,7 @@ async function openSSE() {
     const hLive = document.getElementById('hLive');
     const sseVal = document.getElementById('sseVal');
     if (hLive) hLive.style.display='none';
-    if (sseVal) sseVal.textContent='🟡 Переподключение...';
+    if (sseVal) sseVal.textContent='🟡 Переподключение…';
     // Закрываем сами: иначе браузер переподключается параллельно с нашим
     // таймером, и на один поток приходится два соединения.
     try{SSE.close()}catch(_){}
@@ -16941,7 +16975,10 @@ async function loadSchedules() {
     // рядом утверждала «UTC»: в Киеве рассылка на 12:00 выглядела как
     // назначенная на 12:00 по Гринвичу, то есть на два часа позже.
     txt('schList', items.map(s=>{
-      const dt = new Date(s.execute_at).toLocaleString('ru-RU',{dateStyle:'short',timeStyle:'short'});
+      // Пустое или битое время печаталось как «Invalid Date» — по-английски и
+      // без смысла. Без даты строка честно говорит «время не задано».
+      const _at = new Date(s.execute_at);
+      const dt = (s.execute_at && !isNaN(_at)) ? _at.toLocaleString('ru-RU',{dateStyle:'short',timeStyle:'short'}) : 'Время не задано';
       const [bc,bl] = stb(s.status);
       const preview = (s.message_text||'').substring(0,60);
       const canCancel = s.status==='pending';
@@ -27094,6 +27131,9 @@ function humanDur(sec) {
 const DM_LOG_STATUS = {
   sent:'✅ доставлено', blocked:'🚫 заблокирован', skip:'🔒 недоступен',
   auth:'🔑 сессия мертва', peer_flood:'⛔ слишком много сообщений незнакомым', retry:'⚠️ сбой', failed:'⚠️ сбой',
+  // Исполнитель пишет и этот исход (dm_engine: отправка ушла, а Telegram её не
+  // подтвердил) — без подписи он показывался владельцу словом «unconfirmed».
+  unconfirmed:'❔ доставка не подтверждена',
 };
 // Причина недоставки приходит от Telegram английской строкой
 // (USER_PRIVACY_RESTRICTED, PEER_FLOOD) и в таком виде показывалась владельцу,
@@ -27209,12 +27249,12 @@ async function openDmReport(id) {
     } else {
       // Каждая строка сводки ведёт к списку тех, кто за числом стоит: раньше
       // отчёт отвечал «заблокировали: 54» и не отвечал «кто именно».
-      h += `<div class="sec-t">Исходы</div><div class="lst">` + _DMR_STATUSES.map((s,i)=>
+      h += `<div class="sec">Исходы</div><div class="lst">` + _DMR_STATUSES.map((s,i)=>
         `<div class="li tap" onclick="dmrGoStatus(${i})" role="button" tabindex="0">
            <div class="row-body"><div class="row-name">${esc(DM_LOG_STATUS[s.status]||s.status)}</div></div>
            <div class="row-right"><span class="badge b-bl">${num(s.n)}</span></div><span class="chev">›</span></div>`).join('') + `</div>`;
       if (_DMR_ERRS.length) {
-        h += `<div class="sec-t">Частые причины недоставки</div><div class="lst">` + _DMR_ERRS.map((e,i)=>
+        h += `<div class="sec">Частые причины недоставки</div><div class="lst">` + _DMR_ERRS.map((e,i)=>
           `<div class="li tap" onclick="dmrGoReason(${i})" role="button" tabindex="0">
              <div class="row-body"><div class="row-name" style="font-weight:400">${esc(dmErrRu(e.reason))}</div>${
                dmErrRu(e.reason) !== String(e.reason) ? `<div class="li-sub wrap">${esc(e.reason)}</div>` : ''}</div>
@@ -27223,14 +27263,14 @@ async function openDmReport(id) {
       if (accs.length) {
         // Аккаунт, который сыплет ошибками, чинят в его карточке — тап ведёт
         // туда, а не оставляет владельца с номером на руках.
-        h += `<div class="sec-t">По аккаунтам</div><div class="lst">` + accs.map(a=>
+        h += `<div class="sec">По аккаунтам</div><div class="lst">` + accs.map(a=>
           `<div class="li tap" onclick="openAccount(${Number(a.account_id)})" role="button" tabindex="0">
              <div class="row-body"><div class="row-name">${esc(a.label||('Аккаунт '+a.account_id))}</div>
                <div class="li-sub wrap">✅ ${num(a.sent||0)} · ❌ ${num(a.failed||0)}</div></div>
              <span class="chev">›</span></div>`).join('') + `</div>`;
       }
       if (_DMR_RECENT.length) {
-        h += `<div class="sec-t">Последние отправки</div><div class="lst">`
+        h += `<div class="sec">Последние отправки</div><div class="lst">`
            + _DMR_RECENT.slice(0,20).map((r,i)=>dmrRow('rep',i)).join('') + `</div>`;
         if (_DMR_RECENT.length > 20) {
           h += `<button class="btn btn-s" style="width:100%;margin:8px 0" onclick="openDmLog({status:'',reason:'',title:'Все получатели'})">Показать всех получателей</button>`;
