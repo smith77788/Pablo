@@ -62,6 +62,16 @@ function openFindAll(q) {
   else faSearch(el ? el.value : '');
 }
 
+// Чип истории открывает запрос ПО НОМЕРУ, а не подставляет его текст в
+// разметку обработчика: апостроф в запросе («О'Нил») порвал бы атрибут, а
+// кавычки JSON — саму строку. Значение берём из того же списка, который
+// рисовали.
+function faFromHistory(i) {
+  const hist = faHistory();
+  const q = hist[Number(i)];
+  if (typeof q === 'string' && q) openFindAll(q);
+}
+
 function faSearch(v) {
   const next = (v || '').trim();
   // Новый запрос — снова узкая выдача: «показать ещё» относилось к прошлому
@@ -73,8 +83,8 @@ function faSearch(v) {
     const hist = faHistory();
     const chips = hist.length
       ? '<div class="nav-cat">🕘 Последние запросы</div><div class="lf-chips">' +
-        hist.map(q => '<span class="chip" role="button" tabindex="0" onclick="openFindAll(' +
-          JSON.stringify(q).replace(/"/g, '&quot;') + ')">' + esc(q) + '</span>').join('') +
+        hist.map((q, i) => '<span class="chip" role="button" tabindex="0" onclick="faFromHistory(' +
+          i + ')">' + esc(q) + '</span>').join('') +
         '<span class="chip" role="button" tabindex="0" onclick="faForget()">✖️ Очистить</span></div>'
       : '';
     txt('faResults', (FA_Q

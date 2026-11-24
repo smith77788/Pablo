@@ -38,6 +38,16 @@ def _fn(src: str, name: str) -> str:
     return m.group(0)
 
 
+def _consts(src: str, names) -> str:
+    """Константы берём ИЗ файла: повторённые в стенде, они разойдутся молча."""
+    out = []
+    for n in names:
+        m = re.search(r"^const " + n + r" = .+?;$", src, re.M)
+        assert m, n
+        out.append(m.group(0))
+    return "\n".join(out) + "\n"
+
+
 def _run(src: str):
     return json.loads(subprocess.check_output(["node", "-e", src], text=True))
 
@@ -104,3 +114,36 @@ console.log(JSON.stringify({
 def test_the_search_history_has_a_way_in_and_out():
     assert "faForget()" in FA and "Последние запросы" in FA
     assert "faRemember(q)" in FA
+
+
+def test_history_chip_passes_a_number_and_survives_an_apostrophe():
+    """Чип истории открывает запрос ПО НОМЕРУ, а не подставляет его текст.
+
+    Раньше текст запроса уезжал в атрибут обработчика через JSON.stringify:
+    запрос с апострофом («О'Нил») рвал атрибут, а собственные кавычки JSON —
+    строку вокруг него, то есть чип либо не работал, либо ломал разметку
+    следующих чипов. Сторож формы — test_ui_no_json_in_onclick; здесь
+    проверяется, что по номеру достаётся ИМЕННО тот запрос.
+    """
+    out = _run(_ESC + """
+let STORE = {};
+const localStorage = { getItem: k => STORE[k] || null,
+                       setItem: (k, v) => { STORE[k] = String(v); },
+                       removeItem: k => { delete STORE[k]; } };
+let OPENED = null;
+function openFindAll(q) { OPENED = q; }
+""" + _consts(FA, ("FA_HISTORY_KEY", "FA_HISTORY_MAX")) + _fn(FA, "faHistory") + _fn(FA, "faRemember") + _fn(FA, "faFromHistory") + r"""
+faRemember("О'Нил \"Вега\"");
+faRemember('+7 999 000-00-01');
+const hist = faHistory();
+faFromHistory(hist.indexOf("О'Нил \"Вега\""));
+const first = OPENED;
+OPENED = null;
+faFromHistory(99);          // номера нет в списке
+const missing = OPENED;
+console.log(JSON.stringify({ hist, first, missing }));
+""")
+    assert "О'Нил \"Вега\"" in out["hist"]
+    assert out["first"] == "О'Нил \"Вега\"", (
+        "по номеру чипа обязан открываться ровно тот запрос, который на нём написан")
+    assert out["missing"] is None, "номер вне списка не должен открывать пустой поиск"

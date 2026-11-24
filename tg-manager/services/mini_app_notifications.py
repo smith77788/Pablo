@@ -199,7 +199,7 @@ def setup_routes(app: web.Application, pool) -> None:
                     "WHERE owner_id=$1 AND id = ANY($2::bigint[]) AND read_at IS NULL",
                     uid, clean)
             else:
-                return _err("Укажите ids или all")
+                return _err("Нечего отмечать: выберите уведомление или нажмите «Прочитать всё»")
             n = await pool.fetchval(
                 "SELECT COUNT(*) FROM notification_feed "
                 "WHERE owner_id=$1 AND read_at IS NULL", uid)

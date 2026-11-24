@@ -97,7 +97,7 @@ async function nfRead(id) {
 function _nfRender(unread) {
   const chips = NF_KINDS.map(k =>
     `<span class="chip${NF_PREF === k.key ? ' on' : ''}" role="button" tabindex="0" ` +
-    `onclick="nfSetKind('${esc(k.key)}')">${esc(k.icon)} ${esc(k.label)}</span>`).join('');
+    `onclick="nfSetKind('${escJs(k.key)}')">${esc(k.icon)} ${esc(k.label)}</span>`).join('');
   txt('nfChips',
     `<span class="chip${NF_UNREAD_ONLY ? ' on' : ''}" role="button" tabindex="0" ` +
     `onclick="nfToggleUnread()">🔵 Непрочитанные${unread ? ' · ' + num(unread) : ''}</span>` + chips);
