@@ -274,6 +274,18 @@ def setup_routes(app: web.Application, pool) -> None:
 
         return _json_resp(await attention_items(pool, uid))
 
+    # Короткий кэш: вкладку «Флот сейчас» держат открытой, и она сама
+    # переспрашивает раз в 20 секунд. Десять секунд кэша не дают двум
+    # открытым окнам одного владельца удвоить нагрузку на базу.
+    @_cached_user(ttl=10)
+    async def dashboard_live(request: web.Request) -> web.Response:
+        """«Флот сейчас»: состояние флота, идущие операции и лента событий
+        за сутки одним ответом — для живой вкладки единого дашборда."""
+        uid = _get_uid(request)
+        if not uid:
+            return _err("Unauthorized", 401)
+        return _json_resp(await live_snapshot(pool, uid))
+
     async def results_summary(request: web.Request) -> web.Response:
         """«Итоги»: деньги, лиды, ответы и охват за период плюс до трёх
         карточек «требует внимания». Тот же расчёт показывает бот
@@ -287,6 +299,7 @@ def setup_routes(app: web.Application, pool) -> None:
     app.router.add_get("/api/miniapp/dashboard", dashboard)
     app.router.add_get("/api/miniapp/dashboard/visual", dashboard_visual)
     app.router.add_get("/api/miniapp/dashboard/attention", dashboard_attention)
+    app.router.add_get("/api/miniapp/dashboard/live", dashboard_live)
     app.router.add_get("/api/miniapp/summary", results_summary)
 
 
@@ -531,4 +544,209 @@ async def attention_items(pool, uid: int) -> dict:
         "items": items,
         "high": sum(1 for i in items if i["severity"] == "high"),
         "total": len(items),
+    }
+
+
+# ── «Флот сейчас» ─────────────────────────────────────────────────────────────
+# Подписи событий ограничений. В базе лежит английский код детектора, а
+# владелец английского не читает: неизвестный код подписывается по важности,
+# а не печатается как есть.
+RESTRICTION_LABELS: dict[str, str] = {
+    "ban_detected": "Аккаунт забанен",
+    "session_dead": "Сессия отозвана",
+    "account_restricted": "Аккаунт ограничен",
+    "account_flood_risk": "Частые флуд-ожидания",
+    "dm_restricted": "Ограничены личные сообщения",
+    "invite_degraded": "Инвайты проходят хуже",
+    "search_drop": "Бот просел в поиске",
+    "search_position_drop": "Бот просел в поиске",
+    "drift_detected": "Канал изменён вне Infragram",
+}
+
+# Состояния, в которых операция ещё живёт (идёт, ждёт очереди или паузы).
+LIVE_OP_STATUSES = ("running", "pending", "paused", "scheduled", "waiting_approval")
+
+
+def restriction_label(event_type, severity) -> str:
+    code = str(event_type or "").strip().lower()
+    if code in RESTRICTION_LABELS:
+        return RESTRICTION_LABELS[code]
+    return "Серьёзное ограничение" if str(severity) == "critical" else "Предупреждение по аккаунту"
+
+
+def _iso(ts):
+    try:
+        return ts.isoformat() if ts else None
+    except Exception:
+        return None
+
+
+def _account_name(row) -> str:
+    if row.get("first_name"):
+        return str(row["first_name"])
+    if row.get("username"):
+        return "@" + str(row["username"])
+    if row.get("phone"):
+        return str(row["phone"])
+    return f"аккаунт #{row['account_id']}" if row.get("account_id") else ""
+
+
+async def live_snapshot(pool, uid: int) -> dict:
+    """Снимок флота владельца для вкладки «Флот сейчас».
+
+    Ничего не считает заново: здоровье — из единого пульса
+    (`get_account_health_summary`, с его коротким кэшем), «требует внимания» —
+    из `attention_items`, статусы — тот же словарь `account_status`. Каждая
+    выборка гасит только свой блок: в аварии экран обязан показать то, что
+    удалось прочитать, а не пустую страницу.
+    """
+    from services import account_status as _acc_status
+    from services.mini_app_api import _dashboard_query, _safe_fetch, _safe_fetchrow, log
+
+    dead = _acc_status.sql_dead_list()
+    lost = _acc_status.sql_status_list(_acc_status.LOST_STATUSES)
+    restricted = _acc_status.sql_status_list(_acc_status.RESTRICTED_STATUSES)
+    live_sql = ", ".join(f"'{s}'" for s in LIVE_OP_STATUSES)
+
+    async def _pulse():
+        from services.infra_memory import get_account_health_summary
+        return await get_account_health_summary(pool, uid)
+
+    async def _attention():
+        return await attention_items(pool, uid)
+
+    q = {
+        "fleet": _safe_fetchrow(pool,
+            f"""SELECT COUNT(*) AS total,
+                      COUNT(*) FILTER (WHERE COALESCE(acc_status,'active') NOT IN ({dead})
+                                       AND NOT COALESCE(cooldown_until > now(), FALSE)) AS online,
+                      COUNT(*) FILTER (WHERE COALESCE(acc_status,'active') NOT IN ({dead})
+                                       AND COALESCE(cooldown_until > now(), FALSE)) AS cooldown,
+                      COUNT(*) FILTER (WHERE acc_status IN ({restricted})) AS restricted,
+                      COUNT(*) FILTER (WHERE acc_status IN ({lost})) AS lost,
+                      COUNT(*) FILTER (WHERE acc_status = 'session_expired') AS session
+               FROM tg_accounts WHERE owner_id=$1 AND is_active=TRUE""", uid),
+        "warming": _safe_fetchrow(pool,
+            """SELECT COUNT(DISTINCT p.account_id) AS n
+               FROM account_warmup_plans p
+               JOIN tg_accounts a ON a.id = p.account_id AND a.owner_id = $1 AND a.is_active = TRUE
+               WHERE p.owner_id = $1 AND p.status = 'active'""", uid),
+        "ops_now": _safe_fetchrow(pool,
+            f"""SELECT COUNT(*) FILTER (WHERE status='running') AS running,
+                      COUNT(*) FILTER (WHERE status IN ('pending','scheduled','waiting_approval')) AS queued,
+                      COUNT(*) FILTER (WHERE status='paused') AS paused
+               FROM operation_queue WHERE owner_id=$1 AND status IN ({live_sql})""", uid),
+        "ops_24h": _safe_fetchrow(pool,
+            """SELECT COUNT(*) FILTER (WHERE status='done') AS done,
+                      COUNT(*) FILTER (WHERE status IN ('failed','partial')) AS failed
+               FROM operation_queue
+               WHERE owner_id=$1 AND finished_at > now() - INTERVAL '24 hours'""", uid),
+        "active": _safe_fetch(pool,
+            f"""SELECT id, op_type, COALESCE(label,'') AS label, status,
+                      COALESCE(done_items,0) AS done, COALESCE(total_items,0) AS total,
+                      started_at, created_at
+               FROM operation_queue WHERE owner_id=$1 AND status IN ({live_sql})
+               ORDER BY (status='running') DESC, COALESCE(started_at, created_at) DESC
+               LIMIT 6""", uid),
+        "finished": _safe_fetch(pool,
+            """SELECT id, op_type, COALESCE(label,'') AS label, status,
+                      COALESCE(done_items,0) AS done, COALESCE(total_items,0) AS total,
+                      finished_at
+               FROM operation_queue
+               WHERE owner_id=$1 AND finished_at > now() - INTERVAL '24 hours'
+                 AND status IN ('done','partial','failed','cancelled')
+               ORDER BY finished_at DESC LIMIT 10""", uid),
+        "restrictions": _safe_fetch(pool,
+            """SELECT re.id, re.event_type, re.severity, re.created_at, re.account_id,
+                      a.first_name, a.username, a.phone
+               FROM restriction_events re
+               LEFT JOIN tg_accounts a ON a.id = re.account_id AND a.owner_id = re.owner_id
+               WHERE re.owner_id=$1 AND re.created_at > now() - INTERVAL '24 hours'
+               ORDER BY re.created_at DESC LIMIT 10""", uid),
+        "crit_24h": _safe_fetchrow(pool,
+            """SELECT COUNT(DISTINCT account_id) AS n FROM restriction_events
+               WHERE owner_id=$1 AND severity='critical' AND account_id IS NOT NULL
+                 AND created_at > now() - INTERVAL '24 hours'""", uid),
+        "pulse": _pulse(),
+        "attention": _attention(),
+    }
+    keys = list(q.keys())
+    res = await asyncio.gather(
+        *(_dashboard_query(name, aw) for name, aw in q.items()),
+        return_exceptions=True,
+    )
+    r = {k: (None if isinstance(v, BaseException) else v) for k, v in zip(keys, res)}
+
+    def _int(row, key):
+        try:
+            return int((row or {}).get(key) or 0)
+        except (TypeError, ValueError):
+            return 0
+
+    fl = r.get("fleet")
+    fleet = None
+    if fl is not None:
+        fleet = {k: _int(fl, k) for k in ("total", "online", "cooldown", "restricted", "lost", "session")}
+        fleet["warming"] = _int(r.get("warming"), "n")
+
+    pulse_raw = r.get("pulse")
+    pulse = None
+    if isinstance(pulse_raw, dict):
+        avg = pulse_raw.get("avg_score")
+        pulse = {k: int(pulse_raw.get(k) or 0) for k in ("healthy", "at_risk", "quarantine", "total")}
+        pulse["score"] = int(round(float(avg) * 100)) if avg is not None else None
+
+    on = r.get("ops_now") or {}
+    d24 = r.get("ops_24h") or {}
+    ops = {"running": _int(on, "running"), "queued": _int(on, "queued"),
+           "paused": _int(on, "paused"), "done_24h": _int(d24, "done"),
+           "failed_24h": _int(d24, "failed")}
+
+    active = [{
+        "id": int(o["id"]), "op_type": o.get("op_type") or "", "label": o.get("label") or "",
+        "status": o.get("status") or "", "done": int(o.get("done") or 0),
+        "total": int(o.get("total") or 0),
+        "since": _iso(o.get("started_at") or o.get("created_at")),
+    } for o in (r.get("active") or [])]
+
+    events: list[dict] = []
+    for o in r.get("finished") or []:
+        st = o.get("status") or ""
+        events.append({
+            "kind": "op", "op_id": int(o["id"]), "at": _iso(o.get("finished_at")),
+            "op_type": o.get("op_type") or "", "label": o.get("label") or "",
+            "status": st, "done": int(o.get("done") or 0), "total": int(o.get("total") or 0),
+            "severity": ("good" if st == "done" else "bad" if st == "failed"
+                         else "warn" if st == "partial" else "info"),
+        })
+    for e in r.get("restrictions") or []:
+        sev = str(e.get("severity") or "warning")
+        events.append({
+            "kind": "restriction", "at": _iso(e.get("created_at")),
+            "account_id": int(e["account_id"]) if e.get("account_id") else None,
+            "title": restriction_label(e.get("event_type"), sev),
+            "account": _account_name(e),
+            "severity": "bad" if sev == "critical" else "warn" if sev == "warning" else "info",
+        })
+    events.sort(key=lambda x: x.get("at") or "", reverse=True)
+
+    att = r.get("attention")
+    attention = None
+    if isinstance(att, dict):
+        attention = {"total": int(att.get("total") or 0), "high": int(att.get("high") or 0),
+                     "items": list(att.get("items") or [])[:3]}
+    else:
+        log.warning("dashboard live: attention unavailable uid=%s", uid)
+
+    return {
+        "ok": True,
+        "fleet": fleet,
+        "pulse": pulse,
+        "ops": ops,
+        "active": active,
+        "events": events[:12],
+        # Разных аккаунтов с критическим ограничением за сутки — честный
+        # счётчик по всей таблице, а не по десяти строкам ленты.
+        "critical_24h": _int(r.get("crit_24h"), "n"),
+        "attention": attention,
     }
