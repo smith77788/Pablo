@@ -430,6 +430,9 @@ html.tg-back .hdr > .back{display:none}
 .ni-pin:active{background:var(--sep)}
 .ux-netbar{position:fixed;left:0;right:0;top:0;z-index:70;padding:6px 12px;text-align:center;font-size:12px;font-weight:600;background:var(--orange,#e0b268);color:#1b1b1b}
 .ux-top{position:fixed;right:14px;bottom:calc(72px + env(safe-area-inset-bottom,0px));z-index:60;width:42px;height:42px;border:0;border-radius:50%;background:var(--bg3);color:var(--text);font-size:18px;line-height:42px;box-shadow:0 2px 10px rgba(0,0,0,.35);cursor:pointer}
+.ux-pullbar{position:fixed;left:50%;transform:translateX(-50%);top:calc(8px + env(safe-area-inset-top,0px));z-index:71;padding:6px 14px;border-radius:999px;font-size:12px;font-weight:600;background:var(--bg3);color:var(--text);box-shadow:0 2px 10px rgba(0,0,0,.35)}
+.tab{position:relative}
+.tab-badge{position:absolute;top:2px;left:50%;margin-left:6px;min-width:16px;height:16px;padding:0 4px;border-radius:999px;background:var(--red,#f87171);color:#fff;font-size:10px;font-weight:700;line-height:16px;text-align:center;box-shadow:0 0 0 2px var(--bg,#111)}
 .ux-top:active{opacity:.7}
 .hdr-badge{position:absolute;top:-2px;right:-2px;min-width:16px;height:16px;padding:0 4px;border-radius:8px;background:var(--red);color:#fff;font-size:10px;font-weight:700;line-height:16px;text-align:center}
 .icon-tap{display:inline-flex;align-items:center;justify-content:center;min-width:36px;min-height:36px;flex-shrink:0;cursor:pointer;border-radius:10px;-webkit-tap-highlight-color:transparent}
@@ -1443,7 +1446,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 <div id="content">
 
 <!-- ══════════════════════ HOME ══════════════════════ -->
-<div class="screen show" id="s-home">
+<div class="screen show" id="s-home" data-reload="loadHome">
   <div class="hdr">
     <div class="hdr-burger" onclick="openDrawer()" role="button" tabindex="0" aria-label="Меню">☰</div>
     <div class="hdr-title">📊 Итоги</div>
@@ -1586,7 +1589,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 </div>
 
 <!-- ══════════════════════ BOTS LIST ══════════════════════ -->
-<div class="screen" id="s-bots">
+<div class="screen" id="s-bots" data-reload="loadBots">
   <div class="hdr">
     <div class="hdr-burger" onclick="openDrawer()" role="button" tabindex="0" aria-label="Меню">☰</div>
     <div class="hdr-title">🤖 Мои боты</div>
@@ -1738,7 +1741,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 </div>
 
 <!-- ══════════════════════ ACCOUNTS ══════════════════════ -->
-<div class="screen" id="s-accounts">
+<div class="screen" id="s-accounts" data-reload="loadAccounts">
   <div class="hdr">
     <div class="hdr-burger" onclick="openDrawer()" role="button" tabindex="0" aria-label="Меню">☰</div>
     <div class="hdr-title">📱 Аккаунты</div>
@@ -2218,7 +2221,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 </div>
 
 <!-- ══════════════════════ BROADCASTS ══════════════════════ -->
-<div class="screen" id="s-broadcasts">
+<div class="screen" id="s-broadcasts" data-reload="loadBroadcasts">
   <div class="hdr">
     <div class="hdr-burger" onclick="openDrawer()" role="button" tabindex="0" aria-label="Меню">☰</div>
     <div class="hdr-title">✉️ Сообщения</div>
@@ -2323,7 +2326,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 </div>
 
 <!-- ══════════════════════ PROXY POOL (Proxy Pool Manager) ══════════════════════ -->
-<div class="screen" id="s-proxy-pool">
+<div class="screen" id="s-proxy-pool" data-reload="loadProxyPool">
   <div class="hdr">
     <div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div>
     <div class="hdr-title">🔎 Поиск по прокси</div>
@@ -3643,7 +3646,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 </div>
 
 <!-- ══════════════════════ COMPLIANCE HUB ══════════════════════ -->
-<div class="screen" id="s-compliance">
+<div class="screen" id="s-compliance" data-reload="loadCompliance">
   <div class="hdr"><div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div><div class="hdr-title">✅ Комплаенс</div></div>
   <div class="sub-sb">
     <div class="sec">Аудит операций <span class="sec-act" onclick="exportCompliance()">Выгрузить отчёт →</span></div>
@@ -3661,7 +3664,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 </div>
 
 <!-- ══════════════════════ MULTIGEO ══════════════════════ -->
-<div class="screen" id="s-multigeo">
+<div class="screen" id="s-multigeo" data-reload="loadMultigeo">
   <div class="hdr">
     <div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div>
     <div class="hdr-title">🌍 Гео-сеть</div>
@@ -4648,7 +4651,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 </div>
 
 <!-- ══════════════════════ OPERATIONS ══════════════════════ -->
-<div class="screen" id="s-ops">
+<div class="screen" id="s-ops" data-reload="loadOps">
   <div class="hdr"><div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div><div class="hdr-title" id="opsTitle">⚙️ Операции</div>
     <div class="hdr-meta" style="display:flex;align-items:center;gap:6px">
       <span class="icon-btn" role="button" tabindex="0" onclick="exportOpsCSV()" title="Экспорт CSV" aria-label="Экспорт CSV">📥</span>
@@ -4716,7 +4719,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 </div>
 
 <!-- ══════════════════════ UNIFIED CONTACTS HUB ══════════════════════ -->
-<div class="screen" id="s-contacts">
+<div class="screen" id="s-contacts" data-reload="loadContacts">
   <div class="hdr"><div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div><div class="hdr-title">📇 Контакты</div>
     <div class="hdr-meta" style="display:flex;align-items:center;gap:6px">
       <span class="icon-btn" role="button" tabindex="0" onclick="openUchAI()" title="ИИ-ассистент" aria-label="ИИ-ассистент">🤖</span>
@@ -4939,7 +4942,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
   <div class="sub-sb" id="remBody"><div class="spin-wrap"><div class="spin"></div></div></div>
 </div>
 
-<div class="screen" id="s-uchsynccenter">
+<div class="screen" id="s-uchsynccenter" data-reload="loadSyncCenter">
   <div class="hdr"><div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div><div class="hdr-title">🔄 Центр синхронизации</div></div>
   <div class="sub-sb" id="syncBody"><div class="spin-wrap"><div class="spin"></div></div></div>
 </div>
@@ -4963,7 +4966,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 </div>
 
 <!-- ══════════════════════ BOT SUBSCRIBERS ══════════════════════ -->
-<div class="screen" id="s-botsubs">
+<div class="screen" id="s-botsubs" data-reload="loadBotSubs">
   <div class="hdr">
     <div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div>
     <div class="hdr-title" id="bs-name">Подписчики</div>
@@ -4984,7 +4987,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 </div>
 
 <!-- ══════════════════════ СВОДКА ══════════════════════ -->
-<div class="screen" id="s-dashboard">
+<div class="screen" id="s-dashboard" data-reload="loadDashboard">
   <div class="hdr">
     <div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div>
     <div class="hdr-title">📊 Дашборд</div>
@@ -5015,7 +5018,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 </div>
 
 <!-- ══════════════════════ ANALYTICS ══════════════════════ -->
-<div class="screen" id="s-analytics">
+<div class="screen" id="s-analytics" data-reload="loadAnalytics">
   <div class="hdr"><div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div><div class="hdr-title">📊 Аналитика</div></div>
   <div class="sub-sb">
     <div class="sec">Рост подписчиков (7 дней)</div>
@@ -5047,7 +5050,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 </div>
 
 <!-- ══════════════════════ COMPETITORS ══════════════════════ -->
-<div class="screen" id="s-competitors">
+<div class="screen" id="s-competitors" data-reload="loadCompetitors">
   <div class="hdr">
     <div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div>
     <div class="hdr-title">📈 Конкуренты</div>
@@ -5067,7 +5070,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 </div>
 
 <!-- ══════════════════════ CRM CONTACTS ══════════════════════ -->
-<div class="screen" id="s-crm">
+<div class="screen" id="s-crm" data-reload="loadCRM">
   <div class="hdr">
     <div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div>
     <div class="hdr-title">👤 CRM</div>
@@ -5100,7 +5103,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 </div>
 
 <!-- ══════════════════════ BOT SCHEDULE ══════════════════════ -->
-<div class="screen" id="s-schedule">
+<div class="screen" id="s-schedule" data-reload="loadSchedules">
   <div class="hdr">
     <div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div>
     <div class="hdr-title" id="sch-name">Расписание</div>
@@ -5112,7 +5115,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 </div>
 
 <!-- ══════════════════════ TEMPLATES ══════════════════════ -->
-<div class="screen" id="s-templates">
+<div class="screen" id="s-templates" data-reload="loadTemplates">
   <div class="hdr">
     <div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div>
     <div class="hdr-title">📝 Шаблоны</div>
@@ -5323,7 +5326,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 </div>
 
 <!-- ══════════════════════ PROXIES ══════════════════════ -->
-<div class="screen" id="s-proxies">
+<div class="screen" id="s-proxies" data-reload="loadProxies">
   <div class="hdr">
     <div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div>
     <div class="hdr-title">🌐 Прокси</div>
@@ -5406,7 +5409,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 </div>
 
 <!-- ══════════════════════ SCREEN: DEEPLINKS ══════════════════════ -->
-<div class="screen" id="s-deeplinks">
+<div class="screen" id="s-deeplinks" data-reload="loadDeeplinks">
   <div class="hdr">
     <div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div>
     <div class="hdr-title">🔗 Диплинки</div>
@@ -5420,7 +5423,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 </div>
 
 <!-- ══════════════════════ SCREEN: ENGAGEMENT ══════════════════════ -->
-<div class="screen" id="s-engagement">
+<div class="screen" id="s-engagement" data-reload="loadEngagement">
   <div class="hdr">
     <div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div>
     <div class="hdr-title">🔥 Активность аудитории</div>
@@ -7992,7 +7995,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
   <div class="sub-sb" id="wsdBody"><div class="spin-wrap"><div class="spin"></div></div></div>
 </div>
 
-<div class="screen" id="s-workspaces">
+<div class="screen" id="s-workspaces" data-reload="loadWorkspaces">
   <div class="hdr">
     <div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div>
     <div class="hdr-title">🏢 Рабочие пространства</div>
@@ -8008,7 +8011,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 </div>
 
 <!-- ══════════════════════ SCREEN: PROMO PLATFORM ══════════════════════ -->
-<div class="screen" id="s-promo">
+<div class="screen" id="s-promo" data-reload="loadPromo">
   <div class="hdr">
     <div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div>
     <div class="hdr-title">🔎 Поиск Telegram</div>
@@ -8048,7 +8051,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 
 <!-- ══════════════════════ SCREEN: УВЕДОМЛЕНИЯ ══════════════════════ -->
 <!-- Лента событий: screens/notifications_feed.js, /api/miniapp/notifications -->
-<div class="screen" id="s-notifications">
+<div class="screen" id="s-notifications" data-reload="loadNotificationsFeed">
   <div class="hdr">
     <div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div>
     <div class="hdr-title">🔔 Уведомления</div>
@@ -8237,7 +8240,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 </div>
 
 <!-- ══════════════════════ SCREEN: ERROR REPORT ══════════════════════ -->
-<div class="screen" id="s-errreport">
+<div class="screen" id="s-errreport" data-reload="loadErrReports">
   <div class="hdr">
     <div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div>
     <div class="hdr-title">🐛 Баг-репорт</div>
@@ -9024,7 +9027,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 </div>
 
 <!-- ══════════════════════ SCREEN: RANKING ENGINE ══════════════════════ -->
-<div class="screen" id="s-ranking">
+<div class="screen" id="s-ranking" data-reload="loadRanking">
   <div class="hdr">
     <div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div>
     <div class="hdr-title">🔎 Поиск Telegram</div>
@@ -9084,7 +9087,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 </div>
 
 <!-- ══════════════════════ SCREEN: NETWORK BUILDER ══════════════════════ -->
-<div class="screen" id="s-network-builder">
+<div class="screen" id="s-network-builder" data-reload="loadNetworkBuilder">
   <div class="hdr">
     <div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div>
     <div class="hdr-title">🕸️ Сетки — конструктор</div>
@@ -9249,7 +9252,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 </div>
 
 <!-- ══════════════════════ SCREEN: WORKFLOWS ══════════════════════ -->
-<div class="screen" id="s-workflows">
+<div class="screen" id="s-workflows" data-reload="loadWorkflows">
   <div class="hdr">
     <div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div>
     <div class="hdr-title">🔄 Сценарии</div>
@@ -10822,6 +10825,7 @@ function goTab(tab) {
   if (ti) ti.classList.add('on');
   CUR = tab;
   if (tab === 'more') { buildMoreCategories(); try { loadInboxBadge(); } catch(_) {} }
+  try { refreshTabBadges(); } catch(_) {}
   tg.HapticFeedback?.impactOccurred('light');
   if (!LOADED[tab]) { LOADED[tab]=true; loadTab(tab); }
   try { markDrawerActive(); } catch(_) {}
@@ -11432,9 +11436,10 @@ async function loadHome() {
   if (loadHome.pending) return;
   loadHome.pending = true;
   if (typeof loadHomeProjects === 'function') loadHomeProjects();
-  // Значок колокольчика: отдельная лёгкая ручка (только счётчик), чтобы
-  // главный экран не тянул ленту уведомлений ради одного числа.
-  if (typeof refreshNotifBadge === 'function') refreshNotifBadge();
+  // Значки вкладок и колокольчик берут числа ОДНОЙ ручкой
+  // (screens/tab_badges.js): главный экран не тянет ленту ради одного числа,
+  // а таббар не делает по запросу на вкладку.
+  if (typeof refreshTabBadges === 'function') refreshTabBadges(true);
   modernizeIcons(document.getElementById('s-home'));
   const cached = loadHome.lastData || getCached('infragram_cache_home');
   if (cached && !loadHome.lastData) { renderCards(cached); renderAct(cached.recent_activity||[]); }
@@ -38290,5 +38295,6 @@ function renderAudSegChart(segments) {
 <script src="screens/persona_peers.js"></script>
 <script src="screens/notifications_feed.js"></script>
 <script src="screens/ux_kit.js"></script>
+<script src="screens/tab_badges.js"></script>
 </body>
 </html>

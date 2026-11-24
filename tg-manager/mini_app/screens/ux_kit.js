@@ -123,6 +123,18 @@ function uxInit() {
     if (t && t.classList && t.classList.contains('screen')) uxSyncTopButton(t);
   }, true);
 
+  // Полоска жеста «потянуть вниз — обновить».
+  const pull = document.createElement('div');
+  pull.id = 'uxPullBar';
+  pull.className = 'ux-pullbar';
+  pull.setAttribute('role', 'status');
+  pull.style.display = 'none';
+  document.body.appendChild(pull);
+  document.addEventListener('touchstart', uxPullStart, { passive: true });
+  document.addEventListener('touchmove', uxPullMove, { passive: true });
+  document.addEventListener('touchend', uxPullEnd, { passive: true });
+  document.addEventListener('touchcancel', uxPullEnd, { passive: true });
+
   window.addEventListener('offline', () => uxOffline(true));
   window.addEventListener('online', () => uxOffline(false));
   if (navigator && navigator.onLine === false) uxOffline(true);
@@ -235,4 +247,85 @@ function uxNavQ(s) {
     .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
     .replace(/"/g, '')
     .replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+}
+
+// ── «Потянуть вниз — обновить» ─────────────────────────────────────────────
+// Обновить список можно было только одним способом: уйти с экрана и зайти
+// снова (а на вкладках — нажать вкладку второй раз, о чём нигде не написано).
+// На телефоне обновление списка — жест, и его ждут: владелец смотрит на
+// очередь операций и тянет вниз, потому что так работает всё остальное у него
+// в телефоне. До этого он получал нативный «отскок» прокрутки и ничего больше.
+//
+// Экран объявляет свою загрузку САМ — атрибутом data-reload="loadOps" в
+// разметке. Так имя функции видно и в index.html, и поиску по репозиторию, и
+// сторожу мёртвых функций (CLAUDE.md: имя в коде видят все, строка в словаре —
+// никто), а общая механика не хранит у себя карту двух сотен экранов.
+const UX_PULL_AT = 70;        // сколько тянуть, чтобы жест сработал
+let UX_PULL = null;           // {el, y0, phase} — пока палец на экране
+
+// Фаза жеста по тому, насколько протянули. Отдельной функцией: на ней стоит
+// тест, а в обработчике её не проверить — там нет ни пальца, ни экрана.
+function uxPullPhase(dy) {
+  if (!(dy > 12)) return '';
+  return dy >= UX_PULL_AT ? 'armed' : 'pull';
+}
+
+// Чем экран обновляется. Пусто — значит экран не объявил загрузку, и жест для
+// него выключен: лучше нативный отскок, чем «обновляем…» без обновления.
+function uxReloadFn(el) {
+  const name = el && el.dataset ? String(el.dataset.reload || '') : '';
+  if (!name) return null;
+  const fn = typeof window !== 'undefined' ? window[name] : undefined;
+  return typeof fn === 'function' ? fn : null;
+}
+
+function uxPullBar(text) {
+  const bar = document.getElementById('uxPullBar');
+  if (!bar) return;
+  bar.textContent = text || '';
+  bar.style.display = text ? '' : 'none';
+}
+
+function uxPullStart(ev) {
+  UX_PULL = null;
+  const t = ev.touches;
+  if (!t || t.length !== 1) return;
+  const el = uxActiveScreen();
+  // Тянуть можно только с самого верха: иначе жест отбирал бы прокрутку.
+  if (!el || el.scrollTop > 0 || !uxReloadFn(el)) return;
+  UX_PULL = { el, y0: t[0].clientY, phase: '' };
+}
+
+function uxPullMove(ev) {
+  if (!UX_PULL) return;
+  const t = ev.touches;
+  if (!t || t.length !== 1) { UX_PULL = null; uxPullBar(''); return; }
+  // Пока палец идёт вверх (или экран успел прокрутиться) — это обычная
+  // прокрутка, а не жест обновления.
+  if (UX_PULL.el.scrollTop > 0) { UX_PULL = null; uxPullBar(''); return; }
+  const phase = uxPullPhase(t[0].clientY - UX_PULL.y0);
+  if (phase === UX_PULL.phase) return;
+  UX_PULL.phase = phase;
+  if (phase === 'armed') {
+    uxPullBar('↻ Отпустите — обновим');
+    try { tg && tg.HapticFeedback && tg.HapticFeedback.impactOccurred('light'); } catch (_) {}
+  } else if (phase === 'pull') {
+    uxPullBar('↓ Потяните, чтобы обновить');
+  } else {
+    uxPullBar('');
+  }
+}
+
+function uxPullEnd() {
+  const st = UX_PULL;
+  UX_PULL = null;
+  if (!st || st.phase !== 'armed') { uxPullBar(''); return; }
+  const fn = uxReloadFn(st.el);
+  if (!fn) { uxPullBar(''); return; }
+  uxPullBar('⏳ Обновляем…');
+  try { tg && tg.HapticFeedback && tg.HapticFeedback.impactOccurred('medium'); } catch (_) {}
+  // Полоску убираем по таймеру, а не по ответу: загрузки экранов ничего не
+  // возвращают (и не обязаны), а висящее «обновляем…» — это ложь о состоянии.
+  setTimeout(() => uxPullBar(''), 900);
+  try { fn(); } catch (_) { uxPullBar(''); }
 }

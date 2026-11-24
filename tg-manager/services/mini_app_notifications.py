@@ -135,21 +135,6 @@ def setup_routes(app: web.Application, pool) -> None:
                       for k, v in PREF_LABELS.items()],
         })
 
-    async def feed_unread(request: web.Request) -> web.Response:
-        """Только счётчик: его спрашивает значок на главном экране."""
-        uid = _get_uid(request)
-        if not uid:
-            return _err("Unauthorized", 401)
-        try:
-            n = await pool.fetchval(
-                "SELECT COUNT(*) FROM notification_feed "
-                "WHERE owner_id=$1 AND read_at IS NULL", uid)
-        except Exception as exc:
-            log.debug("notifications: счётчик непрочитанного uid=%s: %s", uid, exc)
-            # Fail-soft: значок — украшение, из-за него экран падать не должен.
-            return _json_resp({"unread": 0})
-        return _json_resp({"unread": int(n or 0)})
-
     async def feed_read(request: web.Request) -> web.Response:
         """Отметить прочитанным: список id или всё (`{"all": true}`).
 
@@ -193,5 +178,4 @@ def setup_routes(app: web.Application, pool) -> None:
         return _json_resp({"ok": True, "unread": int(n or 0)})
 
     app.router.add_get("/api/miniapp/notifications", feed_list)
-    app.router.add_get("/api/miniapp/notifications/unread", feed_unread)
     app.router.add_post("/api/miniapp/notifications/read", feed_read)

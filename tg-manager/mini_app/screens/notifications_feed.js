@@ -149,10 +149,3 @@ function setNotifBadge(n) {
   el.textContent = n > 99 ? '99+' : String(n || '');
   el.style.display = n ? '' : 'none';
 }
-
-async function refreshNotifBadge() {
-  try {
-    const d = await api('/api/miniapp/notifications/unread');
-    setNotifBadge(d.unread || 0);
-  } catch (e) { /* значок — украшение: молчим */ }
-}

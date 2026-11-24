@@ -103,9 +103,6 @@ def test_notification_lands_in_the_feed_and_can_be_read():
         only = await (await client.get("/api/miniapp/notifications?unread=1")).json()
         assert [i["id"] for i in only["items"]] == [d["items"][1]["id"]]
 
-        # Лёгкая ручка значка отдаёт то же число.
-        assert (await (await client.get("/api/miniapp/notifications/unread")).json())["unread"] == 1
-
         # «Прочитать всё».
         assert (await (await client.post("/api/miniapp/notifications/read",
                                          json={"all": True})).json())["unread"] == 0

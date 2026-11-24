@@ -10282,6 +10282,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     # Лента уведомлений владельца (services/mini_app_notifications.py).
     from services import mini_app_notifications
     mini_app_notifications.setup_routes(app, pool)
+    # Значки на вкладках таббара (services/mini_app_badges.py).
+    from services import mini_app_badges
+    mini_app_badges.setup_routes(app, pool)
     mini_app_operations.setup_routes(app, pool)
     mini_app_dashboard.setup_routes(app, pool)
     mini_app_dm.setup_routes(app, pool)

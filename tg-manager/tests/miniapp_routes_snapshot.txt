@@ -117,6 +117,7 @@ GET /api/miniapp/auto_funnel/{funnel_id}
 GET /api/miniapp/auto_funnel/{funnel_id}/people
 GET /api/miniapp/auto_funnels
 GET /api/miniapp/autoreg
+GET /api/miniapp/badges
 GET /api/miniapp/bot/{bot_id}
 GET /api/miniapp/bot/{bot_id}/audience
 GET /api/miniapp/bot/{bot_id}/auto_replies
@@ -283,7 +284,6 @@ GET /api/miniapp/nodes
 GET /api/miniapp/notary
 GET /api/miniapp/notary/{watch_id}
 GET /api/miniapp/notifications
-GET /api/miniapp/notifications/unread
 GET /api/miniapp/notify_routes
 GET /api/miniapp/onboarding
 GET /api/miniapp/operation/{op_id}
@@ -491,6 +491,7 @@ HEAD /api/miniapp/auto_funnel/{funnel_id}
 HEAD /api/miniapp/auto_funnel/{funnel_id}/people
 HEAD /api/miniapp/auto_funnels
 HEAD /api/miniapp/autoreg
+HEAD /api/miniapp/badges
 HEAD /api/miniapp/bot/{bot_id}
 HEAD /api/miniapp/bot/{bot_id}/audience
 HEAD /api/miniapp/bot/{bot_id}/auto_replies
@@ -657,7 +658,6 @@ HEAD /api/miniapp/nodes
 HEAD /api/miniapp/notary
 HEAD /api/miniapp/notary/{watch_id}
 HEAD /api/miniapp/notifications
-HEAD /api/miniapp/notifications/unread
 HEAD /api/miniapp/notify_routes
 HEAD /api/miniapp/onboarding
 HEAD /api/miniapp/operation/{op_id}
