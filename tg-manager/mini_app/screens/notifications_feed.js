@@ -128,11 +128,29 @@ function _nfRender(unread) {
         </div>
       </div>
       ${it.body ? `<div style="font-size:12px;color:var(--hint);margin-top:6px;white-space:pre-line">${esc(it.body)}</div>` : ''}
+      ${_nfOpen(it)}
     </div>`;
   }).join(''));
   txt('nfMore', NF_HAS_MORE
     ? `<button class="btn btn-s" style="width:100%;font-size:13px;padding:10px" onclick="nfMore()">Загрузить ещё</button>`
     : '');
+}
+
+// Кнопка «Открыть» ведёт туда, о чём уведомление: «Операция #412 завершена»
+// открывает саму операцию, а не оставляет владельца искать её руками через
+// очередь. Имя функции приходит с сервера (белый список) — и всё равно
+// проверяется здесь: экран мог переименовать её после того, как строка легла
+// в ленту, а кнопка, которая ничего не делает, читается как сломанное
+// приложение.
+function _nfOpen(it) {
+  const L = it.link;
+  if (!L || !L.fn || typeof window[L.fn] !== 'function') return '';
+  const arg = typeof L.arg === 'number'
+    ? String(L.arg)
+    : "'" + String(L.arg == null ? '' : L.arg).replace(/\\/g, '\\\\').replace(/'/g, "\\'") + "'";
+  return '<button class="btn btn-s" style="margin-top:8px;padding:7px 12px;font-size:12px" ' +
+    'onclick="event.stopPropagation(); nfRead(' + it.id + '); ' + esc(L.fn + '(' + arg + ')') +
+    '">Открыть →</button>';
 }
 
 function nfResetFilters() {

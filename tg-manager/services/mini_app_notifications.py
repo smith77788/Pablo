@@ -18,6 +18,7 @@
 from __future__ import annotations
 
 import html as _html
+import json as _json
 import logging
 import re
 
@@ -51,6 +52,33 @@ PREF_ICONS: dict[str, str] = {
 }
 
 _TAG_RE = re.compile(r"<[^>]+>")
+
+# Куда уведомлению позволено вести. Белый список, а не «любая функция из базы»:
+# строка ленты живёт месяцами, за это время экран могли переименовать, а
+# «открыть» в ленте — это вызов функции фронта по имени. Экран дополнительно
+# проверяет, что такая функция есть (defense in depth).
+LINK_FNS = frozenset({
+    "openOpDetail", "openAccount", "openBot", "openChannel",
+    "openContactDetail", "openBroadcastSearch", "openNotificationsFeed",
+})
+
+
+def safe_link(raw) -> dict | None:
+    """Дверь строки ленты или None. Чужое имя функции — это не дверь."""
+    if isinstance(raw, str):
+        try:
+            raw = _json.loads(raw)
+        except Exception:
+            return None
+    if not isinstance(raw, dict):
+        return None
+    fn = str(raw.get("fn") or "")
+    if fn not in LINK_FNS:
+        return None
+    arg = raw.get("arg")
+    if isinstance(arg, bool) or not isinstance(arg, (int, str)):
+        return None
+    return {"fn": fn, "arg": arg if isinstance(arg, int) else str(arg)[:120]}
 
 
 def plain_text(raw: str) -> str:
@@ -103,7 +131,7 @@ def setup_routes(app: web.Application, pool) -> None:
             # +1 строка сверх страницы — честный признак «есть ещё» без второго
             # COUNT по всей ленте.
             rows = await pool.fetch(
-                f"SELECT id, pref, text, created_at, read_at FROM notification_feed "
+                f"SELECT id, pref, text, created_at, read_at, link FROM notification_feed "
                 f"WHERE {cond} ORDER BY created_at DESC, id DESC "
                 f"LIMIT ${len(args) + 1} OFFSET ${len(args) + 2}",
                 *args, limit + 1, offset)
@@ -126,6 +154,9 @@ def setup_routes(app: web.Application, pool) -> None:
                 "body": body,
                 "created_at": r["created_at"].isoformat() if r["created_at"] else None,
                 "unread": r["read_at"] is None,
+                # Куда ведёт уведомление: «Операция #412 завершена» открывает
+                # саму операцию, а не оставляет владельца искать её руками.
+                "link": safe_link(r["link"]),
             })
         return _json_resp({
             "items": items,

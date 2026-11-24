@@ -110,6 +110,32 @@ def test_notification_lands_in_the_feed_and_can_be_read():
 
 
 @live
+def test_a_notification_carries_the_door_to_what_it_is_about():
+    """«Операция #412 завершена» открывает саму операцию.
+
+    Живая база обязательна: дверь лежит в jsonb, а asyncpg отдаёт jsonb
+    СТРОКОЙ — на заглушке проверка подтвердила бы форму кода, а не то, что
+    строка доедет до экрана разобранной.
+    """
+    from database import db
+
+    async def body(client, pool):
+        await db._feed_record(pool, OWNER, "notify_ops", "Операция #412 завершена",
+                              None, {"fn": "openOpDetail", "arg": 412})
+        await db._feed_record(pool, OWNER, "notify_ops", "Без двери", None, None)
+        await db._feed_record(pool, OWNER, "notify_ops", "Чужая дверь", None,
+                              {"fn": "eval", "arg": "1"})
+        d = await (await client.get("/api/miniapp/notifications")).json()
+        by_title = {i["title"]: i for i in d["items"]}
+        assert by_title["Операция #412 завершена"]["link"] == {
+            "fn": "openOpDetail", "arg": 412}, by_title
+        assert by_title["Без двери"]["link"] is None
+        assert by_title["Чужая дверь"]["link"] is None, (
+            "имя функции приходит из базы — белый список и есть защита")
+    _run(body)
+
+
+@live
 def test_stranger_cannot_read_or_mark_someones_feed():
     from database import db
 

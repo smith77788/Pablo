@@ -5644,8 +5644,28 @@ async def notify_dedup_forget(pool, user_id: int, key: str) -> None:
 _FEED_TEXT_LIMIT = 2000
 
 
+def _feed_link(link) -> str | None:
+    """Дверь строки ленты: {"fn": "openOpDetail", "arg": 412} → json или None.
+
+    Форма проверяется ЗДЕСЬ, у единственной двери записи: строка ленты живёт
+    месяцами, и мусор в ней означал бы кнопку, которая ничего не делает, —
+    а такую кнопку владелец нажмёт и решит, что сломано приложение.
+    """
+    if not isinstance(link, dict):
+        return None
+    fn = str(link.get("fn") or "").strip()
+    if not fn or not fn.replace("_", "").isalnum():
+        return None
+    arg = link.get("arg")
+    if isinstance(arg, bool) or not isinstance(arg, (int, str, type(None))):
+        return None
+    if isinstance(arg, str):
+        arg = arg[:120]
+    return json.dumps({"fn": fn[:60], "arg": arg}, ensure_ascii=False)
+
+
 async def _feed_record(pool, user_id: int, pref: str, text: str,
-                       dedup_key: str | None) -> None:
+                       dedup_key: str | None, link=None) -> None:
     """Записать уведомление в ленту. Никогда не бросает и не задерживает.
 
     Fail-soft намеренно: сбой записи в ленту не должен отменить само
@@ -5656,10 +5676,10 @@ async def _feed_record(pool, user_id: int, pref: str, text: str,
         if len(body) > _FEED_TEXT_LIMIT:
             body = body[:_FEED_TEXT_LIMIT - 1].rstrip() + "…"
         await pool.execute(
-            "INSERT INTO notification_feed(owner_id, pref, text, dedup_key) "
-            "VALUES($1, $2, $3, $4)",
+            "INSERT INTO notification_feed(owner_id, pref, text, dedup_key, link) "
+            "VALUES($1, $2, $3, $4, $5::jsonb)",
             int(user_id), str(pref or "")[:64], body,
-            (str(dedup_key)[:200] if dedup_key else None),
+            (str(dedup_key)[:200] if dedup_key else None), _feed_link(link),
         )
     except Exception as exc:
         log.debug("notification_feed: не записано user=%s pref=%s: %s",
@@ -5675,6 +5695,7 @@ async def notify_if_enabled(
     reply_markup=None,
     *,
     dedup_key: str | None = None,
+    link: dict | None = None,
 ) -> bool:
     """Send a notification to user only if the given preference flag is True.
 
@@ -5728,7 +5749,7 @@ async def notify_if_enabled(
         # ищет в приложении. Место единственное — ниже путь ветвится на тихие
         # часы, повторы и очередь доставки, и запись в каждой ветке означала бы
         # дубли. Запись fail-soft: лента не может стоить уведомления.
-        await _feed_record(pool, user_id, pref, text, dedup_key)
+        await _feed_record(pool, user_id, pref, text, dedup_key, link)
         # Тихие часы (services/quiet_hours.py): несрочное ночью — в сводку,
         # она придёт одним сообщением, когда окно закончится. Сбой очереди —
         # отправка как обычно: потерять отчёт хуже, чем разбудить.
