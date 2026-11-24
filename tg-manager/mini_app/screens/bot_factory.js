@@ -37,14 +37,14 @@ async function openBotFactory() {
     if (_bfE) _bfE.innerHTML = '<option value="">Загрузка экосистем…</option>'; }
   // Load ecosystems
   try {
-    const ecos = await api('/api/miniapp/ecosystems');
+    const ecos = await api('/api/miniapp/ecosystems?limit=300');
     const sel = document.getElementById('bfEcosystem');
     // /api/miniapp/ecosystems отдаёт МАССИВ (экран «Экосистемы» так его и
     // читает: rows.length, rows.map). Здесь читали ecos.ecosystems — у массива
     // такого поля нет, выражение всегда давало [], и в выпадашке навсегда
     // оставалось одно «Не привязывать». То есть привязать к экосистеме было
     // нельзя, сколько бы их владелец ни создал.
-    const ecoList = Array.isArray(ecos) ? ecos : [];
+    const ecoList = listOf(ecos, 'ecosystems');
     sel.innerHTML = '<option value="">Не привязывать</option>' +
       ecoList.map(e=>`<option value="${e.id}">${esc(e.name||'Экосистема #'+e.id)}</option>`).join('');
   } catch(e) {

@@ -15006,6 +15006,9 @@ function chGrowthHtml(g) {
 const BCAST_PAGE = 30;
 let BCAST_ROWS = [], BCAST_TOTAL = 0, BCAST_COUNTS = {}, BCAST_FILTER = '', BCAST_LOADING = false;
 let PAY_ROWS = [], PAY_PAGE = null;   // история оплат: страницы и конверт
+let FUN_ROWS = [], FUN_PAGE = null;   // воронки: страницы и конверт
+let ECO_ROWS = [], ECO_PAGE = null;   // экосистемы: страницы и конверт
+let EXP_ROWS = [], EXP_PAGE = null;   // эксперименты: страницы и конверт
 let BCAST_SEARCH = '', _bcastSearchT = null, BCAST_FOUND = null;
 function _bcastQuery(offset, limit) {
   let u = '/api/miniapp/broadcasts?limit=' + (limit || BCAST_PAGE) + '&offset=' + offset;
@@ -15044,7 +15047,7 @@ async function loadBroadcasts() {
     const [bd, cd, fd] = await Promise.all([
       api(_bcastQuery(0, want)),
       api('/api/miniapp/campaigns'),
-      api('/api/miniapp/funnels'),
+      api('/api/miniapp/funnels?limit=30&offset=0'),
     ]);
     BCAST_ROWS = bd.broadcasts||[];
     BCAST_TOTAL = (bd.total != null) ? bd.total : BCAST_ROWS.length;
@@ -15052,7 +15055,9 @@ async function loadBroadcasts() {
     BCAST_COUNTS = bd.counts || {};
     renderBcasts(BCAST_ROWS);
     renderCmps(cd.campaigns||[]);
-    renderFuns(fd.funnels||[]);
+    FUN_ROWS = fd.funnels||[];
+    FUN_PAGE = fd.page||null;
+    renderFuns();
   } catch(e) {
     txt('bcastList', errHtml(errRu(e),'loadBroadcasts()'));
     txt('bcastChips',''); txt('bcastMore','');
@@ -15233,17 +15238,33 @@ function renderCmps(items) {
   }).join('');
 }
 
-function renderFuns(items) {
+function renderFuns() {
   const el = document.getElementById('funList');
-  if (!items.length) { el.innerHTML=empty('🔄','Нет воронок'); return; }
-  el.innerHTML = items.map(f=>`<div class="li tap" onclick="openFunnelDetail(${f.id},'${escJs(f.name||'Воронка')}')">
+  if (!el) return;
+  if (!FUN_ROWS.length) { el.innerHTML=empty('🔄','Нет воронок'); return; }
+  el.innerHTML = FUN_ROWS.map(f=>`<div class="li tap" onclick="openFunnelDetail(${Number(f.id)},'${escJs(f.name||'Воронка')}')">
     <div class="ava ava-orange">🔄</div>
     <div class="li-body">
       <div class="li-name">${esc(f.name||'Воронка')}</div>
       <div class="li-sub">${f.bot_username?'@'+esc(f.bot_username):''} · Активных: ${num(f.active_subs||0)}</div>
     </div>
     <span class="badge ${f.is_active?'b-gr':'b-gy'}">${f.is_active?'▶ Активна':'⏸ Пауза'}</span>
-  </div>`).join('');
+  </div>`).join('')
+    + UI.more({shown: FUN_ROWS.length, total: FUN_PAGE ? FUN_PAGE.total : null,
+               maybeMore: !!(FUN_PAGE && FUN_PAGE.has_more), fn: 'loadMoreFuns',
+               allLabel: 'Показаны все воронки'});
+}
+
+// Догрузка воронок. Список отсортирован по числу активных подписчиков, то есть
+// воронка БЕЗ подписчиков — та самая, которую надо починить, — стоит в конце и
+// раньше уходила за потолок молча.
+async function loadMoreFuns() {
+  try {
+    const d = await api('/api/miniapp/funnels?limit=30&offset=' + FUN_ROWS.length);
+    FUN_ROWS = FUN_ROWS.concat(d.funnels||[]);
+    FUN_PAGE = d.page||null;
+    renderFuns();
+  } catch(e) { toast('⚠️ ' + errRu(e, 'Не удалось подгрузить')); }
 }
 
 // ── Broadcast modal ────────────────────────────────────
@@ -29042,27 +29063,50 @@ const EXP_TYPE = {start_message:'Приветствие',auto_reply:'Авто-о
 async function openExperiments() {
   push('s-experiments');
   txt('experimentsList','<div class="spin-wrap"><div class="spin"></div></div>');
+  EXP_ROWS = []; EXP_PAGE = null;
+  await expLoadPage();
+}
+
+// Эксперименты листаются. Было жёсткое LIMIT 50 и подпись «N экспериментов» по
+// длине страницы: сравнить сегодняшний опыт с прошлогодним было нельзя — его
+// просто не существовало на экране, а число в плитке раздела было неверным и
+// выдавалось как факт.
+async function expLoadPage() {
   try {
-    const d = await api('/api/miniapp/experiments');
-    const exps = d.experiments||[];
-    txt('m-exp-cnt', exps.length+' экспериментов');
-    if (!exps.length) { txt('experimentsList', empty('🧪','Экспериментов ещё нет',
-      'Эксперимент показывает двум половинам пользователей разные тексты приветствия или авто-ответа и считает, какой сработал лучше',
-      {label:'+ Создать эксперимент', fn:'openExpModal()'})); return; }
-    txt('experimentsList', exps.map(e=>`
-      <div class="row tap" onclick="openExpDetail(${e.id},'${escJs(e.name)}')">
-        <div class="row-ico" style="background:var(--bg-yellow-16)">🧪</div>
-        <div class="row-body">
-          <div class="row-name">${esc(e.name)}</div>
-          <div class="row-val">${EXP_STATUS[e.status]||e.status||'—'} · @${esc(e.bot_username||'')} · ${EXP_TYPE[e.experiment_type]||e.experiment_type||'—'} · ${e.variant_count||0} вариантов</div>
-        </div>
-        <div class="row-right chev">›</div>
-      </div>
-    `).join(''));
+    const d = await api('/api/miniapp/experiments?limit=50&offset=' + EXP_ROWS.length);
+    EXP_ROWS = EXP_ROWS.concat(d.experiments || []);
+    EXP_PAGE = d.page || null;
+    expRender();
   } catch(e) {
+    if (EXP_ROWS.length) { toast('⚠️ ' + errRu(e, 'Не удалось подгрузить')); return; }
     txt('experimentsList', errHtml(errRu(e), 'openExperiments()'));
   }
 }
+
+function expRender() {
+  const total = EXP_PAGE && EXP_PAGE.total != null ? EXP_PAGE.total : EXP_ROWS.length;
+  txt('m-exp-cnt', num(total)+' экспериментов');
+  if (!EXP_ROWS.length) {
+    txt('experimentsList', empty('🧪','Экспериментов ещё нет',
+      'Эксперимент показывает двум половинам пользователей разные тексты приветствия или авто-ответа и считает, какой сработал лучше',
+      {label:'+ Создать эксперимент', fn:'openExpModal()'}));
+    return;
+  }
+  txt('experimentsList', EXP_ROWS.map(e=>`
+      <div class="row tap" onclick="openExpDetail(${Number(e.id)},'${escJs(e.name)}')">
+        <div class="row-ico" style="background:var(--bg-yellow-16)">🧪</div>
+        <div class="row-body">
+          <div class="row-name">${esc(e.name)}</div>
+          <div class="row-val">${EXP_STATUS[e.status]||e.status||'—'} · @${esc(e.bot_username||'')} · ${EXP_TYPE[e.experiment_type]||e.experiment_type||'—'} · ${esc(e.variant_count||0)} вариантов</div>
+        </div>
+        <div class="row-right chev">›</div>
+      </div>
+    `).join('')
+    + UI.more({shown: EXP_ROWS.length, total: EXP_PAGE ? EXP_PAGE.total : null,
+               maybeMore: !!(EXP_PAGE && EXP_PAGE.has_more), fn: 'expLoadPage',
+               allLabel: 'Показаны все эксперименты'}));
+}
+
 async function openExpDetail(id, name) {
   push('s-expdetail');
   txt('expdetail-title','🧪 '+esc(name));
@@ -31734,16 +31778,16 @@ async function openGpCreateModal(presetAssetType) {
     if (_gpE) _gpE.innerHTML = '<option value="">Загрузка экосистем…</option>'; }
   // Load ecosystems
   try {
-    const ecos = await api('/api/miniapp/ecosystems');
+    const ecos = await api('/api/miniapp/ecosystems?limit=300');
     const sel = document.getElementById('gpEcosystem');
     // /api/miniapp/ecosystems отдаёт МАССИВ (экран «Экосистемы» так его и
     // читает: rows.length, rows.map). Здесь читали ecos.ecosystems — у массива
     // такого поля нет, выражение всегда давало [], и в выпадашке навсегда
     // оставалось одно «Не привязывать». То есть привязать к экосистеме было
     // нельзя, сколько бы их владелец ни создал.
-    const ecoList = Array.isArray(ecos) ? ecos : [];
+    const ecoList = listOf(ecos, 'ecosystems');
     sel.innerHTML = '<option value="">Не привязывать</option>' +
-      ecoList.map(e=>`<option value="${e.id}">${esc(e.name||'Экосистема #'+e.id)}</option>`).join('');
+      ecoList.map(e=>`<option value="${Number(e.id)}">${esc(e.name||'Экосистема #'+e.id)}</option>`).join('');
   } catch(e) {
     const sel = document.getElementById('gpEcosystem');
     if (sel) sel.innerHTML = '<option value="">Не привязывать</option>'
@@ -32468,9 +32512,23 @@ async function openEcosystems() {
   txt('ecoList','<div class="spin-wrap"><div class="spin"></div></div>');
   ecoLoadRecs();
   try {
-    const rows = await api('/api/miniapp/ecosystems');
-    if (!rows.length) { txt('ecoList', empty('🌐','Экосистем нет','Объедините активы в управляемую сеть',{label:'➕ Создать экосистему',fn:'openEcosystemModal()'})); return; }
-    txt('ecoList', rows.map(r => `
+    const d = await api('/api/miniapp/ecosystems?limit=30&offset=0');
+    ECO_ROWS = listOf(d, 'ecosystems');
+    ECO_PAGE = (d && !Array.isArray(d) && d.page) ? d.page : null;
+    openEcosystemsRender();
+  } catch(e) { txt('ecoList', empty('⚠️','Ошибка',errRu(e), {label:'↺ Повторить',fn:retryCall('openEcosystems')})); }
+}
+
+// Отрисовка списка экосистем: читает глобалы, поэтому догрузка не
+// перезапрашивает первую страницу и не схлопывает уже показанное.
+function openEcosystemsRender() {
+  if (!ECO_ROWS.length) {
+    txt('ecoList', empty('🌐','Экосистем нет','Объедините активы в управляемую сеть',{label:'➕ Создать экосистему',fn:'openEcosystemModal()'}));
+    const _el = document.getElementById('m-eco-val');
+    if (_el) _el.textContent = '0 экосистем';
+    return;
+  }
+  txt('ecoList', ECO_ROWS.map(r => `
       <div class="row tap" onclick="openEcoDetail(${r.id},'${escJs(r.name)}')">
         <div class="row-ico" style="background:var(--bg-green-16)">${[...(ECO_TYPES[r.ecosystem_type]||'🌐')][0]}</div>
         <div class="row-body">
@@ -32484,10 +32542,15 @@ async function openEcosystems() {
           <span class="chev">›</span>
         </div>
       </div>
-    `).join(''));
-    document.getElementById('m-eco-val').textContent = rows.length+' экосистем';
-  } catch(e) { txt('ecoList', empty('⚠️','Ошибка',errRu(e), {label:'↺ Повторить',fn:retryCall('openEcosystems')})); }
+    `).join('')
+      + UI.more({shown: ECO_ROWS.length, total: ECO_PAGE ? ECO_PAGE.total : null,
+                 maybeMore: !!(ECO_PAGE && ECO_PAGE.has_more), fn: 'ecoMore',
+                 allLabel: 'Показаны все экосистемы'}));
+  const _ecoTotal = ECO_PAGE && ECO_PAGE.total != null ? ECO_PAGE.total : ECO_ROWS.length;
+  const _ecoEl = document.getElementById('m-eco-val');
+  if (_ecoEl) _ecoEl.textContent = num(_ecoTotal)+' экосистем';
 }
+
 let CUR_ECO_ID = null;
 // Состав экосистемы приходил типами и номерами строк («account #17»),
 // ролями и типами событий по-английски. Владелец читает интерфейс по-русски, и

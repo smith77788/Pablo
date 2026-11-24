@@ -15,8 +15,11 @@ INDEX = Path(__file__).resolve().parents[1] / "mini_app" / "index.html"
 
 
 def _fn_src(name: str) -> str:
+    # Сигнатура функции правилом не была: renderFuns стала рисовать из
+    # глобалов (список воронок теперь листается), и мерка, завязанная на
+    # "(items)", объявила живую функцию ненайденной.
     html = INDEX.read_text(encoding="utf-8")
-    m = re.search(r"function " + re.escape(name) + r"\(items\)\s*\{.*?\n\}", html, re.DOTALL)
+    m = re.search(r"function " + re.escape(name) + r"\([^)]*\)\s*\{.*?\n\}", html, re.DOTALL)
     assert m, f"{name} не найдена"
     return m.group(0)
 

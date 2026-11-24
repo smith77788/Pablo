@@ -33,8 +33,8 @@ from aiohttp import web
 def setup_routes(app: web.Application, pool) -> None:
     """Зарегистрировать маршруты воронок и авто-воронок."""
     from services.mini_app_api import (
-        _INTERNAL_ERROR, _err, _get_uid, _json_resp, _list_limit, _safe_count,
-        _safe_fetch, _safe_fetchrow, log,
+        _INTERNAL_ERROR, _err, _get_uid, _json_resp, _list_limit, _list_offset,
+        _page_meta, _safe_count, _safe_fetch, _safe_fetchrow, log,
     )
     from services.security import (
         check_sql_suspicious, validate_integer, validate_string,
@@ -63,10 +63,23 @@ def setup_routes(app: web.Application, pool) -> None:
             return _err("Не удалось переключить", 500)
 
     async def funnels_all(request: web.Request) -> web.Response:
+        """Все воронки владельца, страницами и с общим числом.
+
+        Было `LIMIT 30` без слова об остальных, причём сортировка по числу
+        активных подписчиков: воронка, у которой подписчиков нет (то есть та,
+        которую и надо починить), уходила в конец и за потолок.
+        """
         uid = _get_uid(request)
         if not uid:
             return _err("Unauthorized", 401)
+        limit = _list_limit(request, 30, 300)
+        offset = _list_offset(request)
         try:
+            total = await _safe_count(
+                pool,
+                "SELECT COUNT(*) FROM funnels f "
+                "JOIN managed_bots mb ON mb.bot_id=f.bot_id "
+                "WHERE mb.added_by=$1 AND mb.deleted_at IS NULL", uid)
             rows = await pool.fetch(
                 """SELECT f.id, f.name, f.is_active, mb.username AS bot_username,
                           COUNT(fs.id) FILTER (WHERE fs.completed IS NOT TRUE) AS active_subs,
@@ -79,11 +92,16 @@ def setup_routes(app: web.Application, pool) -> None:
                    LEFT JOIN funnel_subscriptions fs ON fs.funnel_id=f.id
                    WHERE mb.added_by=$1 AND mb.deleted_at IS NULL
                    GROUP BY f.id, f.name, f.is_active, mb.username
-                   ORDER BY active_subs DESC LIMIT 30""", uid)
-            return _json_resp({"funnels": [dict(r) for r in rows]})
+                   ORDER BY active_subs DESC, f.id DESC
+                   LIMIT $2 OFFSET $3""", uid, limit, offset)
+            return _json_resp({
+                "funnels": [dict(r) for r in rows],
+                "page": _page_meta(offset, limit, len(rows), total),
+            })
         except Exception as e:
             log.warning("funnels_all uid=%d: %s", uid, e)
-            return _json_resp({"funnels": []})
+            return _json_resp({"funnels": [],
+                               "page": _page_meta(offset, limit, 0, 0)})
 
     async def funnel_steps(request: web.Request) -> web.Response:
         uid = _get_uid(request)

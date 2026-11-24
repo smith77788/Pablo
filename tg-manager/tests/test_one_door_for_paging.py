@@ -12,7 +12,9 @@
 from __future__ import annotations
 
 import json
+import os
 import pathlib
+import sys
 import re
 import shutil
 import subprocess
@@ -22,7 +24,13 @@ import pytest
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 KIT = (ROOT / "mini_app" / "screens" / "ui_kit.js").read_text(encoding="utf-8")
 CSS = (ROOT / "mini_app" / "ui_kit.css").read_text(encoding="utf-8")
-API = (ROOT / "services" / "mini_app_api.py").read_text(encoding="utf-8")
+# Источник API-слоя берём через tests.miniapp_source: прямой путь к
+# services/mini_app_api.py ослепнет при первом же выносе ручки в свой модуль
+# (сторож — test_tests_do_not_pin_the_monolith).
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from miniapp_source import api_source  # noqa: E402
+
+API = api_source()
 
 pytestmark = pytest.mark.skipif(not shutil.which("node"), reason="нужен node")
 
