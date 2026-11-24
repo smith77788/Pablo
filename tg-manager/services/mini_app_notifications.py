@@ -103,20 +103,16 @@ def title_and_body(raw: str) -> tuple[str, str]:
 
 
 def setup_routes(app: web.Application, pool) -> None:
-    from services.mini_app_api import _err, _get_uid, _json_resp
-
-    def _int(value, default: int, lo: int, hi: int) -> int:
-        try:
-            return max(lo, min(hi, int(value)))
-        except (TypeError, ValueError):
-            return default
+    from services.mini_app_api import (
+        _err, _get_uid, _json_resp, _list_limit, _list_offset,
+    )
 
     async def feed_list(request: web.Request) -> web.Response:
         uid = _get_uid(request)
         if not uid:
             return _err("Unauthorized", 401)
-        limit = _int(request.query.get("limit"), _PAGE, 1, _MAX_PAGE)
-        offset = _int(request.query.get("offset"), 0, 0, 100000)
+        limit = _list_limit(request, _PAGE, _MAX_PAGE)
+        offset = _list_offset(request)
         unread_only = request.query.get("unread") in ("1", "true", "yes")
         pref = (request.query.get("pref") or "").strip()[:64]
         where = ["owner_id = $1"]

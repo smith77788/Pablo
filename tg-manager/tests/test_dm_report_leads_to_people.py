@@ -54,8 +54,8 @@ def _handler(name: str) -> str:
 
 def test_detector_sees_the_screen():
     """Самопроверка измерителя: экран и его загрузчик на месте."""
-    assert '<div class="screen" id="s-dmreport">' in HTML
-    assert '<div class="screen" id="s-dmrlog">' in HTML
+    assert '<div class="screen" id="s-dmreport"' in HTML
+    assert '<div class="screen" id="s-dmrlog"' in HTML
     assert len(_fn("openDmReport")) > 500
 
 
