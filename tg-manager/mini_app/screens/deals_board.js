@@ -418,7 +418,10 @@ async function dkAnalytics(days) {
       (a.stuck_total > a.stuck.length ? '<div class="field-note">Показаны ' + num(a.stuck.length) + ' из ' + num(a.stuck_total) + '</div>' : '') +
       '</div>';
   }
+  // Динамика, потери по стадиям, источники и брошенные сделки — screens/crm_insights.js
+  h += '<div id="dkIns"></div>';
   box.innerHTML = h;
+  if (typeof dkInsights === 'function') dkInsights(_DK_AN_DAYS);
 }
 
 // «Показать ещё» в колонке добирает оба вида карточек: у контактов и у
