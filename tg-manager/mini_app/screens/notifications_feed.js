@@ -116,9 +116,15 @@ function _nfRender(unread) {
     txt('nfMore', '');
     return;
   }
+  // Лента — это история, а историю читают по дням: без разделителей тридцать
+  // строк «2 часа назад / вчера / 12 ноября» сливаются в одну стену.
+  let _day = '';
   txt('nfList', NF_ROWS.map(it => {
     const when = it.created_at ? ago(it.created_at) : '';
-    return `<div class="li" style="display:block;padding:11px 14px${it.unread ? ';background:var(--bg3)' : ''}" ` +
+    const day = nfDayLabel(it.created_at);
+    const sep = day && day !== _day ? `<div class="nav-cat">${esc(day)}</div>` : '';
+    _day = day || _day;
+    return sep + `<div class="li" style="display:block;padding:11px 14px${it.unread ? ';background:var(--bg3)' : ''}" ` +
       `onclick="nfRead(${it.id})">
       <div style="display:flex;align-items:center;gap:10px">
         <div class="ava">${esc(it.icon)}</div>
@@ -151,6 +157,21 @@ function _nfOpen(it) {
   return '<button class="btn btn-s" style="margin-top:8px;padding:7px 12px;font-size:12px" ' +
     'onclick="event.stopPropagation(); nfRead(' + it.id + '); ' + esc(L.fn + '(' + arg + ')') +
     '">Открыть →</button>';
+}
+
+// «Сегодня», «Вчера» или дата. Считаем по КАЛЕНДАРНОМУ дню, а не по «меньше
+// 24 часов назад»: уведомление в 23:50 и в 00:10 — это разные дни, как их и
+// читает человек.
+function nfDayLabel(iso) {
+  if (!iso) return '';
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return '';
+  const today = new Date();
+  const midnight = x => new Date(x.getFullYear(), x.getMonth(), x.getDate()).getTime();
+  const diff = Math.round((midnight(today) - midnight(d)) / 86400000);
+  if (diff <= 0) return 'Сегодня';
+  if (diff === 1) return 'Вчера';
+  return d.toLocaleDateString('ru-RU', { day: 'numeric', month: 'long' });
 }
 
 function nfResetFilters() {

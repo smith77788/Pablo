@@ -13,6 +13,39 @@
 let FA_Q = '';
 let _faT = null;
 let FA_LAST = null;
+const FA_HISTORY_KEY = 'infragram_find_history';
+const FA_HISTORY_MAX = 8;
+
+// Последние запросы: искать приходится одно и то же — «тот номер», «тот
+// канал», — и набирать это заново с телефона дороже, чем кажется.
+function faHistory() {
+  try {
+    const raw = JSON.parse(localStorage.getItem(FA_HISTORY_KEY) || '[]');
+    return Array.isArray(raw) ? raw.filter(x => typeof x === 'string') : [];
+  } catch (_) { return []; }
+}
+
+function faRemember(q) {
+  if (!q || q.length < 2) return;
+  const next = [q].concat(faHistory().filter(x => x !== q)).slice(0, FA_HISTORY_MAX);
+  try { localStorage.setItem(FA_HISTORY_KEY, JSON.stringify(next)); } catch (_) {}
+}
+
+function faForget() {
+  try { localStorage.removeItem(FA_HISTORY_KEY); } catch (_) {}
+  faSearch(FA_Q);
+}
+
+// Подсветка найденного куска. Экранируем СНАЧАЛА, подсвечиваем потом: наоборот
+// — и <mark> уехал бы в текст, а разметка владельца стала бы разметкой.
+function faMark(text, q) {
+  const safe = esc(text);
+  if (!q) return safe;
+  const needle = esc(q).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  try {
+    return safe.replace(new RegExp(needle, 'gi'), m => '<mark class="fa-hit">' + m + '</mark>');
+  } catch (_) { return safe; }
+}
 
 function openFindAll(q) {
   push('s-findall');
@@ -32,9 +65,17 @@ function faSearch(v) {
   FA_Q = (v || '').trim();
   clearTimeout(_faT);
   if (FA_Q.length < 2) {
-    txt('faResults', FA_Q
+    const hist = faHistory();
+    const chips = hist.length
+      ? '<div class="nav-cat">🕘 Последние запросы</div><div class="lf-chips">' +
+        hist.map(q => '<span class="chip" role="button" tabindex="0" onclick="openFindAll(' +
+          JSON.stringify(q).replace(/"/g, '&quot;') + ')">' + esc(q) + '</span>').join('') +
+        '<span class="chip" role="button" tabindex="0" onclick="faForget()">✖️ Очистить</span></div>'
+      : '';
+    txt('faResults', (FA_Q
       ? _faHint('Ещё хотя бы один символ — по одной букве нашлось бы всё подряд')
-      : _faHint('Телефон, ник, название канала, имя контакта, слово из рассылки или название операции'));
+      : _faHint('Телефон, ник, название канала, имя контакта, слово из рассылки или название операции'))
+      + chips);
     return;
   }
   // Запрос уходит на сервер, поэтому ждём паузу в наборе: иначе на каждое
@@ -49,6 +90,9 @@ async function _faGo() {
     const d = await api('/api/miniapp/search/everything?q=' + encodeURIComponent(q));
     if (q !== FA_Q) return;          // человек уже набрал дальше
     FA_LAST = d;
+    // Запоминаем только то, что НАШЛОСЬ: история из промахов — это список
+    // мест, где уже искали впустую.
+    if ((d.found || 0) > 0) faRemember(q);
     _faRender(d);
   } catch (e) {
     txt('faResults', errHtml(errRu(e), 'faSearch(' + JSON.stringify(q) + ')'));
@@ -84,8 +128,8 @@ function _faRender(d) {
       ' · ' + String(g.items.length) + '</div>';
     html += g.items.map(it => {
       const go = _faClick(it);
-      const body = '<span class="ni-body"><span>' + esc(it.title) + '</span>' +
-        (it.subtitle ? '<span class="ni-desc">' + esc(it.subtitle) + '</span>' : '') +
+      const body = '<span class="ni-body"><span>' + faMark(it.title, d.q) + '</span>' +
+        (it.subtitle ? '<span class="ni-desc">' + faMark(it.subtitle, d.q) + '</span>' : '') +
         '</span>';
       // Находка без рабочей двери остаётся видимой, но не притворяется
       // кнопкой: молча пропасть хуже, чем не нажиматься.
