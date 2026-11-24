@@ -10105,7 +10105,7 @@ function _reAuth() {
       const _rb = {initData: tg.initData || ''};
       const _rm = _mirrorId(); if (_rm) _rb.mirror = _rm;
       const r = await fetchT('/api/miniapp/auth', {
-        method:'POST', headers:{'Content-Type':'application/json'},
+        method:'POST', headers:{'Content-Type':'application/json', 'Authorization':'Bearer '+TK},
         body: JSON.stringify(_rb),
       });
       if (r.ok) { TK = (await r.json()).token; openSSE(); }

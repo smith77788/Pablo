@@ -42,7 +42,7 @@ class _Pool:
     def __init__(self, tokens):
         self._tokens = tokens
     async def fetch(self, *a, **k):
-        return [{"token_enc": t} for t in self._tokens]
+        return [{"owner_id": 777, "token_enc": t} for t in self._tokens]
 
 
 def test_find_user_by_init_data_matches_a_mirror(monkeypatch):

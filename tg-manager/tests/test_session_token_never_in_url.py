@@ -60,7 +60,7 @@ def test_session_token_in_query_is_refused():
 
 
 def test_ticket_opens_only_its_path_and_only_get():
-    t = A.make_url_ticket(UID, BOT, EXPORT)
+    t = A.make_url_ticket(UID, BOT, EXPORT, sid="test_owner_session")
     assert _REAL_GET_UID(_Req(EXPORT, query={"ticket": t})) == UID
     assert _REAL_GET_UID(_Req("/api/miniapp/accounts/export", query={"ticket": t})) is None
     assert _REAL_GET_UID(_Req(EXPORT, method="POST", query={"ticket": t})) is None

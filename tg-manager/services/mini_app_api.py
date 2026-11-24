@@ -25,7 +25,7 @@ from services import osint_search as _osint
 from services import op_status
 from services.mini_app_auth import (validate_init_data, make_token, parse_token, parse_token_sid,
                                     signing_secret_ok, make_url_ticket,
-                                    parse_url_ticket, url_ticket_ttl)
+                                    parse_url_ticket, parse_url_ticket_sid, url_ticket_ttl)
 from services.secret_masking import redact_secrets, scrub_payload
 from services import mini_app_host_server
 from services import mini_app_vault
@@ -1469,7 +1469,9 @@ def _uid_from_credentials(request: web.Request) -> int | None:
         return uid
     ticket = request.query.get("ticket")
     if ticket and request.method == "GET":
-        return parse_url_ticket(ticket, _bot_token(), request.path)
+        uid, sid = parse_url_ticket_sid(ticket, _bot_token(), request.path)
+        from services import owner_sessions as _os
+        return uid if uid and sid and not _os.is_revoked(sid) else None
     return None
 
 
@@ -2760,6 +2762,21 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     # Apply security middleware (rate limiting + security headers)
     app.middlewares.append(security_middleware())
 
+    @web.middleware
+    async def owner_revocation_middleware(request, handler):
+        if request.path.startswith("/api/miniapp/"):
+            header = request.headers.get("Authorization", "")
+            sid = None
+            if header.startswith("Bearer "):
+                _, sid = parse_token_sid(header[7:], _bot_token(), max_age=10800)
+            from services import owner_sessions as _os
+            if sid and _os.is_revoked(sid):
+                return _json_resp({"error": "Вход завершён владельцем. Закройте приложение.",
+                                   "code": "session_revoked"}, status=403)
+        return await handler(request)
+
+    app.middlewares.append(owner_revocation_middleware)
+
     # Журнал админ-действий мини-аппа: каждый изменяющий запрос к
     # /api/miniapp/admin/* — кто, что, по какому пути и с каким итогом. До этого
     # след оставляла только рассылка, а выдача тарифа, бан и разбан проходили
@@ -2835,7 +2852,10 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         if not path.startswith("/api/miniapp/") or ".." in path or len(path) > 300:
             return _err("Неверный адрес", 400)
         try:
-            ticket = make_url_ticket(uid, _bot_token(), path)
+            sid = _current_sid(request)
+            if not sid:
+                return _err("Откройте Infragram заново для защищённой загрузки", 403)
+            ticket = make_url_ticket(uid, _bot_token(), path, sid=sid)
         except ValueError:
             return _err(_NO_SIGNING_SECRET, 403)
         return _json_resp({"ticket": ticket, "ttl": url_ticket_ttl(path)})
@@ -2856,29 +2876,28 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         # Проверяем подпись токеном зеркала, но сессию ниже выдаём ОСНОВНЫМ
         # токеном — так остальные ручки (их сотни, см. _get_uid) работают без
         # изменений и ничего не знают о зеркалах. Токен зеркала наружу не идёт.
-        verify_token = bot_token
         try:
             _mid = int(body.get("mirror")) if body.get("mirror") else 0
         except (TypeError, ValueError):
-            _mid = 0
+            return _err("Неверное зеркало", 400)
+        login_kind = "telegram"
         if _mid:
             from services import mirror_bot as _mb
-            _mt = await _mb.get_token_by_id(pool, _mid)
-            if _mt and signing_secret_ok(_mt):
-                verify_token = _mt
-        user = validate_init_data(init_data, verify_token)
-        # Открыто из зеркала без ?m (web-app кнопка из сообщения зеркала): подпись
-        # основным токеном не сойдётся — пробуем токены зеркал. Редкий путь:
-        # только когда основной не подтвердил.
-        if not user and verify_token == bot_token:
-            from services import mirror_bot as _mb
-            user = await _mb.find_user_by_init_data(pool, init_data, validate_init_data)
+            user = await _mb.validate_mirror_user(pool, _mid, init_data, validate_init_data)
+            login_kind = "mirror"
+        else:
+            user = validate_init_data(init_data, bot_token)
+            if not user:
+                from services import mirror_bot as _mb
+                user = await _mb.find_user_by_init_data(pool, init_data, validate_init_data)
+                if user:
+                    login_kind = "mirror"
         if not user:
             return _err("Подпись Telegram не подтвердилась — откройте приложение заново", 401)
         # Журнал входов владельца и номер сеанса в токене (services/owner_sessions):
         # завершённый сеанс отбивается, о входе с нового устройства — тревога.
         from services import owner_sessions as _os
-        sid = await _os.open_session(pool, user["user_id"], "mirror" if _mid else "telegram",
+        sid = await _os.open_session(pool, user["user_id"], login_kind,
                                      _os.request_meta(request))
         # Сессия ВСЕГДА на основном токене: её проверяет _get_uid по основному.
         token = make_token(user["user_id"], bot_token, sid=sid)

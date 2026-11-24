@@ -6,6 +6,7 @@ import hashlib
 import hmac
 import json
 import logging
+import re
 import time
 import urllib.parse
 from typing import Optional
@@ -130,13 +131,13 @@ def parse_token_sid(token: str, bot_token: str,
             payload = f"{uid}:{ts_s}:{sid}"
         else:
             return None, None
-        if time.time() - int(ts_s) > max_age:
+        if not -_INIT_DATA_FUTURE_SKEW <= time.time() - int(ts_s) <= max_age:
             return None, None
         secret = hashlib.sha256(bot_token.encode()).digest()
         expected = hmac.new(secret, payload.encode(), hashlib.sha256).hexdigest()[:24]
         if not hmac.compare_digest(expected, sig):
             return None, None
-        return int(uid), sid
+        return (int(uid), sid) if int(uid) > 0 else (None, None)
     except Exception:
         return None, None
 
@@ -171,32 +172,60 @@ def url_ticket_ttl(path: str) -> int:
     return EVENTS_TICKET_TTL if path == EVENTS_PATH else URL_TICKET_TTL
 
 
-def _ticket_sig(uid: int, ts: int, path: str, bot_token: str) -> str:
+def _ticket_sig(uid: int, ts: int, path: str, bot_token: str,
+                sid: str | None = None) -> str:
     secret = hashlib.sha256(bot_token.encode()).digest()
-    msg = f"url-ticket|{uid}|{ts}|{path}".encode()
-    return hmac.new(secret, msg, hashlib.sha256).hexdigest()[:32]
+    message = (f"url-ticket-v2|{uid}|{ts}|{sid}|{path}" if sid
+               else f"url-ticket|{uid}|{ts}|{path}")
+    return hmac.new(secret, message.encode(), hashlib.sha256).hexdigest()[:32]
 
 
-def make_url_ticket(user_id: int, bot_token: str, path: str) -> str:
-    """Пропуск на GET одного пути. Формат `uid.ts.sig` — без двоеточий, чтобы
-    parse_token не принял его за токен сессии."""
+def make_url_ticket(user_id: int, bot_token: str, path: str,
+                    sid: str | None = None) -> str:
+    """Sign one GET path, bound to the originating owner session when supplied.
+
+    Legacy pure callers retain the three-field format. HTTP entry points must
+    require a session-bound ticket to enforce revocation; the legacy format
+    cannot identify the originating session.
+    """
     if not signing_secret_ok(bot_token):
         raise ValueError("нет ключа подписи: BOT_TOKEN не задан")
+    if sid is not None and not re.fullmatch(r"[A-Za-z0-9_-]{1,128}", sid):
+        raise ValueError("неверный номер сеанса")
     ts = int(time.time())
-    return f"{int(user_id)}.{ts}.{_ticket_sig(int(user_id), ts, path, bot_token)}"
+    uid = int(user_id)
+    signature = _ticket_sig(uid, ts, path, bot_token, sid)
+    payload = f"{uid}.{ts}.{sid}" if sid else f"{uid}.{ts}"
+    return f"{payload}.{signature}"
+
+
+def parse_url_ticket_sid(ticket: str, bot_token: str,
+                         path: str) -> tuple[Optional[int], Optional[str]]:
+    """Validate path, expiry and session signature; return (uid, sid)."""
+    if not signing_secret_ok(bot_token) or not ticket:
+        return None, None
+    try:
+        parts = ticket.split(".")
+        if len(parts) == 3:
+            uid_s, ts_s, sig = parts
+            sid = None
+        elif len(parts) == 4:
+            uid_s, ts_s, sid, sig = parts
+            if not re.fullmatch(r"[A-Za-z0-9_-]{1,128}", sid):
+                return None, None
+        else:
+            return None, None
+        uid, ts = int(uid_s), int(ts_s)
+        if uid <= 0 or not 0 <= time.time() - ts <= url_ticket_ttl(path):
+            return None, None
+        expected = _ticket_sig(uid, ts, path, bot_token, sid)
+        if not hmac.compare_digest(expected, sig):
+            return None, None
+        return uid, sid
+    except (TypeError, ValueError, AttributeError):
+        return None, None
 
 
 def parse_url_ticket(ticket: str, bot_token: str, path: str) -> Optional[int]:
-    """uid, если пропуск подписан для ЭТОГО пути и не истёк; иначе None."""
-    if not signing_secret_ok(bot_token) or not ticket:
-        return None
-    try:
-        uid_s, ts_s, sig = ticket.split(".")
-        uid, ts = int(uid_s), int(ts_s)
-        if not 0 <= time.time() - ts <= url_ticket_ttl(path):
-            return None
-        if not hmac.compare_digest(_ticket_sig(uid, ts, path, bot_token), sig):
-            return None
-        return uid
-    except Exception:
-        return None
+    """Compatibility helper: validate a bound or legacy ticket for one path."""
+    return parse_url_ticket_sid(ticket, bot_token, path)[0]

@@ -116,6 +116,24 @@ async def get_token_by_id(pool, mirror_id: int) -> str | None:
         return None
 
 
+def _validated_owner(row, init_data: str, validate) -> dict | None:
+    try:
+        owner_id = int(row["owner_id"])
+        token = decrypt_token(row["token_enc"])
+        user = validate(init_data, token)
+        return user if user and int(user["user_id"]) == owner_id else None
+    except Exception:
+        log.debug("mirror_bot: invalid mirror authentication record")
+        return None
+
+
+async def validate_mirror_user(pool, mirror_id: int, init_data: str, validate) -> dict | None:
+    """A personal mirror can authenticate only its registered owner."""
+    row = await pool.fetchrow(
+        "SELECT owner_id, token_enc FROM mirror_bots WHERE id=$1", int(mirror_id))
+    return _validated_owner(row, init_data, validate) if row else None
+
+
 async def find_user_by_init_data(pool, init_data: str, validate) -> dict | None:
     """Найти зеркало, чьим токеном подтверждается initData, и вернуть его
     пользователя. Нужен для web-app кнопок, которые хендлеры шлют из зеркала БЕЗ
@@ -124,16 +142,12 @@ async def find_user_by_init_data(pool, init_data: str, validate) -> dict | None:
     """
     try:
         rows = await pool.fetch(
-            "SELECT token_enc FROM mirror_bots ORDER BY id LIMIT 500")
+            "SELECT owner_id, token_enc FROM mirror_bots ORDER BY id LIMIT 500")
     except Exception as exc:
         log.debug("mirror_bot.find_user_by_init_data: %s", exc)
         return None
-    for r in rows:
-        try:
-            tok = decrypt_token(r["token_enc"])
-        except Exception:
-            continue
-        user = validate(init_data, tok)
+    for row in rows:
+        user = _validated_owner(row, init_data, validate)
         if user:
             return user
     return None

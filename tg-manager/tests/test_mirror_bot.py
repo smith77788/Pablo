@@ -92,9 +92,9 @@ def test_auth_handler_validates_against_mirror_then_issues_main_session():
     src = _src("services/mini_app_api.py")
     a = src[src.index("async def auth("):]
     a = a[:a.index("async def mirror_get(")]
-    assert "get_token_by_id(pool, _mid)" in a, "auth не берёт токен зеркала"
-    assert "verify_token = _mt" in a
-    assert "validate_init_data(init_data, verify_token)" in a
+    assert "validate_mirror_user(pool, _mid, init_data, validate_init_data)" in a
+    assert 'login_kind = "mirror"' in a
+    assert "validate_init_data(init_data, bot_token)" in a
     assert "make_token(user[\"user_id\"], bot_token, sid=sid)" in a, "сессия должна быть на основном токене"
 
 
