@@ -1453,7 +1453,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
     <!-- Колокольчик: лента уведомлений (screens/notifications_feed.js). Значок
          показывает непрочитанное; счётчик спрашивается отдельной лёгкой
          ручкой, а не загрузкой всей ленты. -->
-    <div class="icon-btn" role="button" tabindex="0" aria-label="Уведомления" onclick="openNotificationsFeed()" style="position:relative">🔔<span id="homeNotifBadge" class="hdr-badge" style="display:none"></span></div>
+    <div class="icon-btn" role="button" tabindex="0" aria-label="Поиск по своему" onclick="openFindAll('')">🔍</div><div class="icon-btn" role="button" tabindex="0" aria-label="Уведомления" onclick="openNotificationsFeed()" style="position:relative">🔔<span id="homeNotifBadge" class="hdr-badge" style="display:none"></span></div>
     <div class="icon-btn" role="button" tabindex="0" aria-label="Обновить" onclick="loadHome()">🔄</div>
     <div class="hdr-meta">
       <div class="hdr-user" id="hUser">...</div>
@@ -2499,6 +2499,11 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
         <div class="mgmt-tile-ico">🔔</div>
         <div class="mgmt-tile-lbl">Уведомления</div>
         <div class="mgmt-tile-val" id="m-notif-cnt"></div>
+      </div>
+      <div class="mgmt-tile" onclick="openFindAll('')">
+        <div class="mgmt-tile-ico">🔍</div>
+        <div class="mgmt-tile-lbl">Поиск по своему</div>
+        <div class="mgmt-tile-val"></div>
       </div>
     </div>
 
@@ -8051,6 +8056,19 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 
 <!-- ══════════════════════ SCREEN: УВЕДОМЛЕНИЯ ══════════════════════ -->
 <!-- Лента событий: screens/notifications_feed.js, /api/miniapp/notifications -->
+<div class="screen" id="s-findall">
+  <div class="hdr">
+    <div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div>
+    <div class="hdr-title">🔍 Поиск по своему</div>
+  </div>
+  <div class="sub-sb">
+    <input class="inp" id="faQuery" type="search" autocomplete="off"
+           placeholder="Телефон, ник, канал, контакт, рассылка, операция"
+           oninput="faSearch(this.value)" style="width:calc(100% - 32px);margin:8px 16px">
+    <div id="faResults" style="margin:0 16px 16px"></div>
+  </div>
+</div>
+
 <div class="screen" id="s-notifications" data-reload="loadNotificationsFeed">
   <div class="hdr">
     <div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div>
@@ -10836,6 +10854,7 @@ function goTab(tab) {
 // Пер-модульные описания «что делает» (по названию плитки). Показываются
 // подписью в боковом меню и как tooltip на плитках каталога «Все функции».
 const MODULE_DESCS = {
+  'Поиск по своему':'Один запрос по аккаунтам, ботам, каналам, контактам, рассылкам и операциям',
   'Уведомления':'История событий: итоги операций, ограничения аккаунтов, новые подписчики',
   
   'Реферальная программа':'Код приглашения и приведённые пользователи',
@@ -38296,5 +38315,6 @@ function renderAudSegChart(segments) {
 <script src="screens/notifications_feed.js"></script>
 <script src="screens/ux_kit.js"></script>
 <script src="screens/tab_badges.js"></script>
+<script src="screens/find_all.js"></script>
 </body>
 </html>

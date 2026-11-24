@@ -10285,6 +10285,9 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     # Значки на вкладках таббара (services/mini_app_badges.py).
     from services import mini_app_badges
     mini_app_badges.setup_routes(app, pool)
+    # Поиск по своим данным (services/mini_app_global_search.py).
+    from services import mini_app_global_search
+    mini_app_global_search.setup_routes(app, pool)
     mini_app_operations.setup_routes(app, pool)
     mini_app_dashboard.setup_routes(app, pool)
     mini_app_dm.setup_routes(app, pool)

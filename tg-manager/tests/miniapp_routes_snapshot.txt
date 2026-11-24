@@ -341,6 +341,7 @@ GET /api/miniapp/sales/orders
 GET /api/miniapp/sales/persona/{pid}
 GET /api/miniapp/sales/persona/{pid}/stats
 GET /api/miniapp/sales/personas
+GET /api/miniapp/search/everything
 GET /api/miniapp/self_promo
 GET /api/miniapp/self_promo/audience
 GET /api/miniapp/selfpromo/overview
@@ -715,6 +716,7 @@ HEAD /api/miniapp/sales/orders
 HEAD /api/miniapp/sales/persona/{pid}
 HEAD /api/miniapp/sales/persona/{pid}/stats
 HEAD /api/miniapp/sales/personas
+HEAD /api/miniapp/search/everything
 HEAD /api/miniapp/self_promo
 HEAD /api/miniapp/self_promo/audience
 HEAD /api/miniapp/selfpromo/overview
