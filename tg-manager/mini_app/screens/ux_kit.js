@@ -134,6 +134,8 @@ function uxInit() {
   document.addEventListener('touchmove', uxPullMove, { passive: true });
   document.addEventListener('touchend', uxPullEnd, { passive: true });
   document.addEventListener('touchcancel', uxPullEnd, { passive: true });
+  document.addEventListener('touchstart', uxSwipeStart, { passive: true });
+  document.addEventListener('touchend', uxSwipeEnd, { passive: true });
 
   window.addEventListener('offline', () => uxOffline(true));
   window.addEventListener('online', () => uxOffline(false));
@@ -328,4 +330,71 @@ function uxPullEnd() {
   // возвращают (и не обязаны), а висящее «обновляем…» — это ложь о состоянии.
   setTimeout(() => uxPullBar(''), 900);
   try { fn(); } catch (_) { uxPullBar(''); }
+}
+
+// ── Свайп от левого края — назад ───────────────────────────────────────────
+// Кнопка «←» живёт в левом верхнем углу, и на телефоне с большим экраном до
+// неё надо тянуться второй рукой: в приложении, где экраны вложены на три-
+// четыре уровня (список → карточка → раздел карточки), это самый частый жест
+// за день. Системный свайп Telegram закрывает ВСЁ приложение, а не шаг назад,
+// поэтому его не хватало ровно там, где он привычен.
+//
+// Жест читается только от самого края (иначе он отбирал бы горизонтальную
+// прокрутку у полос чипов) и только когда есть куда возвращаться.
+const UX_EDGE = 24;           // откуда начинается «от края»
+const UX_BACK_AT = 64;        // сколько протянуть вбок
+const UX_BACK_SLOPE = 48;     // насколько вертикальным жест быть не должен
+let UX_SWIPE = null;
+
+// Вердикт по жесту отдельной функцией: в обработчике его не проверить — там
+// нет ни пальца, ни экрана.
+function uxSwipeVerdict(x0, dx, dy) {
+  if (x0 > UX_EDGE) return '';            // не от края — это прокрутка
+  if (dx < UX_BACK_AT) return '';
+  if (Math.abs(dy) > UX_BACK_SLOPE) return '';   // слишком вертикально
+  return 'back';
+}
+
+function uxSwipeStart(ev) {
+  UX_SWIPE = null;
+  const t = ev.touches;
+  if (!t || t.length !== 1) return;
+  if (t[0].clientX > UX_EDGE) return;
+  UX_SWIPE = { x0: t[0].clientX, y0: t[0].clientY };
+}
+
+function uxSwipeEnd(ev) {
+  const st = UX_SWIPE;
+  UX_SWIPE = null;
+  if (!st) return;
+  const t = ev.changedTouches;
+  if (!t || t.length !== 1) return;
+  if (uxSwipeVerdict(st.x0, t[0].clientX - st.x0, t[0].clientY - st.y0) !== 'back') return;
+  // Возвращаться некуда — молчим: «назад» с корневого экрана закрыл бы
+  // приложение, а этого человек жестом не просил.
+  if (typeof STACK === 'undefined' || !STACK.length) return;
+  if (typeof back !== 'function') return;
+  try { tg && tg.HapticFeedback && tg.HapticFeedback.impactOccurred('light'); } catch (_) {}
+  back();
+}
+
+// ── «Показаны последние данные» ────────────────────────────────────────────
+// Список открывается последними данными, а не спиннером: в метро и в лифте
+// ответ сервера идёт секундами, и всё это время экран был пуст — приложение
+// выглядело сломанным там, где оно просто ждало сеть. Но показанное из кэша
+// обязано НАЗЫВАТЬ СЕБЯ: молча показать вчерашний список хуже, чем пустой
+// экран, потому что по нему принимают решения.
+function uxStale(id, on) {
+  const el = document.getElementById(id);
+  if (!el || !el.parentNode) return;
+  const noteId = id + '-stale';
+  let note = document.getElementById(noteId);
+  if (!on) { if (note && note.parentNode) note.parentNode.removeChild(note); return; }
+  if (note) return;
+  note = document.createElement('div');
+  note.id = noteId;
+  note.className = 'hint ux-stale';
+  note.setAttribute('role', 'status');
+  note.textContent = '⏳ Показаны последние данные, обновляем…';
+  el.parentNode.insertBefore(note, el);
 }
