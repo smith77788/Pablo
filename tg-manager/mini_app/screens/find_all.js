@@ -114,15 +114,49 @@ function _faClick(it) {
   return it.fn + '(' + arg + ')';
 }
 
+// Разделы приложения ищутся ЗДЕСЬ, по самому каталогу: у них нет и не должно
+// быть таблицы в базе, а искать «где включить прогрев» человек приходит тем же
+// полем, что и «тот номер». Раньше для этого было отдельное поле в боковом
+// меню — то есть надо было помнить, что раздел ищут не там, где данные.
+function faSections(q) {
+  const more = document.getElementById('s-more');
+  const needle = String(q || '').trim().toLowerCase();
+  if (!more || needle.length < 2) return [];
+  const out = [];
+  more.querySelectorAll('.mgmt-tile').forEach(tile => {
+    if (out.length >= 6) return;
+    const lbl = ((tile.querySelector('.mgmt-tile-lbl') || {}).textContent || '').trim();
+    if (!lbl) return;
+    const desc = (typeof MODULE_DESCS !== 'undefined' && MODULE_DESCS[lbl]) || '';
+    if (!lbl.toLowerCase().includes(needle) && !desc.toLowerCase().includes(needle)) return;
+    const icoEl = tile.querySelector('.mgmt-tile-ico');
+    const ico = (icoEl && (icoEl.dataset.emoji || icoEl.textContent || '').trim()) || '•';
+    // Обработчик берём из НАШЕЙ разметки — это тот же переход, что у плитки
+    // каталога, поэтому раздел не разъедется с каталогом при переименовании.
+    out.push({ title: lbl, subtitle: desc, ico, go: tile.getAttribute('onclick') || '' });
+  });
+  return out;
+}
+
 function _faRender(d) {
   const groups = (d.groups || []).filter(g => (g.items || []).length);
-  if (!groups.length) {
+  const sections = faSections(d.q);
+  if (!groups.length && !sections.length) {
     txt('faResults', empty('🔍', 'Ничего не найдено',
-      'По запросу «' + (d.q || '') + '» в аккаунтах, ботах, каналах, контактах, ' +
-      'рассылках и операциях ничего нет'));
+      'По запросу «' + (d.q || '') + '» ничего нет ни в разделах приложения, ни в ' +
+      'аккаунтах, ботах, каналах, контактах, рассылках и операциях'));
     return;
   }
   let html = '';
+  if (sections.length) {
+    html += '<div class="nav-cat">🧭 Разделы приложения · ' + String(sections.length) + '</div>';
+    html += sections.map(it =>
+      '<div class="nav-item has-desc" role="button" tabindex="0" onclick="' + esc(it.go) + '">' +
+      '<span class="ni-ico">' + esc(it.ico) + '</span>' +
+      '<span class="ni-body"><span>' + faMark(it.title, d.q) + '</span>' +
+      (it.subtitle ? '<span class="ni-desc">' + faMark(it.subtitle, d.q) + '</span>' : '') +
+      '</span></div>').join('');
+  }
   for (const g of groups) {
     html += '<div class="nav-cat">' + esc(g.icon) + ' ' + esc(g.label) +
       ' · ' + String(g.items.length) + '</div>';

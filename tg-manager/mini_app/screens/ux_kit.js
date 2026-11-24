@@ -212,6 +212,9 @@ function uxNavPin(lbl, ico, handler) {
   uxNavSave(mem);
   if (typeof buildDrawer === 'function') buildDrawer();
   if (typeof markDrawerActive === 'function') markDrawerActive();
+  // Главный экран показывает то же закреплённое: звезда, нажатая в каталоге,
+  // обязана отразиться там сразу, а не после перезагрузки приложения.
+  uxPinnedHome();
 }
 
 // Разметка блоков «Закреплённые» и «Недавние» для каталога. Отдаём строкой —
@@ -456,4 +459,21 @@ function uxHoldMove(ev) {
 function uxHoldCancel() {
   if (UX_HOLD) clearTimeout(UX_HOLD.timer);
   UX_HOLD = null;
+}
+
+// Закреплённые разделы на главном экране. Каталог человек открывает не чтобы
+// читать каталог, а чтобы попасть в свои пять-шесть разделов; значит им место
+// на первом экране, а не за двумя нажатиями. Пусто — блока нет: пустая полка
+// занимает место и ничего не говорит.
+function uxPinnedHome() {
+  const box = document.getElementById('homePinned');
+  if (!box) return;
+  const pinned = uxNavMemory().pinned;
+  if (!pinned.length) { box.innerHTML = ''; return; }
+  box.innerHTML = '<div class="sec">⭐ Закреплённое</div><div class="qa-grid">' +
+    pinned.slice(0, 8).map(it =>
+      `<div class="qa-tile" role="button" tabindex="0" onclick="${String(it.h || '').replace(/"/g, '&quot;')}">` +
+      `<div class="qa-tile-ico">${uxNavEsc(it.ico)}</div>` +
+      `<div class="qa-tile-lbl">${uxNavEsc(it.lbl)}</div></div>`).join('') +
+    '</div>';
 }

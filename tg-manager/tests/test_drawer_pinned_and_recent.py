@@ -26,8 +26,11 @@ HTML = (ROOT / "mini_app" / "index.html").read_text(encoding="utf-8")
 
 pytestmark = pytest.mark.skipif(not shutil.which("node"), reason="нужен node")
 
+# Стенд обязан знать ВСЁ, что зовёт проверяемая функция: uxNavPin обновляет и
+# полку закреплённого на главном экране, и без неё стенд падал бы ReferenceError
+# — то есть сообщал бы о поломке там, где её нет.
 _NAMES = ("uxNavMemory", "uxNavSave", "uxNavRemember", "uxNavPinned", "uxNavPin",
-          "uxNavBlocks", "uxNavEsc", "uxNavQ")
+          "uxNavBlocks", "uxNavEsc", "uxNavQ", "uxPinnedHome")
 
 
 def _fn(name: str) -> str:
