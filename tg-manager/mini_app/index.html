@@ -10426,6 +10426,12 @@ function liveOpRows(items) {
     document.querySelectorAll('[data-op-bar="' + id + '"]').forEach(el => {
       el.style.width = pct + '%';
     });
+    // Оценка «сколько ещё» пересчитывается вместе с числами, иначе она
+    // застывала бы на момент открытия экрана.
+    document.querySelectorAll('[data-op-eta="' + id + '"]').forEach(el => {
+      const t = _opEta(done, total, el.getAttribute('data-op-start'));
+      el.textContent = t ? ' · ' + t : '';
+    });
   });
 }
 
@@ -15643,7 +15649,7 @@ function renderOps() {
           <div class="ava ava-orange">⚙️</div>
           <div class="li-body">
             <div class="li-name">${esc(o.label||opRu(o.op_type)||'операция')}${(o.scheduled_for&&new Date(o.scheduled_for)>new Date())?' <span class="badge b-or">⏰</span>':''}</div>
-            <div class="li-sub">${(o.scheduled_for&&new Date(o.scheduled_for)>new Date())?'⏰ запланировано на '+new Date(o.scheduled_for).toLocaleString('ru-RU'):`<span data-op-cnt="${o.id}">${num(dDone)+'/'+num(o.total_items||0)}</span> · `+ago(o.created_at)}</div>
+            <div class="li-sub">${(o.scheduled_for&&new Date(o.scheduled_for)>new Date())?'⏰ запланировано на '+new Date(o.scheduled_for).toLocaleString('ru-RU'):`<span data-op-cnt="${o.id}">${num(dDone)+'/'+num(o.total_items||0)}</span>`+_opEtaSpan(o)+' · '+ago(o.created_at)}</div>
           </div>
           <div style="display:flex;align-items:center;gap:6px">
             <span class="badge ${bc}">${bl}</span>
@@ -15697,7 +15703,7 @@ async function openOpDetail(opId) {
       <div class="lst" style="margin:12px 16px 0">
         <div class="row"><div class="row-body"><div class="row-name">Тип</div><div class="row-val">${esc(o.label || opRu(o.op_type) || '')}</div></div></div>
         <div class="row"><div class="row-body"><div class="row-name">Статус</div><div class="row-val"><span class="badge ${bc}">${bl}</span></div></div></div>
-        <div class="row"><div class="row-body"><div class="row-name">Прогресс</div><div class="row-val"><span data-op-cnt="${o.id}">${num(dDone)} / ${num(o.total_items||0)}</span> (<span data-op-pct="${o.id}">${pct}</span>%)</div></div></div>
+        <div class="row"><div class="row-body"><div class="row-name">Прогресс</div><div class="row-val"><span data-op-cnt="${o.id}">${num(dDone)} / ${num(o.total_items||0)}</span> (<span data-op-pct="${o.id}">${pct}</span>%)${_opEtaSpan(o)}</div></div></div>
         <div class="row"><div class="row-body"><div class="row-name">Создано</div><div class="row-val">${o.created_at?new Date(o.created_at).toLocaleString('ru-RU'):''}</div></div></div>
         ${(o.scheduled_for&&new Date(o.scheduled_for)>new Date())?`<div class="row"><div class="row-body"><div class="row-name">⏰ Запланировано</div><div class="row-val" style="color:var(--orange)">${new Date(o.scheduled_for).toLocaleString('ru-RU')}</div></div></div>`:''}
         ${o.started_at?`<div class="row"><div class="row-body"><div class="row-name">Начато</div><div class="row-val">${new Date(o.started_at).toLocaleString('ru-RU')}</div></div></div>`:''}
@@ -15846,6 +15852,25 @@ function _opDuration(sec) {
   if (h) return h+' ч '+m+' мин';
   if (m) return m+' мин '+s+' с';
   return s+' с';
+}
+// Сколько ещё ждать: по средней скорости с начала прогона. Владелец видел
+// «12/340» и не знал, ждать пять минут или до вечера. Оценка честно
+// грубая («≈», паузы от FloodWait в неё входят) и не показывается, пока
+// данных мало: по первым двум целям за десять секунд она врала бы в разы.
+function _opEta(done, total, startedAt, nowMs) {
+  done = +done || 0; total = +total || 0;
+  const t0 = startedAt ? Date.parse(startedAt) : NaN;
+  if (!(total > done) || done < 3 || !isFinite(t0)) return '';
+  const sec = ((nowMs || Date.now()) - t0) / 1000;
+  if (!(sec >= 30)) return '';
+  const left = (total - done) * sec / done;
+  if (left < 60) return '≈ меньше минуты';
+  return '≈ ещё ' + _opDuration(Math.round(left / 60) * 60).replace(/ 0 (мин|с)$/, '');
+}
+function _opEtaSpan(o) {
+  if (o.status !== 'running') return '';
+  const t = _opEta(o.done_items, o.total_items, o.started_at);
+  return `<span data-op-eta="${o.id}" data-op-start="${esc(o.started_at || '')}">${t ? ' · ' + esc(t) : ''}</span>`;
 }
 function _opSpeed(done, sec) {
   const perMin = done / Math.max(sec/60, 1/60);
