@@ -11,6 +11,7 @@
 """
 from __future__ import annotations
 
+import asyncio
 import csv
 import io
 import json
@@ -329,7 +330,23 @@ async def import_contacts(pool, owner_id: int, rows: list[dict], source: str = "
     return await _import_one_by_one(pool, owner_id, rows, source)
 
 
-_LOOKUP_CHUNK = 5000
+# Поиск уже лежащих контактов по телефонам файла — ОДИН проход по контактам
+# владельца. Прежний `phones ?| $2::text[]` пачками по 5000 номеров Postgres
+# исполнял перебором: каждая строка сверялась со всем массивом, и повторный
+# импорт файла на 50 тыс. номеров стоял ~40 с на одном поиске (десять пачек по
+# ~4 с). Здесь номера контакта разворачиваются и сверяются с массивом через
+# хеш: 0,03 с на ту же пачку. Строка, где phones не массив (старые данные),
+# просто не совпадает, а не роняет весь импорт.
+_LOOKUP_SQL = """
+    SELECT u.id, u.phones, u.emails, u.addresses, u.first_name, u.last_name,
+           u.patronymic, u.display_name, u.company, u.notes, u.tags
+      FROM unified_contacts u
+     WHERE u.owner_id = $1
+       AND CASE WHEN jsonb_typeof(u.phones) = 'array' THEN EXISTS (
+               SELECT 1 FROM jsonb_array_elements_text(u.phones) AS ph(p)
+                WHERE ph.p = ANY($2::text[]))
+           ELSE FALSE END
+     ORDER BY u.created_at, u.id"""
 
 
 def _jlist(v):
@@ -354,24 +371,22 @@ def _absorb(state: dict, rec: dict, tag: str) -> None:
     state["tags"] = _union(state["tags"], [tag, "импорт"])
 
 
-async def _import_batched(conn, owner_id: int, rows: list[dict], source: str) -> dict:
+def _plan_import(existing, rows: list[dict], tag: str) -> tuple:
+    """Чистая часть импорта: что вставить, что обновить, что посчитать.
+
+    Идёт в потоке: на файле в 50 тыс. строк это около секунды питона, и на
+    цикле событий она останавливала весь процесс — бот, мини-апп, операции.
+    """
     created = updated = skipped = 0
-    tag = source[:40]
-    wanted = sorted({p for rec in rows for p in rec.get("phones", []) if p})
     by_phone: dict[str, dict] = {}
-    for i in range(0, len(wanted), _LOOKUP_CHUNK):
-        for r in await conn.fetch(
-                "SELECT id, phones, emails, addresses, first_name, last_name, "
-                "patronymic, display_name, company, notes, tags "
-                "FROM unified_contacts WHERE owner_id=$1 AND phones ?| $2::text[]",
-                owner_id, wanted[i:i + _LOOKUP_CHUNK]):
-            st = {k: r[k] for k in ("first_name", "last_name", "patronymic",
-                                    "display_name", "company", "notes")}
-            st.update(id=r["id"], new=False, phones=_jlist(r["phones"]),
-                      emails=_jlist(r["emails"]), addresses=_jlist(r["addresses"]),
-                      tags=list(r["tags"] or []))
-            for ph in st["phones"]:
-                by_phone.setdefault(ph, st)
+    for r in existing:
+        st = {k: r[k] for k in ("first_name", "last_name", "patronymic",
+                                "display_name", "company", "notes")}
+        st.update(id=r["id"], new=False, phones=_jlist(r["phones"]),
+                  emails=_jlist(r["emails"]), addresses=_jlist(r["addresses"]),
+                  tags=list(r["tags"] or []))
+        for ph in st["phones"]:
+            by_phone.setdefault(ph, st)
     touched: dict[int, dict] = {}
     fresh: list[dict] = []
     for rec in rows:
@@ -403,25 +418,38 @@ async def _import_batched(conn, owner_id: int, rows: list[dict], source: str) ->
         # найдёт этот контакт, как находила его в базе поштучная версия.
         for ph in target["phones"]:
             by_phone.setdefault(ph, target)
-    if fresh:
+    insert_args = [
+        (t["id"], t["first_name"], t["last_name"], t["patronymic"],
+         t["display_name"], json.dumps(t["phones"]), json.dumps(t["emails"]),
+         json.dumps(t["addresses"]), t["company"], t["notes"], t["tags"])
+        for t in fresh]
+    update_args = [
+        (t["id"], t["first_name"], t["last_name"], t["patronymic"],
+         t["display_name"], t["company"], t["notes"], json.dumps(t["phones"]),
+         json.dumps(t["emails"]), json.dumps(t["addresses"]), t["tags"])
+        for t in touched.values()]
+    return insert_args, update_args, created, updated, skipped
+
+
+async def _import_batched(conn, owner_id: int, rows: list[dict], source: str) -> dict:
+    tag = source[:40]
+    wanted = sorted({p for rec in rows for p in rec.get("phones", []) if p})
+    existing = await conn.fetch(_LOOKUP_SQL, owner_id, wanted) if wanted else []
+    insert_args, update_args, created, updated, skipped = await asyncio.to_thread(
+        _plan_import, existing, rows, tag)
+    if insert_args:
         await conn.executemany(
             "INSERT INTO unified_contacts (id, owner_id, first_name, last_name, "
             "patronymic, display_name, phones, emails, addresses, company, notes, "
             "tags, persona_type) VALUES "
-            "($1,$2,$3,$4,$5,$6,$7::jsonb,$8::jsonb,$9::jsonb,$10,$11,$12,'imported')",
-            [(t["id"], owner_id, t["first_name"], t["last_name"], t["patronymic"],
-              t["display_name"], json.dumps(t["phones"]), json.dumps(t["emails"]),
-              json.dumps(t["addresses"]), t["company"], t["notes"], t["tags"])
-             for t in fresh])
-    if touched:
+            "($1,$12,$2,$3,$4,$5,$6::jsonb,$7::jsonb,$8::jsonb,$9,$10,$11,'imported')",
+            [a + (owner_id,) for a in insert_args])
+    if update_args:
         await conn.executemany(
-            "UPDATE unified_contacts SET first_name=$3, last_name=$4, patronymic=$5, "
-            "display_name=$6, company=$7, notes=$8, phones=$9::jsonb, emails=$10::jsonb, "
-            "addresses=$11::jsonb, tags=$12, updated_at=NOW() WHERE id=$1 AND owner_id=$2",
-            [(t["id"], owner_id, t["first_name"], t["last_name"], t["patronymic"],
-              t["display_name"], t["company"], t["notes"], json.dumps(t["phones"]),
-              json.dumps(t["emails"]), json.dumps(t["addresses"]), t["tags"])
-             for t in touched.values()])
+            "UPDATE unified_contacts SET first_name=$2, last_name=$3, patronymic=$4, "
+            "display_name=$5, company=$6, notes=$7, phones=$8::jsonb, emails=$9::jsonb, "
+            "addresses=$10::jsonb, tags=$11, updated_at=NOW() WHERE id=$1 AND owner_id=$12",
+            [a + (owner_id,) for a in update_args])
     return {"created": created, "updated": updated,
             "total": len(rows), "skipped": skipped}
 

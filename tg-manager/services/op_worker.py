@@ -20712,7 +20712,10 @@ async def _exec_contacts_import(
         except Exception:
             pass
     try:
-        rows = _fi.parse_contacts(filename, data)
+        # Разбор файла — чистый CPU: xlsx на 50 тыс. строк это ~3 с, и на
+        # цикле событий они останавливали бы весь процесс — бот, мини-апп и
+        # остальные операции. Поэтому в поток.
+        rows = await asyncio.to_thread(_fi.parse_contacts, filename, data)
     except Exception:
         log.exception("contacts_import op=%d parse owner=%s", op_id, owner_id)
         return {"status": "failed",

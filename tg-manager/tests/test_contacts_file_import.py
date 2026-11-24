@@ -139,7 +139,9 @@ def test_worker_executor_parses_imports_and_chains_push():
     src = _src("services/op_worker.py")
     body = src[src.index("async def _exec_contacts_import("):]
     body = body[:body.index("async def _exec_contacts_push(")]
-    assert "parse_contacts(" in body and "import_contacts(" in body
+    # Разбор файла — чистый CPU (xlsx на 50 тыс. строк ~3 с): идёт в потоке,
+    # иначе стоит весь процесс.
+    assert "asyncio.to_thread(_fi.parse_contacts," in body and "import_contacts(" in body
     # По успеху — авто-выгрузка в книги флота (contacts_push).
     assert '"contacts_push"' in body
     # Временный файл удаляется.

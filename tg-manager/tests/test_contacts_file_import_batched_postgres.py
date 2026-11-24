@@ -107,3 +107,52 @@ def test_batch_path_is_taken(monkeypatch):
 
     s = _run(_go())
     assert (s["created"], s["updated"], s["skipped"]) == (4, 2, 1), s
+
+
+def test_lookup_is_one_query_and_survives_non_array_phones():
+    """Поиск существующих — один запрос на весь файл, а не пачки `?|`, которые
+    Postgres исполнял перебором (~4 с на 5000 номеров). Старая строка, где
+    phones не массив, не должна ронять весь импорт в медленный поштучный путь."""
+    import asyncpg
+
+    from services.contacts_hub import file_import as fi
+
+    async def body():
+        pool = await asyncpg.create_pool(DSN, min_size=1, max_size=2)
+        try:
+            await pool.execute("DELETE FROM unified_contacts WHERE owner_id=$1", A)
+            await pool.execute(
+                "INSERT INTO unified_contacts (owner_id, display_name, phones) "
+                "VALUES ($1, 'старый', '\"+79990000077\"'::jsonb), "
+                "       ($1, 'есть', '[\"+79990000001\"]'::jsonb)", A)
+            calls = []
+            orig = fi._import_one_by_one
+
+            async def _slow(*a, **k):
+                calls.append(1)
+                return await orig(*a, **k)
+
+            fi._import_one_by_one = _slow
+            try:
+                res = await fi.import_contacts(pool, A, [
+                    {"phones": ["+79990000001"], "first_name": "Иван"},
+                    {"phones": ["+79990000002"], "display_name": "Новый"}])
+            finally:
+                fi._import_one_by_one = orig
+            assert not calls, "пачка упала и ушла в поштучный путь"
+            assert (res["created"], res["updated"]) == (1, 1)
+            assert fi._LOOKUP_SQL.count("FROM unified_contacts") == 1
+            assert "?|" not in fi._LOOKUP_SQL
+        finally:
+            await pool.execute("DELETE FROM unified_contacts WHERE owner_id=$1", A)
+            await pool.close()
+
+    _run(body())
+
+
+def test_import_planning_runs_off_the_event_loop():
+    import inspect
+
+    from services.contacts_hub import file_import as fi
+    src = inspect.getsource(fi._import_batched)
+    assert "asyncio.to_thread(" in src and "_plan_import" in src
