@@ -804,7 +804,69 @@ async def _section_live(pool: asyncpg.Pool, uid: int, key: str) -> tuple[str, li
         )
         buttons = [] if bots else [("➕ Подключить бота", BotCb(action="add"))]
         return line, buttons
+    if key == "messages":
+        return await _messages_live(pool, uid)
     return "", []
+
+
+async def _messages_live(pool: asyncpg.Pool, uid: int) -> tuple[str, list]:
+    """Раздел «Сообщения»: какие рассылки и кампании в личку идут прямо сейчас.
+
+    Раньше, чтобы увидеть ход рассылки, надо было знать путь «Мои боты → бот
+    → Рассылка → История». Теперь идущая рассылка — кнопка с прогрессом на
+    экране раздела, а кампания в личку на паузе — кнопка к её карточке.
+    """
+    from bot.callbacks import BroadcastCb
+
+    bcs, dms = await asyncio.gather(
+        pool.fetch(
+            """SELECT b.id, b.bot_id, b.sent_count, b.failed_count, b.total_users, b.status
+               FROM broadcasts b JOIN managed_bots m ON m.bot_id = b.bot_id
+               WHERE m.added_by=$1 AND b.status IN ('pending','running')
+               ORDER BY b.created_at DESC LIMIT 3""",
+            uid,
+        ),
+        pool.fetch(
+            """SELECT id, name, sent_count, fail_count, total_targets, status
+               FROM dm_campaigns
+               WHERE owner_id=$1 AND status IN ('running','paused')
+               ORDER BY created_at DESC LIMIT 3""",
+            uid,
+        ),
+    )
+    buttons: list = []
+    for b in bcs:
+        done = int(b["sent_count"] or 0) + int(b["failed_count"] or 0)
+        total = int(b["total_users"] or 0)
+        label = (
+            f"📢 Рассылка идёт: {done} из {total}" if b["status"] == "running" and total
+            else "📢 Рассылка в очереди"
+        )
+        buttons.append((label, BroadcastCb(action="detail", bot_id=b["bot_id"], broadcast_id=b["id"])))
+    paused_dm = 0
+    for d in dms:
+        name = str(d["name"] or "без названия")
+        if len(name) > 24:
+            name = name[:23] + "…"
+        if d["status"] == "paused":
+            paused_dm += 1
+            label = f"⏸ «{name}» на паузе"
+        else:
+            done = int(d["sent_count"] or 0) + int(d["fail_count"] or 0)
+            label = f"📨 «{name}»: {done} из {int(d['total_targets'] or 0)}"
+        buttons.append((label, DmCb(action="detail", campaign_id=d["id"])))
+    if not buttons:
+        return "\n\n<i>Сейчас ничего не отправляется.</i>", []
+    parts = []
+    if bcs:
+        n = len(bcs)
+        parts.append(f"📢 {n} {plural(n, 'рассылка', 'рассылки', 'рассылок')} через бота")
+    running_dm = len(dms) - paused_dm
+    if running_dm:
+        parts.append(f"📨 {running_dm} {plural(running_dm, 'кампания', 'кампании', 'кампаний')} в личку")
+    if paused_dm:
+        parts.append(f"⏸ {paused_dm} на паузе")
+    return "\n\n<i>Сейчас идёт: " + " · ".join(parts) + "</i>", buttons
 
 
 @router.callback_query(BmCb.filter(F.action == "tools"))

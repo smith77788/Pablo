@@ -417,6 +417,14 @@ async def cb_detail(
     callback: CallbackQuery, callback_data: BroadcastCb, pool: asyncpg.Pool
 ) -> None:
 
+    # Чужая рассылка по подставленному bot_id — «не найдена», а не её текст.
+    if not await db.get_bot(
+        pool, callback_data.bot_id, callback.from_user.id, include_inactive=True
+    ):
+        await callback.answer(
+            "Рассылка не найдена. Откройте историю рассылок заново.", show_alert=True
+        )
+        return
     bc = await db.get_broadcast(
         pool, callback_data.broadcast_id, bot_id=callback_data.bot_id
     )
@@ -549,6 +557,14 @@ async def cb_bc_stat(
     callback: CallbackQuery, callback_data: BroadcastCb, pool: asyncpg.Pool
 ) -> None:
     """Show detailed stats for a completed broadcast."""
+    # Чужая рассылка по подставленному bot_id — «не найдена», а не её текст.
+    if not await db.get_bot(
+        pool, callback_data.bot_id, callback.from_user.id, include_inactive=True
+    ):
+        await callback.answer(
+            "Рассылка не найдена. Откройте историю рассылок заново.", show_alert=True
+        )
+        return
     bc = await db.get_broadcast(
         pool, callback_data.broadcast_id, bot_id=callback_data.bot_id
     )

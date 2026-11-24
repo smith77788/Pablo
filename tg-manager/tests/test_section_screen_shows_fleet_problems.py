@@ -15,8 +15,14 @@ from types import SimpleNamespace
 
 
 class _Pool:
-    def __init__(self, row):
+    def __init__(self, row, fetched=None):
         self.row = row
+        self.fetched = list(fetched or [])
+
+    async def fetch(self, sql, *a, **k):
+        if isinstance(self.row, BaseException):
+            raise self.row
+        return self.fetched.pop(0) if self.fetched else []
 
     async def fetchrow(self, *a, **k):
         if isinstance(self.row, BaseException):
@@ -24,7 +30,7 @@ class _Pool:
         return self.row
 
 
-def _open(monkeypatch, key, row):
+def _open(monkeypatch, key, row, fetched=None):
     from bot.handlers import botmother_menu as bm
 
     shown: list[tuple[str, object]] = []
@@ -42,7 +48,7 @@ def _open(monkeypatch, key, row):
     monkeypatch.setattr(bm, "safe_answer", fake_answer)
     monkeypatch.setattr(bm, "_get_user_plan", fake_plan)
     cb = SimpleNamespace(from_user=SimpleNamespace(id=99189001))
-    asyncio.run(bm.cb_section(cb, bm.BmCb(action="section", sub=key), _Pool(row)))
+    asyncio.run(bm.cb_section(cb, bm.BmCb(action="section", sub=key), _Pool(row, fetched)))
     assert len(shown) == 1
     text, markup = shown[0]
     btns = [(b.text, b.callback_data or "") for r in markup.inline_keyboard for b in r]
@@ -83,3 +89,21 @@ def test_database_hiccup_still_shows_the_section(monkeypatch):
     text, btns = _open(monkeypatch, "accounts", RuntimeError("db down"))
     assert "Сейчас:" not in text
     assert any(t == "📱 TG-аккаунты" for t, _ in btns)
+
+
+def test_messages_section_shows_running_sends_as_buttons(monkeypatch):
+    bcs = [{"id": 7, "bot_id": 555, "sent_count": 300, "failed_count": 40,
+            "total_users": 1200, "status": "running"}]
+    dms = [{"id": 9, "name": "Осенняя акция для старых клиентов", "sent_count": 5,
+            "fail_count": 0, "total_targets": 50, "status": "paused"}]
+    text, btns = _open(monkeypatch, "messages", None, [bcs, dms])
+    assert "Сейчас идёт: 📢 1 рассылка через бота · ⏸ 1 на паузе" in text
+    assert btns[0] == ("📢 Рассылка идёт: 340 из 1200", "bc:detail:555:7:")
+    assert btns[1][0] == "⏸ «Осенняя акция для стары…» на паузе"
+    assert btns[1][1].startswith("dm:detail:9:")
+
+
+def test_quiet_messages_section_says_so(monkeypatch):
+    text, btns = _open(monkeypatch, "messages", None, [[], []])
+    assert "Сейчас ничего не отправляется." in text
+    assert btns[0][0] in ("🌐 Открыть раздел в приложении", "📢 Рассылка через бота")
