@@ -1125,6 +1125,7 @@ from services.op_errors import (  # noqa: E402,F401
     _normalize_result,
     _classify_op_error,
     explain_error_ru,
+    explain_error_short,
     _is_network_or_proxy_error,
     _is_dead_session_error,
 )
@@ -9598,7 +9599,7 @@ async def _exec_bulk_post_to_channel(
                 raise
             except Exception as _post_exc:
                 log.warning("_exec_bulk_post_to_channel acc=%s: %s", acc.get("id"), _post_exc)
-                err_list.append(f"❌ {label}: {_html.escape(str(_post_exc)[:60])}")
+                err_list.append(f"❌ {label}: {_html.escape(explain_error_short(str(_post_exc))[:90])}")
                 await _log_acc(idx, _key, False, str(_post_exc)[:200])
                 await _safe_execute(
                         pool,"UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1", op_id)
@@ -9609,8 +9610,18 @@ async def _exec_bulk_post_to_channel(
                 err_list.append(f"❌ {label}: забанен")
                 await _log_acc(idx, _key, False, "Аккаунт забанен")
             elif result.get("flood_wait"):
-                err_list.append(f"⏳ {label}: flood_wait, пропущен")
-                await _log_acc(idx, _key, False, "FloodWait — пропущен")
+                _fw_post = int(result.get("flood_wait") or 0)
+                # Флуд записываем в общий пульс аккаунта: без этого следующая
+                # публикация снова брала этот аккаунт и добивала его.
+                try:
+                    from services.flood_engine import record_flood
+
+                    await record_flood(pool, int(acc["id"]), _fw_post, "bulk_post", op_id)
+                except Exception:
+                    log_exc_swallow(log, "bulk_post: record_flood failed")
+                err_list.append(f"⏳ {label}: Telegram просит подождать {_fw_post} с — пропущен")
+                await _log_acc(idx, _key, False,
+                               f"Telegram просит подождать {_fw_post} с — аккаунт пропущен")
             elif "msg_id" in result:
                 ok_list.append(f"✅ {label}: msg_id={result['msg_id']}")
                 await _log_acc(idx, _key, True, f"msg_id={result['msg_id']}")
@@ -9635,7 +9646,7 @@ async def _exec_bulk_post_to_channel(
                         )
                     except Exception as e:
                         log_exc_swallow(log, f"bulk_post: dead session deactivate failed for acc {acc['id']}: {e}")
-                err_list.append(f"❌ {label}: {_html.escape(err_str[:60])}")
+                err_list.append(f"❌ {label}: {_html.escape(explain_error_short(err_str)[:90])}")
                 await _log_acc(idx, _key, False, err_str[:200])
 
             await _safe_execute(
@@ -15346,6 +15357,14 @@ async def _exec_mass_report(
         except Exception as exc:
             log.warning("mass_report op=%d acc=%s: %s", op_id, acc.get("id"), exc)
             fail_count += 1
+            # Без строки в журнале сбой был невидим: в «📋 Лог» аккаунт просто
+            # отсутствовал, и узнать, почему жалоба не ушла, было негде.
+            await _safe_execute(
+                pool,
+                "INSERT INTO operation_log(op_id, step_num, target, status, message) "
+                "VALUES($1,$2,$3,'error',$4)",
+                op_id, idx, _acc_key, str(exc)[:200] or type(exc).__name__,
+            )
 
         await _safe_execute(
                 pool,"UPDATE operation_queue SET done_items=done_items+1 WHERE id=$1", op_id)
