@@ -112,3 +112,6 @@ def test_the_badges_count_what_needs_attention_and_only_mine():
     # Чужая беда и чужая рассылка не попадают в мои значки, и наоборот.
     assert stranger["accounts"] == 1 and stranger["broadcasts"] == 1
     assert stranger["notifications"] == 1 and stranger["operations"] == 0
+    # Плашка «идёт операция» показывает мою работу и только мою.
+    assert mine["op"] and mine["op"]["label"] == "значки", mine["op"]
+    assert stranger["op"] is None

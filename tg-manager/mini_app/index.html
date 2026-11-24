@@ -432,6 +432,10 @@ html.tg-back .hdr > .back{display:none}
 .ux-top{position:fixed;right:14px;bottom:calc(72px + env(safe-area-inset-bottom,0px));z-index:60;width:42px;height:42px;border:0;border-radius:50%;background:var(--bg3);color:var(--text);font-size:18px;line-height:42px;box-shadow:0 2px 10px rgba(0,0,0,.35);cursor:pointer}
 .ux-pullbar{position:fixed;left:50%;transform:translateX(-50%);top:calc(8px + env(safe-area-inset-top,0px));z-index:71;padding:6px 14px;border-radius:999px;font-size:12px;font-weight:600;background:var(--bg3);color:var(--text);box-shadow:0 2px 10px rgba(0,0,0,.35)}
 .ux-stale{padding:6px 16px;font-size:12px;color:var(--hint)}
+.op-live{position:fixed;left:12px;right:12px;bottom:calc(var(--tab-h) + var(--safe-b) + 8px);z-index:400;display:flex;align-items:center;gap:8px;padding:8px 12px;border-radius:12px;background:var(--bg3);color:var(--text);font-size:12px;cursor:pointer;overflow:hidden;box-shadow:0 6px 20px rgba(0,0,0,.35)}
+.op-live-txt{flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.op-live-pct{flex:0 0 auto;font-weight:700;color:var(--accent)}
+.op-live-fill{position:absolute;left:0;bottom:0;height:2px;background:var(--accent);transition:width .4s var(--ease)}
 .tab{position:relative}
 .tab-badge{position:absolute;top:2px;left:50%;margin-left:6px;min-width:16px;height:16px;padding:0 4px;border-radius:999px;background:var(--red,#f87171);color:#fff;font-size:10px;font-weight:700;line-height:16px;text-align:center;box-shadow:0 0 0 2px var(--bg,#111)}
 .ux-top:active{opacity:.7}
@@ -38317,5 +38321,6 @@ function renderAudSegChart(segments) {
 <script src="screens/ux_kit.js"></script>
 <script src="screens/tab_badges.js"></script>
 <script src="screens/find_all.js"></script>
+<script src="screens/op_live_bar.js"></script>
 </body>
 </html>

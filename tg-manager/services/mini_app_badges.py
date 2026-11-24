@@ -63,15 +63,50 @@ _COUNTS: dict[str, str] = {
 }
 
 
-async def collect(pool, uid: int) -> dict[str, int]:
+# Операция, которая идёт прямо сейчас: её показывает плашка поверх всех
+# экранов. Берём САМУЮ СВЕЖУЮ из работающих — если их несколько, плашка
+# говорит «и ещё N», а не притворяется, что работа одна.
+_RUNNING_OP_SQL = """
+SELECT id, COALESCE(NULLIF(label,''), op_type) AS label, op_type,
+       COALESCE(done_items,0) AS done_items, COALESCE(total_items,0) AS total_items,
+       started_at
+  FROM operation_queue
+ WHERE owner_id = $1 AND status = 'running'
+ ORDER BY COALESCE(started_at, now()) DESC, id DESC
+ LIMIT 1
+"""
+
+
+async def running_op(pool, uid: int) -> dict | None:
+    """Что идёт прямо сейчас — для плашки над таббаром. Сбой = пусто."""
+    try:
+        r = await pool.fetchrow(_RUNNING_OP_SQL, uid)
+    except Exception as exc:
+        log.debug("badges: текущая операция uid=%s: %s", uid, str(exc)[:120])
+        return None
+    if not r:
+        return None
+    return {
+        "id": int(r["id"]),
+        "label": (r["label"] or "Операция")[:60],
+        "done": int(r["done_items"] or 0),
+        "total": int(r["total_items"] or 0),
+        "started_at": r["started_at"].isoformat() if r["started_at"] else None,
+    }
+
+
+async def collect(pool, uid: int) -> dict:
     """Счётчики для таббара. Упавший счётчик — ноль, а не упавший ответ."""
-    out: dict[str, int] = {}
+    out: dict = {}
     for key, sql in _COUNTS.items():
         try:
             out[key] = int(await pool.fetchval(sql, uid) or 0)
         except Exception as exc:
             log.debug("badges: счётчик %s не прочитан uid=%s: %s", key, uid, str(exc)[:120])
             out[key] = 0
+    # Плашка «идёт операция» берёт своё из того же ответа: отдельный опрос
+    # означал бы второй круг по сети каждые двадцать секунд.
+    out["op"] = await running_op(pool, uid)
     return out
 
 

@@ -50,6 +50,12 @@ async function refreshTabBadges(force) {
     // «Итоги», и берёт его из этого же ответа: второй запрос ради одного
     // числа — это второй круг по сети на каждое обновление.
     if (typeof setNotifBadge === 'function') setNotifBadge(Number(d.notifications) || 0);
+    // Плашка «идёт операция» берёт своё из этого же ответа и просит следующий
+    // чаще, пока работа идёт (screens/op_live_bar.js).
+    if (typeof renderOpLiveBar === 'function') {
+      renderOpLiveBar(d.op);
+      if (typeof opLiveBarTick === 'function') opLiveBarTick();
+    }
   } catch (_) {
     // Значок — украшение: молчим и пробуем в следующий раз.
     _tabBadgeAt = 0;
