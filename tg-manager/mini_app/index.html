@@ -2246,6 +2246,12 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
       <button class="btn btn-s" onclick="openTemplates()" style="flex:1 1 auto;font-size:13px;padding:9px 6px">📝 Шаблоны</button>
     </div>
     <div class="sec-row"><div class="sec" id="bcastSec">Рассылки по ботам</div></div>
+    <!-- Поиск по истории рассылок: по тексту сообщения и по нику бота. Поле
+         стоит в РАЗМЕТКЕ, а не строится со списком: иначе оно теряло бы фокус
+         после первой же буквы (список перерисовывается на каждый ответ). -->
+    <div style="padding:0 16px 6px"><input type="text" id="bcastSearch" class="inp"
+         oninput="onBcastSearch(this.value)" placeholder="🔍 Поиск: текст рассылки или @бот"
+         autocomplete="off" aria-label="Поиск по рассылкам"></div>
     <div id="bcastChips" class="lf-chips"></div>
     <div class="lst" id="bcastList"><div class="spin-wrap"><div class="spin"></div></div></div>
     <div class="lst-more" id="bcastMore"></div>
@@ -14924,12 +14930,33 @@ function chGrowthHtml(g) {
 // их всего, есть срез по статусу (неудачные ищут именно так) и догрузка.
 const BCAST_PAGE = 30;
 let BCAST_ROWS = [], BCAST_TOTAL = 0, BCAST_COUNTS = {}, BCAST_FILTER = '', BCAST_LOADING = false;
+let BCAST_SEARCH = '', _bcastSearchT = null, BCAST_FOUND = null;
 function _bcastQuery(offset, limit) {
   let u = '/api/miniapp/broadcasts?limit=' + (limit || BCAST_PAGE) + '&offset=' + offset;
   if (BCAST_FILTER) u += '&status=' + encodeURIComponent(BCAST_FILTER);
+  if (BCAST_SEARCH) u += '&q=' + encodeURIComponent(BCAST_SEARCH);
   return u;
 }
+// Поиск идёт на СЕРВЕР, а не по загруженной странице: в истории сотни
+// рассылок, а на экране тридцать, и «поиск» по ним находил бы только то, что
+// и так видно.
+function onBcastSearch(v) {
+  BCAST_SEARCH = (v || '').trim();
+  clearTimeout(_bcastSearchT);
+  _bcastSearchT = setTimeout(() => { BCAST_ROWS = []; loadBroadcasts(); }, 350);
+}
+function resetBcastSearch() {
+  BCAST_SEARCH = '';
+  const el = document.getElementById('bcastSearch');
+  if (el) el.value = '';
+  BCAST_ROWS = [];
+  loadBroadcasts();
+}
 function _bcastShownTotal() {
+  // Под поиском «всего» — это найденное: сервер считает его тем же условием,
+  // что и выдачу. Иначе строка «показано 30 из 412» называла бы число, не
+  // имеющее отношения к тому, что на экране.
+  if (BCAST_FOUND != null) return BCAST_FOUND;
   if (!BCAST_FILTER) return BCAST_TOTAL;
   const c = BCAST_COUNTS || {};
   return (c[BCAST_FILTER] != null) ? c[BCAST_FILTER] : BCAST_ROWS.length;
@@ -14945,6 +14972,7 @@ async function loadBroadcasts() {
     ]);
     BCAST_ROWS = bd.broadcasts||[];
     BCAST_TOTAL = (bd.total != null) ? bd.total : BCAST_ROWS.length;
+    BCAST_FOUND = (bd.q && bd.found != null) ? bd.found : null;
     BCAST_COUNTS = bd.counts || {};
     renderBcasts(BCAST_ROWS);
     renderCmps(cd.campaigns||[]);
@@ -14985,6 +15013,7 @@ async function filterBcasts(status) {
     BCAST_ROWS = d.broadcasts||[];
     if (d.total != null) BCAST_TOTAL = d.total;
     if (d.counts) BCAST_COUNTS = d.counts;
+    BCAST_FOUND = (d.q && d.found != null) ? d.found : null;
   } catch(e) {
     if (el) el.innerHTML = errHtml(errRu(e), `filterBcasts('${BCAST_FILTER}')`);
     return;
@@ -15002,6 +15031,7 @@ async function loadMoreBcasts() {
     (d.broadcasts||[]).forEach(b => { if (!known.has(String(b.id))) BCAST_ROWS.push(b); });
     if (d.total != null) BCAST_TOTAL = d.total;
     if (d.counts) BCAST_COUNTS = d.counts;
+    BCAST_FOUND = (d.q && d.found != null) ? d.found : null;
   } catch(e) {
     txt('bcastMore','');
     toast('⚠️ '+errRu(e,'Не удалось догрузить'));
@@ -15014,15 +15044,21 @@ async function loadMoreBcasts() {
 function renderBcasts(items) {
   const el = document.getElementById('bcastList');
   const sec = document.getElementById('bcastSec');
-  if (sec) sec.textContent = BCAST_TOTAL
-    ? `Рассылки по ботам · ${String(items.length)} из ${String(_bcastShownTotal())}`
-    : 'Рассылки по ботам';
+  if (sec) sec.textContent = BCAST_SEARCH
+    ? `Найдено · ${String(items.length)} из ${String(_bcastShownTotal())}`
+    : (BCAST_TOTAL
+        ? `Рассылки по ботам · ${String(items.length)} из ${String(_bcastShownTotal())}`
+        : 'Рассылки по ботам');
   renderBcastChips();
   if (!items.length) {
     el.className='lst';
     // Под активным срезом «рассылок нет» — неправда: они есть, просто не этого
     // статуса, и предлагать создать новую здесь не то, что нужно человеку.
-    el.innerHTML = BCAST_FILTER
+    el.innerHTML = BCAST_SEARCH
+      ? empty('🔍','Ничего не найдено','По запросу «' + BCAST_SEARCH + '» рассылок нет' +
+              (BCAST_FILTER ? ' в этом срезе' : ''),
+              {label:'✖️ Сбросить поиск', fn:'resetBcastSearch()'})
+      : BCAST_FILTER
       ? empty('🔍','По этому срезу пусто','Смените срез, чтобы увидеть остальные рассылки',
               {label:'Показать все', fn:"filterBcasts('')"})
       : empty('📢','Нет рассылок','Рассылка отправляет сообщение всем подписчикам бота',
