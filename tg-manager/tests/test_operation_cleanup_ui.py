@@ -195,7 +195,12 @@ const api = async path => path === '/log' ? {logs: []} : result;
   assert.match(banner.innerHTML, /retryOp/);
 })().catch(error => { console.error(error); process.exitCode = 1; });
 """
-    source = "\n".join(js_function(name) for name in ("opCanRetry", "openOpDetail", "showOpComplete"))
+    # _opEtaSpan/_opEta/_opDuration — оценка «сколько ещё ждать» в карточке
+    # операции. Берём НАСТОЯЩИЕ функции, а не заглушки: заглушка здесь
+    # означала бы, что стенд перестаёт видеть, что карточка их зовёт.
+    source = "\n".join(js_function(name) for name in (
+        "opCanRetry", "_opDuration", "_opEta", "_opEtaSpan", "openOpDetail",
+        "showOpComplete"))
     subprocess.run([node, "-"], input=source + "\n" + script, text=True, check=True)
 
 
