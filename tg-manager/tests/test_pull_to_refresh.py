@@ -27,7 +27,10 @@ SCREENS = ROOT / "mini_app" / "screens"
 
 pytestmark = pytest.mark.skipif(not shutil.which("node"), reason="нужен node")
 
-_NAMES = ("uxActiveScreen", "uxPullPhase", "uxReloadFn", "uxPullBar",
+# Стенд собирает функции по именам, поэтому список обязан идти за кодом:
+# uxReloadFn теперь спрашивает карту «экран → чем открывается» (uxScreenFn), и
+# без неё стенд падает ReferenceError на заведомо живом коде.
+_NAMES = ("uxActiveScreen", "uxPullPhase", "uxScreenFn", "uxReloadFn", "uxPullBar",
           "uxPullStart", "uxPullMove", "uxPullEnd")
 
 
@@ -38,6 +41,7 @@ def _fn(name: str) -> str:
 
 
 _STAND = """
+let UX_SCREEN_FN = {}, UX_PENDING_FN = '';
 const made = {};
 function screen(id, reload, top) {
   return made[id] = {id, scrollTop: top || 0, dataset: {reload: reload || ''},

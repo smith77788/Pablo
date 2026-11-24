@@ -11152,6 +11152,9 @@ function syncSelBarGap(wrapId) {
 
 function push(sid) {
   closeAllModals();
+  // Привязываем экран к функции, которой его открыли: это даёт
+  // тянуть-обновить на экранах без явного data-reload.
+  if (typeof uxNoteScreenFn === 'function') uxNoteScreenFn(sid);
   // Экраны — синглтоны по id, и один и тот же id дважды подряд в стеке не
   // означает ничего, кроме ловушки: «назад» снимет верхний и покажет ТОТ ЖЕ
   // экран. Так и было везде, где экран перерисовывают повторным вызовом своей
@@ -15009,6 +15012,7 @@ let PAY_ROWS = [], PAY_PAGE = null;   // история оплат: страни
 let FUN_ROWS = [], FUN_PAGE = null;   // воронки: страницы и конверт
 let ECO_ROWS = [], ECO_PAGE = null;   // экосистемы: страницы и конверт
 let EXP_ROWS = [], EXP_PAGE = null;   // эксперименты: страницы и конверт
+let SCH_ROWS = [], SCH_PAGE = null;   // расписание бота: страницы и конверт
 let BCAST_SEARCH = '', _bcastSearchT = null, BCAST_FOUND = null;
 function _bcastQuery(offset, limit) {
   let u = '/api/miniapp/broadcasts?limit=' + (limit || BCAST_PAGE) + '&offset=' + offset;
@@ -17120,19 +17124,34 @@ async function openSchedule(botId, botName) {
   await loadSchedules();
 }
 
-async function loadSchedules() {
+async function loadSchedules(more) {
+  // Расписание листается: было жёсткое LIMIT 20 по времени отправки, то есть у
+  // бота с регулярной рассылкой экран показывал последние двадцать строк как
+  // всё расписание — и отменить двадцать первую было нельзя.
+  if (!more) { SCH_ROWS = []; SCH_PAGE = null; }
   try {
-    const d = await api('/api/miniapp/bot/'+SCH_BOT_ID+'/schedules');
-    const items = d.schedules||[];
-    if (!items.length) {
-      txt('schList', empty('⏰','Нет запланированных рассылок','Нажмите + Запланировать'));
-      return;
-    }
+    const d = await api('/api/miniapp/bot/'+SCH_BOT_ID+'/schedules?limit=20&offset=' + SCH_ROWS.length);
+    SCH_ROWS = SCH_ROWS.concat(d.schedules||[]);
+    SCH_PAGE = d.page||null;
+    schRender();
+  } catch(e) {
+    if (SCH_ROWS.length) { toast('⚠️ ' + errRu(e, 'Не удалось подгрузить')); return; }
+    txt('schList', errHtml(errRu(e), retryCall('loadSchedules')));
+  }
+}
+
+function schMore() { loadSchedules(true); }
+
+function schRender() {
+  if (!SCH_ROWS.length) {
+    txt('schList', empty('⏰','Нет запланированных рассылок','Нажмите + Запланировать'));
+    return;
+  }
     const statIco = {pending:'⏳',done:'✅',cancelled:'❌',missed:'⚠️'};
     // Время печатается в часовом поясе устройства (toLocaleString), а подпись
     // рядом утверждала «UTC»: в Киеве рассылка на 12:00 выглядела как
     // назначенная на 12:00 по Гринвичу, то есть на два часа позже.
-    txt('schList', items.map(s=>{
+    txt('schList', SCH_ROWS.map(s=>{
       const dt = new Date(s.execute_at).toLocaleString('ru-RU',{dateStyle:'short',timeStyle:'short'});
       const [bc,bl] = stb(s.status);
       const preview = (s.message_text||'').substring(0,60);
@@ -17150,10 +17169,10 @@ async function loadSchedules() {
           </div>
         </div>
       </div>`;
-    }).join(''));
-  } catch(e) {
-    txt('schList', errHtml(errRu(e), retryCall('loadSchedules')));
-  }
+    }).join('')
+      + UI.more({shown: SCH_ROWS.length, total: SCH_PAGE ? SCH_PAGE.total : null,
+                 maybeMore: !!(SCH_PAGE && SCH_PAGE.has_more), fn: 'schMore',
+                 allLabel: 'Показано всё расписание'}));
 }
 
 function openSchModal() {

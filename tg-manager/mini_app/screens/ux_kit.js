@@ -281,11 +281,47 @@ function uxPullPhase(dy) {
 
 // Чем экран обновляется. Пусто — значит экран не объявил загрузку, и жест для
 // него выключен: лучше нативный отскок, чем «обновляем…» без обновления.
+// Чем обновляется экран.
+//
+// Явный `data-reload` стоит у двадцати семи главных экранов, а всего их около
+// двухсот: дописывать атрибут руками каждому — это та же ручная перечисление,
+// которая в этом проекте уже дважды оставляла половину продукта без двери.
+// Поэтому есть вторая дорога: каталог («Все функции») знает, КАКОЙ функцией
+// открывается каждый экран, и ровно эта функция и есть обновление — она
+// перезапрашивает данные и перерисовывает список. Имя запоминается при
+// открытии (uxRememberScreen) и привязывается к экрану в единственной двери
+// навигации (push → uxNoteScreenFn).
+//
+// Из строки обработчика берём ТОЛЬКО имя функции без аргументов: ничего не
+// исполняем как код, а экран с аргументом (карточка конкретного бота) без
+// явного data-reload тянуть-обновить не получает — обновить «список» там
+// нечего, а перерисовать чужую карточку по чужому id было бы хуже, чем ничего.
 function uxReloadFn(el) {
   const name = el && el.dataset ? String(el.dataset.reload || '') : '';
-  if (!name) return null;
-  const fn = typeof window !== 'undefined' ? window[name] : undefined;
+  if (name) {
+    const fn = typeof window !== 'undefined' ? window[name] : undefined;
+    if (typeof fn === 'function') return fn;
+  }
+  return uxScreenFn(el && el.id);
+}
+
+// Экран → имя функции, которой он открывается. Карта живёт в памяти и
+// наполняется по ходу навигации: это подсказка, а не источник правды.
+function uxScreenFn(sid) {
+  const call = sid ? UX_SCREEN_FN[sid] : null;
+  const m = /^([A-Za-z_$][\w$]*)\(\s*\)$/.exec(String(call || ''));
+  if (!m) return null;
+  const fn = typeof window !== 'undefined' ? window[m[1]] : undefined;
   return typeof fn === 'function' ? fn : null;
+}
+
+// Запомнить, что этот экран открылся вот этой функцией. Зовётся из push —
+// единственной двери навигации, — поэтому карта не зависит от того, вспомнил
+// ли автор экрана про атрибут.
+function uxNoteScreenFn(sid) {
+  if (!sid || !UX_PENDING_FN) return;
+  UX_SCREEN_FN[sid] = UX_PENDING_FN;
+  UX_PENDING_FN = '';
 }
 
 function uxPullBar(text) {
@@ -485,11 +521,14 @@ function uxPinnedHome() {
 // каталог → раздел. Помним ПОСЛЕДНИЙ открытый вложенный экран и предлагаем
 // вернуться одним нажатием; предложение живёт сутки — через день это уже не
 // «то место», а чужая строка на главном.
+let UX_SCREEN_FN = {}, UX_PENDING_FN = '';
 const UX_LAST_KEY = 'infragram_last_screen';
 const UX_LAST_TTL = 24 * 3600e3;
 
 function uxRememberScreen(title, handler) {
   if (!title || !handler) return;
+  // Экран ещё не открыт — имя ждёт, пока push скажет, какой это экран.
+  UX_PENDING_FN = String(handler);
   try {
     localStorage.setItem(UX_LAST_KEY, JSON.stringify(
       { title: String(title).slice(0, 60), h: handler, ts: Date.now() }));
