@@ -217,6 +217,15 @@ _RU_EXPLAIN: tuple[tuple[re.Pattern, str], ...] = tuple(
         (r"INVITE_REQUEST_SENT", "заявка на вступление отправлена — ждёт одобрения админа"),
         (r"USERNAME_NOT_OCCUPIED|No user has .* as username|Cannot find any entity",
          "такого @username или ссылки не существует"),
+        (r"not occupied", "такого @username не существует"),
+        (r"USER_DELETED|user has been deleted|InputUserDeactivated|deleted account",
+         "аккаунт пользователя удалён"),
+        (r"PEER_ID_INVALID|CHAT_ID_INVALID|CHANNEL_INVALID|CHAT_INVALID|Could not find the input entity",
+         "чат или получатель не найден — неверная ссылка или нет доступа"),
+        (r"USER_KICKED|USER_BANNED_IN|kicked", "пользователь исключён или заблокирован в этом чате"),
+        (r"USERS_TOO_MUCH|too many users", "в чате достигнут лимит участников"),
+        (r"USER_ID_INVALID|BOT_GROUPS_BLOCKED", "этого пользователя нельзя добавить"),
+        (r"INPUT_USER_DEACTIVATED", "аккаунт пользователя удалён"),
         (r"USERNAME_INVALID", "недопустимый @username"),
         (r"USERNAME_OCCUPIED|already taken", "этот @username уже занят"),
         (r"CHANNEL_PRIVATE|is private and you lack permission",
@@ -239,6 +248,7 @@ _RU_EXPLAIN: tuple[tuple[re.Pattern, str], ...] = tuple(
         (r"MEDIA_EMPTY|MEDIA_INVALID|file reference", "медиафайл недоступен или повреждён"),
         (r"MESSAGE_TOO_LONG|message is too long", "сообщение слишком длинное для Telegram"),
         (r"BOT_TOKEN|Unauthorized.*bot", "токен бота недействителен — обновите его"),
+        (r"not allowed to|You can't|forbidden", "у аккаунта нет прав на это действие"),
         (r"socks|proxy", "прокси недоступен — проверьте или замените прокси"),
         (r"timed? ?out|TimeoutError", "Telegram не ответил вовремя (таймаут) — повторите позже"),
         (r"connection|network|ConnectionReset|ConnectionRefused|OSError",
@@ -277,3 +287,17 @@ def explain_error_ru(text: str | None, limit: int = 500) -> str:
         out = f"{ru[0].upper()}{ru[1:]} · тех.: {t}"
         return out[:limit]
     return f"Непредвиденная ошибка: {t}"[:limit]
+
+
+def explain_error_short(text: str | None) -> str:
+    """Короткая русская причина для строки журнала — без технического хвоста.
+
+    Русский текст возвращается как есть; распознанная английская ошибка — её
+    объяснением; нераспознанная — исходником (переводить нечем, а строка
+    «Непредвиденная ошибка» в каждой строке журнала ничего не добавляет).
+    """
+    t = str(text or "").strip()
+    out = explain_error_ru(t, 1000)
+    if " · тех.: " in out:
+        return out.split(" · тех.: ", 1)[0]
+    return t

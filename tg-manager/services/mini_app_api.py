@@ -3763,8 +3763,24 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 f"ORDER BY step_num, id LIMIT ${_n + 2} OFFSET ${_n + 3}",
                 op_id, *_qa, limit, offset)
             shown_total = total
+        # Причины в журнале пишут исполнители, и часть из них — сырой текст
+        # Telegram по-английски («USER_PRIVACY_RESTRICTED», «A wait of 30
+        # seconds…»). Владелец его не читает: отдаём русское объяснение,
+        # исходник — в message_raw. Переводим при чтении, поэтому это работает
+        # для всех операций разом, включая уже записанные журналы.
+        from services.op_errors import explain_error_short as _ru_short
+        logs_out = []
+        for r in rows or []:
+            d = dict(r)
+            msg = d.get("message")
+            if msg and (d.get("status") or "").lower() != "ok":
+                ru = _ru_short(msg)
+                if ru != msg:
+                    d["message_raw"] = msg
+                    d["message"] = ru
+            logs_out.append(d)
         return _json_resp({
-            "logs": rows,
+            "logs": logs_out,
             "total": total,
             "counts": counts,
             "status": status,
