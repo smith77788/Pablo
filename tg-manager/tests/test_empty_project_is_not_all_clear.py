@@ -60,6 +60,11 @@ def test_list_tools_hide_while_list_is_empty():
         assert start < html.index(inner), f"{inner} должен лежать внутри {tools}"
     assert "getElementById('botTools')" in bots
     assert "_accToolsShown(" in accs
-    empty_bots = bots[bots.index("if (!BOTS.length)"):]
+    # Пустое состояние живёт в renderBots, и резать файл по ПЕРВОМУ
+    # «if (!BOTS.length)» нельзя: такое же условие стоит выше, в тёплом старте
+    # списка из кэша. Измеритель, который перестаёт видеть заведомо живое
+    # пустое состояние, сломан сам — поэтому ищем его внутри renderBots.
+    _render = bots[bots.index("function renderBots()"):]
+    empty_bots = _render[_render.index("if (!BOTS.length)"):]
     empty_bots = empty_bots[:empty_bots.index("return; }")]
     assert "openBotAddModal()" in empty_bots.split("+")[0], "главная кнопка — токен"

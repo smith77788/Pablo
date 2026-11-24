@@ -153,7 +153,19 @@
   }
   function rgba(h, a) { var c = rgb(h); return 'rgba(' + c[0] + ',' + c[1] + ',' + c[2] + ',' + a + ')'; }
 
+  // Ручной выбор владельца сильнее темы клиента: в Telegram тема одна на всё
+  // приложение, а мини-апп у него открыт часами — работать в светлой теме
+  // ночью (или наоборот) человек не обязан.
+  var THEME_KEY = 'infragram_theme';
+  function savedScheme() {
+    try {
+      var v = localStorage.getItem(THEME_KEY);
+      return (v === 'light' || v === 'dark') ? v : '';
+    } catch (_) { return ''; }
+  }
   function scheme() {
+    var own = savedScheme();
+    if (own) return own;
     if (inTelegram() && (tg.colorScheme === 'light' || tg.colorScheme === 'dark')) return tg.colorScheme;
     return (mq && mq.matches) ? 'dark' : (mq ? 'light' : 'dark');
   }
@@ -232,6 +244,15 @@
 
   window.__applyTheme = apply;
   window.__themeScheme = function () { return root.getAttribute('data-theme') || 'dark'; };
+  // 'auto' — снять свой выбор и снова слушать клиента.
+  window.__setTheme = function (mode) {
+    try {
+      if (mode === 'light' || mode === 'dark') localStorage.setItem(THEME_KEY, mode);
+      else localStorage.removeItem(THEME_KEY);
+    } catch (_) {}
+    apply();
+  };
+  window.__themeMode = function () { return savedScheme() || 'auto'; };
   apply();
   try { if (tg && tg.onEvent) tg.onEvent('themeChanged', apply); } catch (_) {}
   try {
@@ -425,6 +446,23 @@ html.tg-back .hdr > .back{display:none}
    прежнего размера — растёт только площадь, по которой попадает палец.
    Замер на экране 360px показал значки 14–21px: промах по 🗑 в списке
    удаляет не то, что человек целил. */
+/* Общая механика экранов (screens/ux_kit.js): полоска «нет сети» и «наверх». */
+.ni-pin{margin-left:auto;flex:0 0 auto;display:inline-flex;align-items:center;justify-content:center;min-width:36px;min-height:36px;font-size:15px;color:var(--hint);cursor:pointer;border-radius:10px}
+.ni-pin:active{background:var(--sep)}
+.ux-netbar{position:fixed;left:0;right:0;top:0;z-index:70;padding:6px 12px;text-align:center;font-size:12px;font-weight:600;background:var(--orange,#e0b268);color:#1b1b1b}
+.ux-top{position:fixed;right:14px;bottom:calc(72px + env(safe-area-inset-bottom,0px));z-index:60;width:42px;height:42px;border:0;border-radius:50%;background:var(--bg3);color:var(--text);font-size:18px;line-height:42px;box-shadow:0 2px 10px rgba(0,0,0,.35);cursor:pointer}
+.ux-pullbar{position:fixed;left:50%;transform:translateX(-50%);top:calc(8px + env(safe-area-inset-top,0px));z-index:71;padding:6px 14px;border-radius:999px;font-size:12px;font-weight:600;background:var(--bg3);color:var(--text);box-shadow:0 2px 10px rgba(0,0,0,.35)}
+.ux-stale{padding:6px 16px;font-size:12px;color:var(--hint)}
+.fa-hit{background:rgba(var(--accent-rgb),.22);color:inherit;border-radius:3px;padding:0 1px}
+.ux-resume{margin:10px 16px;padding:10px 14px;border-radius:12px;background:var(--bg2);border:1px solid var(--sep);font-size:13px;color:var(--text);cursor:pointer}
+.op-live{position:fixed;left:12px;right:12px;bottom:calc(var(--tab-h) + var(--safe-b) + 8px);z-index:400;display:flex;align-items:center;gap:8px;padding:8px 12px;border-radius:12px;background:var(--bg3);color:var(--text);font-size:12px;cursor:pointer;overflow:hidden;box-shadow:0 6px 20px rgba(0,0,0,.35)}
+.op-live-txt{flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.op-live-pct{flex:0 0 auto;font-weight:700;color:var(--accent)}
+.op-live-fill{position:absolute;left:0;bottom:0;height:2px;background:var(--accent);transition:width .4s var(--ease)}
+.tab{position:relative}
+.tab-badge{position:absolute;top:2px;left:50%;margin-left:6px;min-width:16px;height:16px;padding:0 4px;border-radius:999px;background:var(--red,#f87171);color:#fff;font-size:10px;font-weight:700;line-height:16px;text-align:center;box-shadow:0 0 0 2px var(--bg,#111)}
+.ux-top:active{opacity:.7}
+.hdr-badge{position:absolute;top:-2px;right:-2px;min-width:16px;height:16px;padding:0 4px;border-radius:8px;background:var(--red);color:#fff;font-size:10px;font-weight:700;line-height:16px;text-align:center}
 .icon-tap{display:inline-flex;align-items:center;justify-content:center;min-width:36px;min-height:36px;flex-shrink:0;cursor:pointer;border-radius:10px;-webkit-tap-highlight-color:transparent}
 .icon-tap:active{background:var(--sep)}
 /* То же для коротких текстовых ссылок-действий: высота строки 14–15px мала
@@ -1436,10 +1474,14 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 <div id="content">
 
 <!-- ══════════════════════ HOME ══════════════════════ -->
-<div class="screen show" id="s-home">
+<div class="screen show" id="s-home" data-reload="loadHome">
   <div class="hdr">
     <div class="hdr-burger" onclick="openDrawer()" role="button" tabindex="0" aria-label="Меню">☰</div>
     <div class="hdr-title">📊 Итоги</div>
+    <!-- Колокольчик: лента уведомлений (screens/notifications_feed.js). Значок
+         показывает непрочитанное; счётчик спрашивается отдельной лёгкой
+         ручкой, а не загрузкой всей ленты. -->
+    <div class="icon-btn" role="button" tabindex="0" aria-label="Поиск по своему" onclick="openFindAll('')">🔍</div><div class="icon-btn" role="button" tabindex="0" aria-label="Уведомления" onclick="openNotificationsFeed()" style="position:relative">🔔<span id="homeNotifBadge" class="hdr-badge" style="display:none"></span></div>
     <div class="icon-btn" role="button" tabindex="0" aria-label="Обновить" onclick="loadHome()">🔄</div>
     <div class="hdr-meta">
       <div class="hdr-user" id="hUser">...</div>
@@ -1464,6 +1506,11 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
     <div id="opProgress" style="display:none;margin:10px 16px;background:var(--bg);border-radius:14px;padding:12px 16px;border:1px solid var(--sep)">
       <div style="font-size:13px;font-weight:600;margin-bottom:8px">⏳ Выполняется</div>
     </div>
+    <!-- «Продолжить: …» — последний открытый раздел (screens/ux_kit.js). -->
+    <div id="homeResume"></div>
+    <!-- Закреплённое владельцем: его собственные разделы выше наших плиток.
+         Пусто, пока ничего не закреплено (screens/ux_kit.js). -->
+    <div id="homePinned"></div>
     <!-- Quick actions -->
     <div class="sec">Быстрые действия</div>
     <!-- Плитки — ЧИСТАЯ навигация (без цифр): все счётчики живут один раз в верхней
@@ -1575,7 +1622,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 </div>
 
 <!-- ══════════════════════ BOTS LIST ══════════════════════ -->
-<div class="screen" id="s-bots">
+<div class="screen" id="s-bots" data-reload="loadBots">
   <div class="hdr">
     <div class="hdr-burger" onclick="openDrawer()" role="button" tabindex="0" aria-label="Меню">☰</div>
     <div class="hdr-title">🤖 Мои боты</div>
@@ -1727,7 +1774,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 </div>
 
 <!-- ══════════════════════ ACCOUNTS ══════════════════════ -->
-<div class="screen" id="s-accounts">
+<div class="screen" id="s-accounts" data-reload="loadAccounts">
   <div class="hdr">
     <div class="hdr-burger" onclick="openDrawer()" role="button" tabindex="0" aria-label="Меню">☰</div>
     <div class="hdr-title">📱 Аккаунты</div>
@@ -2207,7 +2254,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 </div>
 
 <!-- ══════════════════════ BROADCASTS ══════════════════════ -->
-<div class="screen" id="s-broadcasts">
+<div class="screen" id="s-broadcasts" data-reload="loadBroadcasts">
   <div class="hdr">
     <div class="hdr-burger" onclick="openDrawer()" role="button" tabindex="0" aria-label="Меню">☰</div>
     <div class="hdr-title">✉️ Сообщения</div>
@@ -2235,6 +2282,12 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
       <button class="btn btn-s" onclick="openTemplates()" style="flex:1 1 auto;font-size:13px;padding:9px 6px">📝 Шаблоны</button>
     </div>
     <div class="sec-row"><div class="sec" id="bcastSec">Рассылки по ботам</div></div>
+    <!-- Поиск по истории рассылок: по тексту сообщения и по нику бота. Поле
+         стоит в РАЗМЕТКЕ, а не строится со списком: иначе оно теряло бы фокус
+         после первой же буквы (список перерисовывается на каждый ответ). -->
+    <div style="padding:0 16px 6px"><input type="text" id="bcastSearch" class="inp"
+         oninput="onBcastSearch(this.value)" placeholder="🔍 Поиск: текст рассылки или @бот"
+         autocomplete="off" aria-label="Поиск по рассылкам"></div>
     <div id="bcastChips" class="lf-chips"></div>
     <div class="lst" id="bcastList"><div class="spin-wrap"><div class="spin"></div></div></div>
     <div class="lst-more" id="bcastMore"></div>
@@ -2306,7 +2359,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 </div>
 
 <!-- ══════════════════════ PROXY POOL (Proxy Pool Manager) ══════════════════════ -->
-<div class="screen" id="s-proxy-pool">
+<div class="screen" id="s-proxy-pool" data-reload="loadProxyPool">
   <div class="hdr">
     <div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div>
     <div class="hdr-title">🔎 Поиск по прокси</div>
@@ -2474,6 +2527,16 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
         <div class="mgmt-tile-ico">📈</div>
         <div class="mgmt-tile-lbl">Конкуренты</div>
         <div class="mgmt-tile-val" id="m-comp-cnt"></div>
+      </div>
+      <div class="mgmt-tile" onclick="openNotificationsFeed()">
+        <div class="mgmt-tile-ico">🔔</div>
+        <div class="mgmt-tile-lbl">Уведомления</div>
+        <div class="mgmt-tile-val" id="m-notif-cnt"></div>
+      </div>
+      <div class="mgmt-tile" onclick="openFindAll('')">
+        <div class="mgmt-tile-ico">🔍</div>
+        <div class="mgmt-tile-lbl">Поиск по своему</div>
+        <div class="mgmt-tile-val"></div>
       </div>
     </div>
 
@@ -3621,7 +3684,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 </div>
 
 <!-- ══════════════════════ COMPLIANCE HUB ══════════════════════ -->
-<div class="screen" id="s-compliance">
+<div class="screen" id="s-compliance" data-reload="loadCompliance">
   <div class="hdr"><div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div><div class="hdr-title">✅ Комплаенс</div></div>
   <div class="sub-sb">
     <div class="sec">Аудит операций <span class="sec-act" onclick="exportCompliance()">Выгрузить отчёт →</span></div>
@@ -3639,7 +3702,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 </div>
 
 <!-- ══════════════════════ MULTIGEO ══════════════════════ -->
-<div class="screen" id="s-multigeo">
+<div class="screen" id="s-multigeo" data-reload="loadMultigeo">
   <div class="hdr">
     <div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div>
     <div class="hdr-title">🌍 Гео-сеть</div>
@@ -4626,7 +4689,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 </div>
 
 <!-- ══════════════════════ OPERATIONS ══════════════════════ -->
-<div class="screen" id="s-ops">
+<div class="screen" id="s-ops" data-reload="loadOps">
   <div class="hdr"><div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div><div class="hdr-title" id="opsTitle">⚙️ Операции</div>
     <div class="hdr-meta" style="display:flex;align-items:center;gap:6px">
       <span class="icon-btn" role="button" tabindex="0" onclick="exportOpsCSV()" title="Экспорт CSV" aria-label="Экспорт CSV">📥</span>
@@ -4694,7 +4757,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 </div>
 
 <!-- ══════════════════════ UNIFIED CONTACTS HUB ══════════════════════ -->
-<div class="screen" id="s-contacts">
+<div class="screen" id="s-contacts" data-reload="loadContacts">
   <div class="hdr"><div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div><div class="hdr-title">📇 Контакты</div>
     <div class="hdr-meta" style="display:flex;align-items:center;gap:6px">
       <span class="icon-btn" role="button" tabindex="0" onclick="openUchAI()" title="ИИ-ассистент" aria-label="ИИ-ассистент">🤖</span>
@@ -4917,7 +4980,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
   <div class="sub-sb" id="remBody"><div class="spin-wrap"><div class="spin"></div></div></div>
 </div>
 
-<div class="screen" id="s-uchsynccenter">
+<div class="screen" id="s-uchsynccenter" data-reload="loadSyncCenter">
   <div class="hdr"><div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div><div class="hdr-title">🔄 Центр синхронизации</div></div>
   <div class="sub-sb" id="syncBody"><div class="spin-wrap"><div class="spin"></div></div></div>
 </div>
@@ -4941,7 +5004,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 </div>
 
 <!-- ══════════════════════ BOT SUBSCRIBERS ══════════════════════ -->
-<div class="screen" id="s-botsubs">
+<div class="screen" id="s-botsubs" data-reload="loadBotSubs">
   <div class="hdr">
     <div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div>
     <div class="hdr-title" id="bs-name">Подписчики</div>
@@ -4962,7 +5025,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 </div>
 
 <!-- ══════════════════════ СВОДКА ══════════════════════ -->
-<div class="screen" id="s-dashboard">
+<div class="screen" id="s-dashboard" data-reload="loadDashboard">
   <div class="hdr">
     <div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div>
     <div class="hdr-title">📊 Дашборд</div>
@@ -4993,7 +5056,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 </div>
 
 <!-- ══════════════════════ ANALYTICS ══════════════════════ -->
-<div class="screen" id="s-analytics">
+<div class="screen" id="s-analytics" data-reload="loadAnalytics">
   <div class="hdr"><div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div><div class="hdr-title">📊 Аналитика</div></div>
   <div class="sub-sb">
     <div class="sec">Рост подписчиков (7 дней)</div>
@@ -5025,7 +5088,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 </div>
 
 <!-- ══════════════════════ COMPETITORS ══════════════════════ -->
-<div class="screen" id="s-competitors">
+<div class="screen" id="s-competitors" data-reload="loadCompetitors">
   <div class="hdr">
     <div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div>
     <div class="hdr-title">📈 Конкуренты</div>
@@ -5045,7 +5108,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 </div>
 
 <!-- ══════════════════════ CRM CONTACTS ══════════════════════ -->
-<div class="screen" id="s-crm">
+<div class="screen" id="s-crm" data-reload="loadCRM">
   <div class="hdr">
     <div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div>
     <div class="hdr-title">👤 CRM</div>
@@ -5078,7 +5141,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 </div>
 
 <!-- ══════════════════════ BOT SCHEDULE ══════════════════════ -->
-<div class="screen" id="s-schedule">
+<div class="screen" id="s-schedule" data-reload="loadSchedules">
   <div class="hdr">
     <div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div>
     <div class="hdr-title" id="sch-name">Расписание</div>
@@ -5090,7 +5153,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 </div>
 
 <!-- ══════════════════════ TEMPLATES ══════════════════════ -->
-<div class="screen" id="s-templates">
+<div class="screen" id="s-templates" data-reload="loadTemplates">
   <div class="hdr">
     <div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div>
     <div class="hdr-title">📝 Шаблоны</div>
@@ -5301,7 +5364,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 </div>
 
 <!-- ══════════════════════ PROXIES ══════════════════════ -->
-<div class="screen" id="s-proxies">
+<div class="screen" id="s-proxies" data-reload="loadProxies">
   <div class="hdr">
     <div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div>
     <div class="hdr-title">🌐 Прокси</div>
@@ -5384,7 +5447,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 </div>
 
 <!-- ══════════════════════ SCREEN: DEEPLINKS ══════════════════════ -->
-<div class="screen" id="s-deeplinks">
+<div class="screen" id="s-deeplinks" data-reload="loadDeeplinks">
   <div class="hdr">
     <div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div>
     <div class="hdr-title">🔗 Диплинки</div>
@@ -5398,7 +5461,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 </div>
 
 <!-- ══════════════════════ SCREEN: ENGAGEMENT ══════════════════════ -->
-<div class="screen" id="s-engagement">
+<div class="screen" id="s-engagement" data-reload="loadEngagement">
   <div class="hdr">
     <div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div>
     <div class="hdr-title">🔥 Активность аудитории</div>
@@ -7970,7 +8033,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
   <div class="sub-sb" id="wsdBody"><div class="spin-wrap"><div class="spin"></div></div></div>
 </div>
 
-<div class="screen" id="s-workspaces">
+<div class="screen" id="s-workspaces" data-reload="loadWorkspaces">
   <div class="hdr">
     <div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div>
     <div class="hdr-title">🏢 Рабочие пространства</div>
@@ -7986,7 +8049,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 </div>
 
 <!-- ══════════════════════ SCREEN: PROMO PLATFORM ══════════════════════ -->
-<div class="screen" id="s-promo">
+<div class="screen" id="s-promo" data-reload="loadPromo">
   <div class="hdr">
     <div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div>
     <div class="hdr-title">🔎 Поиск Telegram</div>
@@ -8021,6 +8084,34 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
       <div class="card" style="font-size:12px;color:var(--hint);margin-bottom:8px">Подключите GlobalSMM-совместимую панель через Telegram-бота (команда /promo).</div>
       <div class="lst" id="promoPanelList"><div class="spin-wrap"><div class="spin"></div></div></div>
     </div>
+  </div>
+</div>
+
+<!-- ══════════════════════ SCREEN: УВЕДОМЛЕНИЯ ══════════════════════ -->
+<!-- Лента событий: screens/notifications_feed.js, /api/miniapp/notifications -->
+<div class="screen" id="s-findall">
+  <div class="hdr">
+    <div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div>
+    <div class="hdr-title">🔍 Поиск по своему</div>
+  </div>
+  <div class="sub-sb">
+    <input class="inp" id="faQuery" type="search" autocomplete="off"
+           placeholder="Телефон, ник, канал, контакт, рассылка, операция"
+           oninput="faSearch(this.value)" style="width:calc(100% - 32px);margin:8px 16px">
+    <div id="faResults" style="margin:0 16px 16px"></div>
+  </div>
+</div>
+
+<div class="screen" id="s-notifications" data-reload="loadNotificationsFeed">
+  <div class="hdr">
+    <div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div>
+    <div class="hdr-title">🔔 Уведомления</div>
+    <div class="hdr-meta"><button class="btn btn-s" id="nfReadAll" style="padding:7px 12px;font-size:13px;display:none" onclick="nfReadAll()">Прочитать всё</button></div>
+  </div>
+  <div class="sub-sb">
+    <div class="lf-chips" id="nfChips" role="group" aria-label="Отбор уведомлений"></div>
+    <div class="lst" id="nfList" style="margin:0 16px"></div>
+    <div id="nfMore" style="margin:10px 16px"></div>
   </div>
 </div>
 
@@ -8139,6 +8230,19 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
     <!-- Валюта жила только в «Когортах и LTV», а часовой пояс брался молча у
          телефона — «Тихие часы» на компьютере в другом поясе работали не в те
          часы. Выгрузка и удаление своих данных были только командами бота. -->
+    <div class="sec" style="margin-top:16px">Оформление</div>
+    <div class="card" style="padding:12px 16px">
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;padding:4px 0">
+        <span style="font-size:14px">🎨 Тема</span>
+        <div id="set-theme"></div>
+      </div>
+      <div style="font-size:11px;color:var(--hint)">«Авто» — как в Telegram. Выбор сохраняется на этом устройстве.</div>
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;padding:10px 0 2px;border-top:1px solid var(--sep);margin-top:10px">
+        <span style="font-size:14px">🧹 Память приложения</span>
+        <button class="btn btn-s" style="padding:7px 12px;font-size:13px" onclick="forgetLocalData()">Очистить</button>
+      </div>
+      <div style="font-size:11px;color:var(--hint)">Забудет закреплённые и недавние разделы, историю поиска, «продолжить», кэш списков и выбор темы. Данные в облаке не трогает.</div>
+    </div>
     <div class="sec" style="margin-top:16px">Регион и деньги</div>
     <div class="card" style="padding:12px 16px">
       <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;padding:8px 0;border-bottom:1px solid var(--sep)">
@@ -8200,7 +8304,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 </div>
 
 <!-- ══════════════════════ SCREEN: ERROR REPORT ══════════════════════ -->
-<div class="screen" id="s-errreport">
+<div class="screen" id="s-errreport" data-reload="loadErrReports">
   <div class="hdr">
     <div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div>
     <div class="hdr-title">🐛 Баг-репорт</div>
@@ -8987,7 +9091,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 </div>
 
 <!-- ══════════════════════ SCREEN: RANKING ENGINE ══════════════════════ -->
-<div class="screen" id="s-ranking">
+<div class="screen" id="s-ranking" data-reload="loadRanking">
   <div class="hdr">
     <div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div>
     <div class="hdr-title">🔎 Поиск Telegram</div>
@@ -9047,7 +9151,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 </div>
 
 <!-- ══════════════════════ SCREEN: NETWORK BUILDER ══════════════════════ -->
-<div class="screen" id="s-network-builder">
+<div class="screen" id="s-network-builder" data-reload="loadNetworkBuilder">
   <div class="hdr">
     <div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div>
     <div class="hdr-title">🕸️ Сетки — конструктор</div>
@@ -9212,7 +9316,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 </div>
 
 <!-- ══════════════════════ SCREEN: WORKFLOWS ══════════════════════ -->
-<div class="screen" id="s-workflows">
+<div class="screen" id="s-workflows" data-reload="loadWorkflows">
   <div class="hdr">
     <div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div>
     <div class="hdr-title">🔄 Сценарии</div>
@@ -10785,6 +10889,7 @@ function goTab(tab) {
   if (ti) ti.classList.add('on');
   CUR = tab;
   if (tab === 'more') { buildMoreCategories(); try { loadInboxBadge(); } catch(_) {} }
+  try { refreshTabBadges(); } catch(_) {}
   tg.HapticFeedback?.impactOccurred('light');
   if (!LOADED[tab]) { LOADED[tab]=true; loadTab(tab); }
   try { markDrawerActive(); } catch(_) {}
@@ -10795,6 +10900,8 @@ function goTab(tab) {
 // Пер-модульные описания «что делает» (по названию плитки). Показываются
 // подписью в боковом меню и как tooltip на плитках каталога «Все функции».
 const MODULE_DESCS = {
+  'Поиск по своему':'Один запрос по аккаунтам, ботам, каналам, контактам, рассылкам и операциям',
+  'Уведомления':'История событий: итоги операций, ограничения аккаунтов, новые подписчики',
   
   'Реферальная программа':'Код приглашения и приведённые пользователи',
   'Рабочие пространства':'Отдельные контуры с доступом по участникам',
@@ -10858,6 +10965,11 @@ function buildDrawer() {
    ['broadcasts','✉️','Сообщения'],['more','🧭','Разделы']].forEach(([tab,ico,lbl])=>{
     html += `<div class="nav-item" data-tab="${tab}" onclick="navGo('${tab}',null)"><span class="ni-ico">${ico}</span>${esc(lbl)}</div>`;
   });
+  // 1.5) Своё: закреплённое и недавнее (screens/ux_kit.js). Каталог — 80+
+  //      разделов, а человек ходит в пять-шесть; раньше их искали заново
+  //      каждый день. В `seen` эти пункты НЕ добавляем: они не заменяют
+  //      каталог, а стоят над ним ярлыками.
+  if (typeof uxNavBlocks === 'function') html += uxNavBlocks();
   // 2) Полный каталог — динамически из экрана «Ещё» (все секции и плитки), НО
   //    без дублей: верхние вкладки (Дашборд/Боты/Аккаунты/Рассылки/Все функции)
   //    и повторяющиеся ярлыки не выводятся повторно; секция «Быстрые действия»
@@ -10893,7 +11005,15 @@ function buildDrawer() {
         const descHtml = desc ? `<span class="ni-desc">${esc(desc)}</span>` : '';
         // has-desc: у пункта с пояснением значок выравнивается по ПЕРВОЙ строке,
         // иначе он повисал между названием и пояснением.
-        items += `<div class="nav-item${desc?' has-desc':''}" onclick="closeDrawer(); ${handler}"><span class="ni-ico">${ico}</span><span class="ni-body"><span>${esc(lbl)}</span>${descHtml}</span></div>`;
+        // Переход запоминается (блок «Недавние»), а звезда закрепляет пункт
+        // наверху каталога — обе памяти живут в screens/ux_kit.js.
+        const q = (typeof uxNavQ === 'function') ? uxNavQ : (x => String(x));
+        // Переход запоминается дважды: как «недавнее» в каталоге и как «то
+        // место», куда предлагает вернуться главный экран.
+        const remember = `uxNavRemember('${q(lbl)}','${q(ico)}','${q(handler)}'); uxRememberScreen('${q(lbl)}','${q(handler)}')`;
+        const pinned = (typeof uxNavPinned === 'function') && uxNavPinned(lbl);
+        const star = `<span class="ni-pin" role="button" tabindex="0" aria-label="${pinned?'Открепить':'Закрепить'}" onclick="event.stopPropagation(); uxNavPin('${q(lbl)}','${q(ico)}','${q(handler)}')">${pinned?'★':'☆'}</span>`;
+        items += `<div class="nav-item${desc?' has-desc':''}" onclick="closeDrawer(); ${remember}; ${handler}"><span class="ni-ico">${ico}</span><span class="ni-body"><span>${esc(lbl)}</span>${descHtml}</span>${star}</div>`;
       });
       if (items) html += `<div class="nav-cat">${esc((sec.textContent||'').trim())}</div>` + items;  // категорию — только если есть непустые пункты
     });
@@ -11047,10 +11167,19 @@ function push(sid) {
   // Прячем все видимые экраны — иначе абсолютно спозиционированные элементы
   // предыдущего экрана (напр. кнопки удаления с z-index) «протекают» поверх
   // нового экрана.
+  // Перед уходом запоминаем, где человек стоял: «назад» вернёт его туда же
+  // (screens/ux_kit.js). Иначе список на триста строк листают заново после
+  // каждого открытия карточки.
+  if (typeof uxRememberScroll === 'function') {
+    document.querySelectorAll('.screen.show').forEach(s => uxRememberScroll(s.id));
+  }
   document.querySelectorAll('.screen.show').forEach(s=>s.classList.remove('show'));
   STACK.push(sid);
   const el = document.getElementById(sid);
+  // Новый экран открывается сверху — это переход, а не возврат.
+  if (typeof uxForgetScroll === 'function') uxForgetScroll(sid);
   if (el) { el.classList.add('show'); el.scrollTop = 0; }
+  if (typeof uxSyncTopButton === 'function') uxSyncTopButton(el);
   showTabbar(false);
   _syncBackButton();
   tg.HapticFeedback?.impactOccurred('light');
@@ -11062,11 +11191,15 @@ function back() {
   closeAllModals();
   if (!STACK.length) return;
   const id = STACK.pop();
+  if (typeof uxRememberScroll === 'function') uxRememberScroll(id);
   document.getElementById(id)?.classList.remove('show');
   // Возвращаем предыдущий экран стека, либо экран текущей вкладки.
   const prev = STACK.length ? STACK[STACK.length - 1] : ('s-' + CUR);
   const pel = document.getElementById(prev);
   if (pel) pel.classList.add('show');
+  // …и ровно туда, где человек его оставил (screens/ux_kit.js).
+  if (typeof uxRestoreScroll === 'function') uxRestoreScroll(prev);
+  if (typeof uxSyncTopButton === 'function') uxSyncTopButton(pel);
   if (!STACK.length) showTabbar(true);
   _syncBackButton();
   tg.HapticFeedback?.impactOccurred('light');
@@ -11370,6 +11503,13 @@ async function loadHome() {
   if (loadHome.pending) return;
   loadHome.pending = true;
   if (typeof loadHomeProjects === 'function') loadHomeProjects();
+  // Значки вкладок и колокольчик берут числа ОДНОЙ ручкой
+  // (screens/tab_badges.js): главный экран не тянет ленту ради одного числа,
+  // а таббар не делает по запросу на вкладку.
+  if (typeof refreshTabBadges === 'function') refreshTabBadges(true);
+  // Закреплённые разделы — на первом экране, а не за двумя нажатиями.
+  if (typeof uxPinnedHome === 'function') uxPinnedHome();
+  if (typeof uxResumeHome === 'function') uxResumeHome();
   modernizeIcons(document.getElementById('s-home'));
   const cached = loadHome.lastData || getCached('infragram_cache_home');
   if (cached && !loadHome.lastData) { renderCards(cached); renderAct(cached.recent_activity||[]); }
@@ -14369,8 +14509,8 @@ function buildAccDetail(d) {
 
     <div class="sec">Профиль</div>
     <div class="lst">
-      ${a.phone?`<div class="row"><div class="row-ico" style="background:var(--bg-green-16)">📞</div><div class="row-body"><div class="row-name">Телефон</div><div class="row-val">${esc(a.phone)}</div></div></div>`:''}
-      ${a.tg_user_id?`<div class="row"><div class="row-ico" style="background:var(--bg-blue-16)">🆔</div><div class="row-body"><div class="row-name">Telegram ID</div><div class="row-val">${a.tg_user_id}</div></div></div>`:''}
+      ${a.phone?`<div class="row" data-copy="${esc(a.phone)}" data-copy-what="Телефон скопирован" title="Удерживайте, чтобы скопировать"><div class="row-ico" style="background:var(--bg-green-16)">📞</div><div class="row-body"><div class="row-name">Телефон</div><div class="row-val">${esc(a.phone)}</div></div></div>`:''}
+      ${a.tg_user_id?`<div class="row" data-copy="${a.tg_user_id}" data-copy-what="Telegram ID скопирован" title="Удерживайте, чтобы скопировать"><div class="row-ico" style="background:var(--bg-blue-16)">🆔</div><div class="row-body"><div class="row-name">Telegram ID</div><div class="row-val">${a.tg_user_id}</div></div></div>`:''}
       <div class="row"><div class="row-ico" style="background:rgba(20,184,166,.16)">🛡</div>
         <div class="row-body">
           <div class="row-name">Уровень доверия</div>
@@ -14865,12 +15005,33 @@ function chGrowthHtml(g) {
 // их всего, есть срез по статусу (неудачные ищут именно так) и догрузка.
 const BCAST_PAGE = 30;
 let BCAST_ROWS = [], BCAST_TOTAL = 0, BCAST_COUNTS = {}, BCAST_FILTER = '', BCAST_LOADING = false;
+let BCAST_SEARCH = '', _bcastSearchT = null, BCAST_FOUND = null;
 function _bcastQuery(offset, limit) {
   let u = '/api/miniapp/broadcasts?limit=' + (limit || BCAST_PAGE) + '&offset=' + offset;
   if (BCAST_FILTER) u += '&status=' + encodeURIComponent(BCAST_FILTER);
+  if (BCAST_SEARCH) u += '&q=' + encodeURIComponent(BCAST_SEARCH);
   return u;
 }
+// Поиск идёт на СЕРВЕР, а не по загруженной странице: в истории сотни
+// рассылок, а на экране тридцать, и «поиск» по ним находил бы только то, что
+// и так видно.
+function onBcastSearch(v) {
+  BCAST_SEARCH = (v || '').trim();
+  clearTimeout(_bcastSearchT);
+  _bcastSearchT = setTimeout(() => { BCAST_ROWS = []; loadBroadcasts(); }, 350);
+}
+function resetBcastSearch() {
+  BCAST_SEARCH = '';
+  const el = document.getElementById('bcastSearch');
+  if (el) el.value = '';
+  BCAST_ROWS = [];
+  loadBroadcasts();
+}
 function _bcastShownTotal() {
+  // Под поиском «всего» — это найденное: сервер считает его тем же условием,
+  // что и выдачу. Иначе строка «показано 30 из 412» называла бы число, не
+  // имеющее отношения к тому, что на экране.
+  if (BCAST_FOUND != null) return BCAST_FOUND;
   if (!BCAST_FILTER) return BCAST_TOTAL;
   const c = BCAST_COUNTS || {};
   return (c[BCAST_FILTER] != null) ? c[BCAST_FILTER] : BCAST_ROWS.length;
@@ -14886,6 +15047,7 @@ async function loadBroadcasts() {
     ]);
     BCAST_ROWS = bd.broadcasts||[];
     BCAST_TOTAL = (bd.total != null) ? bd.total : BCAST_ROWS.length;
+    BCAST_FOUND = (bd.q && bd.found != null) ? bd.found : null;
     BCAST_COUNTS = bd.counts || {};
     renderBcasts(BCAST_ROWS);
     renderCmps(cd.campaigns||[]);
@@ -14926,6 +15088,7 @@ async function filterBcasts(status) {
     BCAST_ROWS = d.broadcasts||[];
     if (d.total != null) BCAST_TOTAL = d.total;
     if (d.counts) BCAST_COUNTS = d.counts;
+    BCAST_FOUND = (d.q && d.found != null) ? d.found : null;
   } catch(e) {
     if (el) el.innerHTML = errHtml(errRu(e), `filterBcasts('${BCAST_FILTER}')`);
     return;
@@ -14943,6 +15106,7 @@ async function loadMoreBcasts() {
     (d.broadcasts||[]).forEach(b => { if (!known.has(String(b.id))) BCAST_ROWS.push(b); });
     if (d.total != null) BCAST_TOTAL = d.total;
     if (d.counts) BCAST_COUNTS = d.counts;
+    BCAST_FOUND = (d.q && d.found != null) ? d.found : null;
   } catch(e) {
     txt('bcastMore','');
     toast('⚠️ '+errRu(e,'Не удалось догрузить'));
@@ -14955,15 +15119,21 @@ async function loadMoreBcasts() {
 function renderBcasts(items) {
   const el = document.getElementById('bcastList');
   const sec = document.getElementById('bcastSec');
-  if (sec) sec.textContent = BCAST_TOTAL
-    ? `Рассылки по ботам · ${String(items.length)} из ${String(_bcastShownTotal())}`
-    : 'Рассылки по ботам';
+  if (sec) sec.textContent = BCAST_SEARCH
+    ? `Найдено · ${String(items.length)} из ${String(_bcastShownTotal())}`
+    : (BCAST_TOTAL
+        ? `Рассылки по ботам · ${String(items.length)} из ${String(_bcastShownTotal())}`
+        : 'Рассылки по ботам');
   renderBcastChips();
   if (!items.length) {
     el.className='lst';
     // Под активным срезом «рассылок нет» — неправда: они есть, просто не этого
     // статуса, и предлагать создать новую здесь не то, что нужно человеку.
-    el.innerHTML = BCAST_FILTER
+    el.innerHTML = BCAST_SEARCH
+      ? empty('🔍','Ничего не найдено','По запросу «' + BCAST_SEARCH + '» рассылок нет' +
+              (BCAST_FILTER ? ' в этом срезе' : ''),
+              {label:'✖️ Сбросить поиск', fn:'resetBcastSearch()'})
+      : BCAST_FILTER
       ? empty('🔍','По этому срезу пусто','Смените срез, чтобы увидеть остальные рассылки',
               {label:'Показать все', fn:"filterBcasts('')"})
       : empty('📢','Нет рассылок','Рассылка отправляет сообщение всем подписчикам бота',
@@ -21766,8 +21936,8 @@ async function openContactDetail(id) {
     document.getElementById('cdFavBtn').style.opacity = c.is_favorite ? '1' : '.4';
     let html = `<div class="lst" style="margin:12px 16px 0">
       <div class="row"><div class="row-body"><div class="row-name">Имя</div><div class="row-val">${esc(name)}</div></div></div>
-      ${c.username?`<div class="row"><div class="row-body"><div class="row-name">Имя в Telegram</div><div class="row-val">@${esc(c.username)}</div></div></div>`:''}
-      ${c.telegram_user_id?`<div class="row"><div class="row-body"><div class="row-name">Telegram ID</div><div class="row-val">${c.telegram_user_id}</div></div></div>`:''}
+      ${c.username?`<div class="row" data-copy="@${esc(c.username)}" data-copy-what="Ник скопирован" title="Удерживайте, чтобы скопировать"><div class="row-body"><div class="row-name">Имя в Telegram</div><div class="row-val">@${esc(c.username)}</div></div></div>`:''}
+      ${c.telegram_user_id?`<div class="row" data-copy="${c.telegram_user_id}" data-copy-what="Telegram ID скопирован" title="Удерживайте, чтобы скопировать"><div class="row-body"><div class="row-name">Telegram ID</div><div class="row-val">${c.telegram_user_id}</div></div></div>`:''}
       ${c.is_premium?`<div class="row"><div class="row-body"><div class="row-name">Premium</div><div class="row-val">💎 Да</div></div></div>`:''}
       ${c.registered_estimate?`<div class="row"><div class="row-body"><div class="row-name">Регистрация (оценка)</div><div class="row-val">📅 ≈ ${esc(c.registered_estimate)}</div></div></div>`:''}
       ${lastSeenLabel(c.last_seen_type, c.last_seen_at)?`<div class="row"><div class="row-body"><div class="row-name">Был в сети</div><div class="row-val">${esc(lastSeenLabel(c.last_seen_type, c.last_seen_at))}${c.last_seen_at?' · '+esc(String(c.last_seen_at).slice(0,16).replace('T',' ')):''}</div></div></div>`:''}
@@ -21775,8 +21945,8 @@ async function openContactDetail(id) {
       ${c.is_mutual?`<div class="row"><div class="row-body"><div class="row-name">Взаимный</div><div class="row-val">↔ Да</div></div></div>`:''}
       ${enr.activity&&enr.activity.level!=='unknown'?`<div class="row"><div class="row-body"><div class="row-name">Активность</div><div class="row-val">${enr.activity.level==='hot'?'🔥':enr.activity.level==='warm'?'🌤':'❄️'} ${esc(enr.activity.label)}</div></div></div>`:''}
       ${enr.language&&enr.language.code?`<div class="row"><div class="row-body"><div class="row-name">Язык (оценка)</div><div class="row-val">${esc(({ru:'🇷🇺 Русский',en:'🌐 Латиница',cjk:'🀄 Иероглифы',ar:'☪ Арабский'})[enr.language.code]||enr.language.code)} · ${Math.round((enr.language.confidence||0)*100)}%</div></div></div>`:''}
-      ${Array.isArray(c.phones)&&c.phones.length?`<div class="row"><div class="row-body"><div class="row-name">Телефон</div><div class="row-val">${esc(c.phones.join(', '))}</div></div></div>`:''}
-      ${Array.isArray(c.emails)&&c.emails.length?`<div class="row"><div class="row-body"><div class="row-name">Почта</div><div class="row-val">${esc(c.emails.join(', '))}</div></div></div>`:''}
+      ${Array.isArray(c.phones)&&c.phones.length?`<div class="row" data-copy="${esc(c.phones.join(', '))}" data-copy-what="Телефон скопирован" title="Удерживайте, чтобы скопировать"><div class="row-body"><div class="row-name">Телефон</div><div class="row-val">${esc(c.phones.join(', '))}</div></div></div>`:''}
+      ${Array.isArray(c.emails)&&c.emails.length?`<div class="row" data-copy="${esc(c.emails.join(', '))}" data-copy-what="Почта скопирована" title="Удерживайте, чтобы скопировать"><div class="row-body"><div class="row-name">Почта</div><div class="row-val">${esc(c.emails.join(', '))}</div></div></div>`:''}
       ${c.company?`<div class="row"><div class="row-body"><div class="row-name">Компания</div><div class="row-val">${esc(c.company)}</div></div></div>`:''}
       ${c.position?`<div class="row"><div class="row-body"><div class="row-name">Должность</div><div class="row-val">${esc(c.position)}</div></div></div>`:''}
       ${c.websites&&c.websites.length?`<div class="row"><div class="row-body"><div class="row-name">Сайты</div><div class="row-val">${c.websites.map(w=>'<a href="'+esc(w)+'" target="_blank" style="color:var(--accent)">'+esc(w)+'</a>').join(', ')}</div></div></div>`:''}
@@ -35480,6 +35650,40 @@ async function mirrorDisconnect() {
   }
 }
 
+// Переключатель темы. Рисуем из кода, а не разметкой: подпись выбранного
+// пункта должна совпадать с тем, что реально применено, а применяет тему
+// бутстрап в начале документа (он же знает про «авто»).
+function renderThemeRow() {
+  const box = document.getElementById('set-theme');
+  if (!box || typeof UI === 'undefined' || !UI.segmented) return;
+  const mode = (typeof window.__themeMode === 'function') ? window.__themeMode() : 'auto';
+  box.innerHTML = UI.segmented(
+    [{ value: 'auto', label: 'Авто' }, { value: 'light', label: '☀️ Светлая' },
+     { value: 'dark', label: '🌙 Тёмная' }],
+    mode, 'setAppTheme');
+}
+
+// Кнопка «очистить память» спрашивает ДО, а не после: шаг необратим, и
+// названо в вопросе ровно то, что исчезнет.
+async function forgetLocalData() {
+  if (!await askConfirm('Забыть закреплённые и недавние разделы, историю поиска, ' +
+                        '«продолжить», кэш списков и выбор темы на этом устройстве? ' +
+                        'Данные в облаке останутся.')) return;
+  const n = (typeof uxForgetLocal === 'function') ? uxForgetLocal() : 0;
+  if (typeof window.__setTheme === 'function') window.__setTheme('auto');
+  renderThemeRow();
+  try { uxPinnedHome(); uxResumeHome(); } catch(_) {}
+  const body = document.getElementById('navBody');
+  if (body) { body.dataset.built = ''; try { buildDrawer(); } catch(_) {} }
+  toast(n ? '🧹 Забыто записей: ' + n : '🧹 Забывать было нечего');
+}
+
+function setAppTheme(mode) {
+  if (typeof window.__setTheme === 'function') window.__setTheme(mode);
+  renderThemeRow();
+  try { tg.HapticFeedback?.impactOccurred('light'); } catch(_) {}
+}
+
 async function openSettings() {
   push('s-settings');
   const uid = window._tgUid || (tg.initDataUnsafe?.user?.id);
@@ -35501,6 +35705,7 @@ async function openSettings() {
   try { renderFullscreenRow(); } catch(_) {}
   try { loadMirror(); } catch(_) {}
   try { renderFormMemoryStatus(); } catch(_) {}
+  try { renderThemeRow(); } catch(_) {}
   document.getElementById('m-settings-val').textContent = '⚙️';
   try {
     // Источник правды — бэкенд (notification_settings + get_proxy_policy). Раньше
@@ -38193,5 +38398,10 @@ function renderAudSegChart(segments) {
 <script src="screens/infra.js"></script>
 <script src="screens/clone_adapt.js"></script>
 <script src="screens/persona_peers.js"></script>
+<script src="screens/notifications_feed.js"></script>
+<script src="screens/ux_kit.js"></script>
+<script src="screens/tab_badges.js"></script>
+<script src="screens/find_all.js"></script>
+<script src="screens/op_live_bar.js"></script>
 </body>
 </html>

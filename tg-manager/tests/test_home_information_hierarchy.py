@@ -13,7 +13,7 @@ SUMMARY = (ROOT / "mini_app" / "screens" / "summary.js").read_text(
 
 
 def _home() -> str:
-    start = HTML.index('<div class="screen show" id="s-home">')
+    start = HTML.index('<div class="screen show" id="s-home"')
     end = HTML.index('<!-- ══════════════════════ BOTS LIST', start)
     return HTML[start:end]
 

@@ -34,7 +34,7 @@ def _fn(name: str) -> str:
 
 
 def test_detector_sees_the_screen():
-    assert '<div class="screen" id="s-warmuplog">' in HTML
+    assert '<div class="screen" id="s-warmuplog"' in HTML
     assert len(_fn("openWarmupLog")) > 800
 
 

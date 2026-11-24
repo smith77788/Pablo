@@ -734,6 +734,11 @@ def setup_routes(app: web.Application, pool) -> None:
         except (ValueError, TypeError):
             offset = 0
         status = (request.query.get("status") or "").strip().lower()
+        # Поиск по истории рассылок. Без него найти «ту рассылку про скидку»
+        # среди сотен можно было только прокруткой: срез по статусу сужает до
+        # сотни, а дальше — глазами. Ищем по тексту сообщения и по нику бота,
+        # то есть по двум вещам, которые владелец и помнит.
+        q = (request.query.get("q") or "").strip()[:100]
 
         counts: dict = {}
         try:
@@ -763,21 +768,40 @@ def setup_routes(app: web.Application, pool) -> None:
         cols = """b.id, b.bot_id, mb.username AS bot_username,
                   b.message_text, b.status, b.sent_count, b.failed_count,
                   b.total_users, b.created_at, b.status_note, b.buttons"""
+        # Условие собирается ОДНО на оба случая: две почти одинаковые ветки
+        # запроса расходятся при первой же правке (так срез по статусу однажды
+        # уже существовал только в одной из них).
+        where = ["b.created_by=$1"]
+        args: list = [uid]
         if status:
-            rows = await _safe_fetch(pool,
-                f"""SELECT {cols} FROM broadcasts b
+            args.append(status)
+            where.append(f"lower(b.status)=${len(args)}")
+        if q:
+            args.append(f"%{q}%")
+            where.append(f"(b.message_text ILIKE ${len(args)} "
+                         f"OR mb.username ILIKE ${len(args)})")
+        cond = " AND ".join(where)
+        rows = await _safe_fetch(pool,
+            f"""SELECT {cols} FROM broadcasts b
+                JOIN managed_bots mb ON mb.bot_id=b.bot_id
+                WHERE {cond}
+                ORDER BY b.created_at DESC, b.id
+                LIMIT ${len(args) + 1} OFFSET ${len(args) + 2}""",
+            *args, limit, offset)
+        if q:
+            # Под поиском «всего» — это найденное, а не вся история: число из
+            # агрегата здесь означало бы «показано 30 из 412», где 412 никак
+            # не связано с тем, что на экране. Считаем ровно по тому же
+            # условию, что и выдача.
+            shown_total = await _safe_count(
+                pool,
+                f"""SELECT COUNT(*) FROM broadcasts b
                     JOIN managed_bots mb ON mb.bot_id=b.bot_id
-                    WHERE b.created_by=$1 AND lower(b.status)=$2
-                    ORDER BY b.created_at DESC, b.id LIMIT $3 OFFSET $4""",
-                uid, status, limit, offset)
+                    WHERE {cond}""",
+                *args)
+        elif status:
             shown_total = counts.get(status, len(rows) + offset)
         else:
-            rows = await _safe_fetch(pool,
-                f"""SELECT {cols} FROM broadcasts b
-                    JOIN managed_bots mb ON mb.bot_id=b.bot_id
-                    WHERE b.created_by=$1
-                    ORDER BY b.created_at DESC, b.id LIMIT $2 OFFSET $3""",
-                uid, limit, offset)
             shown_total = total
         return _json_resp({
             "broadcasts": rows,
@@ -785,6 +809,8 @@ def setup_routes(app: web.Application, pool) -> None:
             "counts": counts,
             "totals": totals,
             "status": status,
+            "q": q,
+            "found": shown_total if q else None,
             "page": {"offset": offset, "limit": limit,
                      "has_more": offset + len(rows) < shown_total},
         })

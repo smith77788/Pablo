@@ -18,7 +18,7 @@ SRC = miniapp_source()
 
 
 def _catalog_labels() -> list[str]:
-    s = HTML.index('<div class="screen" id="s-more">')
+    s = HTML.index('<div class="screen" id="s-more"')
     cat = HTML[s:HTML.index("<!-- Админ-панель (только для админов) -->", s)]
     return re.findall(r'mgmt-tile-lbl">([^<]*)<', cat)
 
@@ -48,7 +48,7 @@ def test_both_screens_are_tabs_of_one_module():
     reg = re.search(r"const SCREEN_MODULES = \{(.*?)\n\};", SRC, re.S).group(1)
     for key, sid in (("all", "s-workflows"), ("funnels", "s-autofunnels")):
         assert re.search(r"key:'" + key + r"'[^\n]*sid:'" + sid + "'", reg), key
-        head = HTML[HTML.index(f'<div class="screen" id="{sid}">'):][:900]
+        head = HTML[HTML.index(f'<div class="screen" id="{sid}"'):][:900]
         assert '<div class="hdr-title">🔄 Сценарии</div>' in head, sid
         assert f'data-module="scenarios" data-tab="{key}"' in head, sid
 

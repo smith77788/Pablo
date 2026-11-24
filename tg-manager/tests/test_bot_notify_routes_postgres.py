@@ -50,9 +50,15 @@ def pool():
         pytest.skip(f"Postgres недоступен: {str(exc)[:120]}")
     _run(p.execute("DELETE FROM bot_notify_routes WHERE owner_id=$1", OWNER))
     _run(p.execute("DELETE FROM user_activity WHERE bot_id=$1", OWNER))
+    # Токен свой у файла: общий 'x' под УНИКАЛЬНЫМ token означал, что строка
+    # этого теста не вставлялась вовсе (ON CONFLICT DO NOTHING прятал это), а
+    # соседний файл падал на том же токене.
+    _token = f"test-notify-routes-{OWNER}"
+    _run(p.execute("DELETE FROM managed_bots WHERE token=$1 AND bot_id<>$2",
+                   _token, OWNER))
     _run(p.execute(
-        "INSERT INTO managed_bots(token, bot_id, added_by) VALUES('x', $1, $1) "
-        "ON CONFLICT DO NOTHING", OWNER))
+        "INSERT INTO managed_bots(token, bot_id, added_by) VALUES($1, $2, $2) "
+        "ON CONFLICT (bot_id) DO NOTHING", _token, OWNER))
     yield p
     _run(p.close())
 

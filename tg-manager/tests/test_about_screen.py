@@ -181,7 +181,7 @@ def test_description_keeps_up_with_the_product(catalog):
     """
     index = os.path.join(ROOT, "mini_app", "index.html")
     html = open(index, encoding="utf-8").read()
-    i = html.find('<div class="screen" id="s-more">')
+    i = html.find('<div class="screen" id="s-more"')
     assert i != -1, "экран «Все функции» не найден — сверять не с чем"
     j = html.find('<div class="screen" id="s-', i + 10)
     labels = set(re.findall(r'<div class="mgmt-tile-lbl">([^<]+)</div>', html[i:j]))
