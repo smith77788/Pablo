@@ -33,6 +33,7 @@ from aiohttp import web
 log = logging.getLogger(__name__)
 
 _PER_GROUP = 6
+_MAX_PER_GROUP = 25
 _MAX_Q = 100
 
 
@@ -142,7 +143,10 @@ async def search_all(pool, uid: int, q: str, per_group: int = _PER_GROUP) -> dic
         found += len(items)
         if items:
             groups.append({"key": key, "label": label, "icon": icon, "items": items})
-    return {"q": q, "groups": groups, "found": found, "failed": failed}
+    return {"q": q, "groups": groups, "found": found, "failed": failed,
+            "per_group": per_group,
+            # Есть ли смысл в «показать ещё»: хоть одна группа упёрлась в потолок.
+            "capped": any(len(g["items"]) >= per_group for g in groups)}
 
 
 def setup_routes(app: web.Application, pool) -> None:
@@ -155,6 +159,13 @@ def setup_routes(app: web.Application, pool) -> None:
         q = (request.query.get("q") or "").strip()[:_MAX_Q]
         if len(q) < 2:
             return _err("Введите хотя бы два символа")
-        return _json_resp(await search_all(pool, uid, q))
+        # «Показать ещё» просит ту же выдачу шире, а не вторую страницу: групп
+        # шесть, и страница у каждой своя — «ещё» по одной из них означало бы
+        # шесть счётчиков смещения на экране ради редкого случая.
+        try:
+            per = max(_PER_GROUP, min(_MAX_PER_GROUP, int(request.query.get("per") or 0)))
+        except (TypeError, ValueError):
+            per = _PER_GROUP
+        return _json_resp(await search_all(pool, uid, q, per))
 
     app.router.add_get("/api/miniapp/search/everything", search_everything)

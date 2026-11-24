@@ -13,6 +13,7 @@
 let FA_Q = '';
 let _faT = null;
 let FA_LAST = null;
+let FA_PER = 0;              // сколько находок в группе просим (0 — по умолчанию)
 const FA_HISTORY_KEY = 'infragram_find_history';
 const FA_HISTORY_MAX = 8;
 
@@ -62,7 +63,11 @@ function openFindAll(q) {
 }
 
 function faSearch(v) {
-  FA_Q = (v || '').trim();
+  const next = (v || '').trim();
+  // Новый запрос — снова узкая выдача: «показать ещё» относилось к прошлому
+  // запросу, а не к набранному сейчас.
+  if (next !== FA_Q) FA_PER = 0;
+  FA_Q = next;
   clearTimeout(_faT);
   if (FA_Q.length < 2) {
     const hist = faHistory();
@@ -87,7 +92,8 @@ async function _faGo() {
   const q = FA_Q;
   txt('faResults', '<div class="spin-wrap"><div class="spin"></div></div>');
   try {
-    const d = await api('/api/miniapp/search/everything?q=' + encodeURIComponent(q));
+    const d = await api('/api/miniapp/search/everything?q=' + encodeURIComponent(q)
+      + (FA_PER ? '&per=' + FA_PER : ''));
     if (q !== FA_Q) return;          // человек уже набрал дальше
     FA_LAST = d;
     // Запоминаем только то, что НАШЛОСЬ: история из промахов — это список
@@ -174,6 +180,11 @@ function _faRender(d) {
           '<span class="ni-ico">•</span>' + body + '</div>';
     }).join('');
   }
+  // «Показать ещё» имеет смысл, только если какая-то группа упёрлась в потолок.
+  if (d.capped && !FA_PER) {
+    html += '<button class="btn btn-s" style="width:100%;margin-top:10px;font-size:13px;' +
+      'padding:10px" onclick="faMore()">Показать больше находок</button>';
+  }
   // Где не искали — говорим вслух: пустая группа из-за сбоя неотличима от
   // честного «ничего нет», и молчать здесь значит соврать.
   if ((d.failed || []).length) {
@@ -186,6 +197,13 @@ function _faRender(d) {
 // У рассылки своего экрана нет: ведём в «Сообщения» с тем же запросом в
 // поиске истории — то есть в список найденного, а не в строку, которую
 // пришлось бы искать там заново.
+// Та же выдача шире, а не вторая страница: групп шесть, и «ещё» по каждой
+// означало бы шесть счётчиков смещения на экране ради редкого случая.
+function faMore() {
+  FA_PER = 25;
+  _faGo();
+}
+
 function openBroadcastSearch(q) {
   goTab('broadcasts');
   const el = document.getElementById('bcastSearch');

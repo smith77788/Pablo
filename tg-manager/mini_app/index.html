@@ -454,6 +454,7 @@ html.tg-back .hdr > .back{display:none}
 .ux-pullbar{position:fixed;left:50%;transform:translateX(-50%);top:calc(8px + env(safe-area-inset-top,0px));z-index:71;padding:6px 14px;border-radius:999px;font-size:12px;font-weight:600;background:var(--bg3);color:var(--text);box-shadow:0 2px 10px rgba(0,0,0,.35)}
 .ux-stale{padding:6px 16px;font-size:12px;color:var(--hint)}
 .fa-hit{background:rgba(var(--accent-rgb),.22);color:inherit;border-radius:3px;padding:0 1px}
+.ux-resume{margin:10px 16px;padding:10px 14px;border-radius:12px;background:var(--bg2);border:1px solid var(--sep);font-size:13px;color:var(--text);cursor:pointer}
 .op-live{position:fixed;left:12px;right:12px;bottom:calc(var(--tab-h) + var(--safe-b) + 8px);z-index:400;display:flex;align-items:center;gap:8px;padding:8px 12px;border-radius:12px;background:var(--bg3);color:var(--text);font-size:12px;cursor:pointer;overflow:hidden;box-shadow:0 6px 20px rgba(0,0,0,.35)}
 .op-live-txt{flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .op-live-pct{flex:0 0 auto;font-weight:700;color:var(--accent)}
@@ -1505,6 +1506,8 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
     <div id="opProgress" style="display:none;margin:10px 16px;background:var(--bg);border-radius:14px;padding:12px 16px;border:1px solid var(--sep)">
       <div style="font-size:13px;font-weight:600;margin-bottom:8px">⏳ Выполняется</div>
     </div>
+    <!-- «Продолжить: …» — последний открытый раздел (screens/ux_kit.js). -->
+    <div id="homeResume"></div>
     <!-- Закреплённое владельцем: его собственные разделы выше наших плиток.
          Пусто, пока ничего не закреплено (screens/ux_kit.js). -->
     <div id="homePinned"></div>
@@ -8234,6 +8237,11 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
         <div id="set-theme"></div>
       </div>
       <div style="font-size:11px;color:var(--hint)">«Авто» — как в Telegram. Выбор сохраняется на этом устройстве.</div>
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;padding:10px 0 2px;border-top:1px solid var(--sep);margin-top:10px">
+        <span style="font-size:14px">🧹 Память приложения</span>
+        <button class="btn btn-s" style="padding:7px 12px;font-size:13px" onclick="forgetLocalData()">Очистить</button>
+      </div>
+      <div style="font-size:11px;color:var(--hint)">Забудет закреплённые и недавние разделы, историю поиска, «продолжить», кэш списков и выбор темы. Данные в облаке не трогает.</div>
     </div>
     <div class="sec" style="margin-top:16px">Регион и деньги</div>
     <div class="card" style="padding:12px 16px">
@@ -11000,7 +11008,9 @@ function buildDrawer() {
         // Переход запоминается (блок «Недавние»), а звезда закрепляет пункт
         // наверху каталога — обе памяти живут в screens/ux_kit.js.
         const q = (typeof uxNavQ === 'function') ? uxNavQ : (x => String(x));
-        const remember = `uxNavRemember('${q(lbl)}','${q(ico)}','${q(handler)}')`;
+        // Переход запоминается дважды: как «недавнее» в каталоге и как «то
+        // место», куда предлагает вернуться главный экран.
+        const remember = `uxNavRemember('${q(lbl)}','${q(ico)}','${q(handler)}'); uxRememberScreen('${q(lbl)}','${q(handler)}')`;
         const pinned = (typeof uxNavPinned === 'function') && uxNavPinned(lbl);
         const star = `<span class="ni-pin" role="button" tabindex="0" aria-label="${pinned?'Открепить':'Закрепить'}" onclick="event.stopPropagation(); uxNavPin('${q(lbl)}','${q(ico)}','${q(handler)}')">${pinned?'★':'☆'}</span>`;
         items += `<div class="nav-item${desc?' has-desc':''}" onclick="closeDrawer(); ${remember}; ${handler}"><span class="ni-ico">${ico}</span><span class="ni-body"><span>${esc(lbl)}</span>${descHtml}</span>${star}</div>`;
@@ -11499,6 +11509,7 @@ async function loadHome() {
   if (typeof refreshTabBadges === 'function') refreshTabBadges(true);
   // Закреплённые разделы — на первом экране, а не за двумя нажатиями.
   if (typeof uxPinnedHome === 'function') uxPinnedHome();
+  if (typeof uxResumeHome === 'function') uxResumeHome();
   modernizeIcons(document.getElementById('s-home'));
   const cached = loadHome.lastData || getCached('infragram_cache_home');
   if (cached && !loadHome.lastData) { renderCards(cached); renderAct(cached.recent_activity||[]); }
@@ -35650,6 +35661,21 @@ function renderThemeRow() {
     [{ value: 'auto', label: 'Авто' }, { value: 'light', label: '☀️ Светлая' },
      { value: 'dark', label: '🌙 Тёмная' }],
     mode, 'setAppTheme');
+}
+
+// Кнопка «очистить память» спрашивает ДО, а не после: шаг необратим, и
+// названо в вопросе ровно то, что исчезнет.
+async function forgetLocalData() {
+  if (!await askConfirm('Забыть закреплённые и недавние разделы, историю поиска, ' +
+                        '«продолжить», кэш списков и выбор темы на этом устройстве? ' +
+                        'Данные в облаке останутся.')) return;
+  const n = (typeof uxForgetLocal === 'function') ? uxForgetLocal() : 0;
+  if (typeof window.__setTheme === 'function') window.__setTheme('auto');
+  renderThemeRow();
+  try { uxPinnedHome(); uxResumeHome(); } catch(_) {}
+  const body = document.getElementById('navBody');
+  if (body) { body.dataset.built = ''; try { buildDrawer(); } catch(_) {} }
+  toast(n ? '🧹 Забыто записей: ' + n : '🧹 Забывать было нечего');
 }
 
 function setAppTheme(mode) {

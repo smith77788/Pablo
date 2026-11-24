@@ -477,3 +477,73 @@ function uxPinnedHome() {
       `<div class="qa-tile-lbl">${uxNavEsc(it.lbl)}</div></div>`).join('') +
     '</div>';
 }
+
+// ── «Продолжить с того места» ──────────────────────────────────────────────
+// Мини-апп закрывают десятки раз в день — на звонок, на другой чат, по
+// случайному смахиванию, — и каждый раз он открывается на «Итогах». Человек,
+// разбиравший контакты или кампанию, возвращался к началу пути: вкладка →
+// каталог → раздел. Помним ПОСЛЕДНИЙ открытый вложенный экран и предлагаем
+// вернуться одним нажатием; предложение живёт сутки — через день это уже не
+// «то место», а чужая строка на главном.
+const UX_LAST_KEY = 'infragram_last_screen';
+const UX_LAST_TTL = 24 * 3600e3;
+
+function uxRememberScreen(title, handler) {
+  if (!title || !handler) return;
+  try {
+    localStorage.setItem(UX_LAST_KEY, JSON.stringify(
+      { title: String(title).slice(0, 60), h: handler, ts: Date.now() }));
+  } catch (_) {}
+}
+
+function uxLastScreen() {
+  try {
+    const d = JSON.parse(localStorage.getItem(UX_LAST_KEY) || 'null');
+    if (!d || !d.h || !d.ts || Date.now() - d.ts > UX_LAST_TTL) return null;
+    return d;
+  } catch (_) { return null; }
+}
+
+// Полоска на главном. Пусто — ничего не рисуем: «продолжить» без того, что
+// продолжать, — это строка, которая просит нажать на неё впустую.
+function uxResumeHome() {
+  const box = document.getElementById('homeResume');
+  if (!box) return;
+  const d = uxLastScreen();
+  box.innerHTML = (d && d.title)
+    ? `<div class="ux-resume" role="button" tabindex="0" onclick="${String(d.h).replace(/"/g, '&quot;')}">` +
+      `↩️ Продолжить: <b>${uxNavEsc(d.title)}</b></div>`
+    : '';
+}
+
+// ── Сброс памяти приложения ────────────────────────────────────────────────
+// Приложение помнит на устройстве немало: закреплённые и недавние разделы,
+// последние запросы поиска, «то место», куда предлагает вернуться, кэш
+// списков и выбранную тему. Когда что-то из этого показывает старое (телефон
+// передали другому человеку, сменился проект), убрать это было нельзя ничем,
+// кроме переустановки Telegram. Теперь есть одна кнопка — и она НАЗЫВАЕТ, что
+// именно забудет: «очистить всё» без списка последствий человек нажимать
+// боится, и правильно делает.
+const UX_LOCAL_KEYS = [
+  'infragram_nav_memory', 'infragram_find_history', 'infragram_last_screen',
+  'infragram_theme',
+];
+
+function uxForgetLocal() {
+  let n = 0;
+  // Кэши списков и экранов зовутся одинаково (infragram_cache_*), поэтому
+  // перебираем хранилище, а не держим второй список их имён: он устарел бы на
+  // первом же новом экране.
+  try {
+    const keys = [];
+    for (let i = 0; i < localStorage.length; i++) keys.push(localStorage.key(i));
+    keys.forEach(k => {
+      if (!k) return;
+      if (UX_LOCAL_KEYS.indexOf(k) >= 0 || k.indexOf('infragram_cache_') === 0) {
+        localStorage.removeItem(k);
+        n++;
+      }
+    });
+  } catch (_) { return 0; }
+  return n;
+}
