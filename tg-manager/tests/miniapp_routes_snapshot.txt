@@ -282,6 +282,8 @@ GET /api/miniapp/node/{node_id}/threads
 GET /api/miniapp/nodes
 GET /api/miniapp/notary
 GET /api/miniapp/notary/{watch_id}
+GET /api/miniapp/notifications
+GET /api/miniapp/notifications/unread
 GET /api/miniapp/notify_routes
 GET /api/miniapp/onboarding
 GET /api/miniapp/operation/{op_id}
@@ -654,6 +656,8 @@ HEAD /api/miniapp/node/{node_id}/threads
 HEAD /api/miniapp/nodes
 HEAD /api/miniapp/notary
 HEAD /api/miniapp/notary/{watch_id}
+HEAD /api/miniapp/notifications
+HEAD /api/miniapp/notifications/unread
 HEAD /api/miniapp/notify_routes
 HEAD /api/miniapp/onboarding
 HEAD /api/miniapp/operation/{op_id}
@@ -1073,6 +1077,7 @@ POST /api/miniapp/niche/keywords
 POST /api/miniapp/node
 POST /api/miniapp/notary
 POST /api/miniapp/notary/{watch_id}/check
+POST /api/miniapp/notifications/read
 POST /api/miniapp/notify_routes
 POST /api/miniapp/notify_routes/{route_id}/test
 POST /api/miniapp/onboarding/goal

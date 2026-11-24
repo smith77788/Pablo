@@ -5638,6 +5638,34 @@ async def notify_dedup_forget(pool, user_id: int, key: str) -> None:
         log.debug("notify_dedup_forget (%s): %s", key, exc)
 
 
+# Лента уведомлений мини-аппа (schema_v385) — история «что произошло, пока
+# меня не было». Длинный отчёт операции режем: лента это список, а не архив
+# переписки; полный текст владелец видел и видит в личке бота.
+_FEED_TEXT_LIMIT = 2000
+
+
+async def _feed_record(pool, user_id: int, pref: str, text: str,
+                       dedup_key: str | None) -> None:
+    """Записать уведомление в ленту. Никогда не бросает и не задерживает.
+
+    Fail-soft намеренно: сбой записи в ленту не должен отменить само
+    уведомление — владельцу нужнее сообщение, чем строка в истории.
+    """
+    try:
+        body = str(text or "")
+        if len(body) > _FEED_TEXT_LIMIT:
+            body = body[:_FEED_TEXT_LIMIT - 1].rstrip() + "…"
+        await pool.execute(
+            "INSERT INTO notification_feed(owner_id, pref, text, dedup_key) "
+            "VALUES($1, $2, $3, $4)",
+            int(user_id), str(pref or "")[:64], body,
+            (str(dedup_key)[:200] if dedup_key else None),
+        )
+    except Exception as exc:
+        log.debug("notification_feed: не записано user=%s pref=%s: %s",
+                  user_id, pref, str(exc)[:120])
+
+
 async def notify_if_enabled(
     pool: asyncpg.Pool,
     bot,
@@ -5694,6 +5722,13 @@ async def notify_if_enabled(
             settings = {}
         if not settings.get(pref, True):
             return True
+        # Лента уведомлений мини-аппа (schema_v385). Пишем ЗДЕСЬ, а не рядом с
+        # успешной отправкой: событие произошло независимо от того, принял ли
+        # его Telegram, и именно историю «что было, пока меня не было» владелец
+        # ищет в приложении. Место единственное — ниже путь ветвится на тихие
+        # часы, повторы и очередь доставки, и запись в каждой ветке означала бы
+        # дубли. Запись fail-soft: лента не может стоить уведомления.
+        await _feed_record(pool, user_id, pref, text, dedup_key)
         # Тихие часы (services/quiet_hours.py): несрочное ночью — в сводку,
         # она придёт одним сообщением, когда окно закончится. Сбой очереди —
         # отправка как обычно: потерять отчёт хуже, чем разбудить.

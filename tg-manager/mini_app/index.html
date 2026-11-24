@@ -425,6 +425,11 @@ html.tg-back .hdr > .back{display:none}
    прежнего размера — растёт только площадь, по которой попадает палец.
    Замер на экране 360px показал значки 14–21px: промах по 🗑 в списке
    удаляет не то, что человек целил. */
+/* Общая механика экранов (screens/ux_kit.js): полоска «нет сети» и «наверх». */
+.ux-netbar{position:fixed;left:0;right:0;top:0;z-index:70;padding:6px 12px;text-align:center;font-size:12px;font-weight:600;background:var(--orange,#e0b268);color:#1b1b1b}
+.ux-top{position:fixed;right:14px;bottom:calc(72px + env(safe-area-inset-bottom,0px));z-index:60;width:42px;height:42px;border:0;border-radius:50%;background:var(--bg3);color:var(--text);font-size:18px;line-height:42px;box-shadow:0 2px 10px rgba(0,0,0,.35);cursor:pointer}
+.ux-top:active{opacity:.7}
+.hdr-badge{position:absolute;top:-2px;right:-2px;min-width:16px;height:16px;padding:0 4px;border-radius:8px;background:var(--red);color:#fff;font-size:10px;font-weight:700;line-height:16px;text-align:center}
 .icon-tap{display:inline-flex;align-items:center;justify-content:center;min-width:36px;min-height:36px;flex-shrink:0;cursor:pointer;border-radius:10px;-webkit-tap-highlight-color:transparent}
 .icon-tap:active{background:var(--sep)}
 /* То же для коротких текстовых ссылок-действий: высота строки 14–15px мала
@@ -1440,6 +1445,10 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
   <div class="hdr">
     <div class="hdr-burger" onclick="openDrawer()" role="button" tabindex="0" aria-label="Меню">☰</div>
     <div class="hdr-title">📊 Итоги</div>
+    <!-- Колокольчик: лента уведомлений (screens/notifications_feed.js). Значок
+         показывает непрочитанное; счётчик спрашивается отдельной лёгкой
+         ручкой, а не загрузкой всей ленты. -->
+    <div class="icon-btn" role="button" tabindex="0" aria-label="Уведомления" onclick="openNotificationsFeed()" style="position:relative">🔔<span id="homeNotifBadge" class="hdr-badge" style="display:none"></span></div>
     <div class="icon-btn" role="button" tabindex="0" aria-label="Обновить" onclick="loadHome()">🔄</div>
     <div class="hdr-meta">
       <div class="hdr-user" id="hUser">...</div>
@@ -2474,6 +2483,11 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
         <div class="mgmt-tile-ico">📈</div>
         <div class="mgmt-tile-lbl">Конкуренты</div>
         <div class="mgmt-tile-val" id="m-comp-cnt"></div>
+      </div>
+      <div class="mgmt-tile" onclick="openNotificationsFeed()">
+        <div class="mgmt-tile-ico">🔔</div>
+        <div class="mgmt-tile-lbl">Уведомления</div>
+        <div class="mgmt-tile-val" id="m-notif-cnt"></div>
       </div>
     </div>
 
@@ -8024,6 +8038,21 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
   </div>
 </div>
 
+<!-- ══════════════════════ SCREEN: УВЕДОМЛЕНИЯ ══════════════════════ -->
+<!-- Лента событий: screens/notifications_feed.js, /api/miniapp/notifications -->
+<div class="screen" id="s-notifications">
+  <div class="hdr">
+    <div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div>
+    <div class="hdr-title">🔔 Уведомления</div>
+    <div class="hdr-meta"><button class="btn btn-s" id="nfReadAll" style="padding:7px 12px;font-size:13px;display:none" onclick="nfReadAll()">Прочитать всё</button></div>
+  </div>
+  <div class="sub-sb">
+    <div class="lf-chips" id="nfChips" role="group" aria-label="Отбор уведомлений"></div>
+    <div class="lst" id="nfList" style="margin:0 16px"></div>
+    <div id="nfMore" style="margin:10px 16px"></div>
+  </div>
+</div>
+
 <!-- ══════════════════════ SCREEN: SETTINGS ══════════════════════ -->
 <div class="screen" id="s-settings">
   <div class="hdr">
@@ -10795,6 +10824,7 @@ function goTab(tab) {
 // Пер-модульные описания «что делает» (по названию плитки). Показываются
 // подписью в боковом меню и как tooltip на плитках каталога «Все функции».
 const MODULE_DESCS = {
+  'Уведомления':'История событий: итоги операций, ограничения аккаунтов, новые подписчики',
   
   'Реферальная программа':'Код приглашения и приведённые пользователи',
   'Рабочие пространства':'Отдельные контуры с доступом по участникам',
@@ -11047,10 +11077,19 @@ function push(sid) {
   // Прячем все видимые экраны — иначе абсолютно спозиционированные элементы
   // предыдущего экрана (напр. кнопки удаления с z-index) «протекают» поверх
   // нового экрана.
+  // Перед уходом запоминаем, где человек стоял: «назад» вернёт его туда же
+  // (screens/ux_kit.js). Иначе список на триста строк листают заново после
+  // каждого открытия карточки.
+  if (typeof uxRememberScroll === 'function') {
+    document.querySelectorAll('.screen.show').forEach(s => uxRememberScroll(s.id));
+  }
   document.querySelectorAll('.screen.show').forEach(s=>s.classList.remove('show'));
   STACK.push(sid);
   const el = document.getElementById(sid);
+  // Новый экран открывается сверху — это переход, а не возврат.
+  if (typeof uxForgetScroll === 'function') uxForgetScroll(sid);
   if (el) { el.classList.add('show'); el.scrollTop = 0; }
+  if (typeof uxSyncTopButton === 'function') uxSyncTopButton(el);
   showTabbar(false);
   _syncBackButton();
   tg.HapticFeedback?.impactOccurred('light');
@@ -11062,11 +11101,15 @@ function back() {
   closeAllModals();
   if (!STACK.length) return;
   const id = STACK.pop();
+  if (typeof uxRememberScroll === 'function') uxRememberScroll(id);
   document.getElementById(id)?.classList.remove('show');
   // Возвращаем предыдущий экран стека, либо экран текущей вкладки.
   const prev = STACK.length ? STACK[STACK.length - 1] : ('s-' + CUR);
   const pel = document.getElementById(prev);
   if (pel) pel.classList.add('show');
+  // …и ровно туда, где человек его оставил (screens/ux_kit.js).
+  if (typeof uxRestoreScroll === 'function') uxRestoreScroll(prev);
+  if (typeof uxSyncTopButton === 'function') uxSyncTopButton(pel);
   if (!STACK.length) showTabbar(true);
   _syncBackButton();
   tg.HapticFeedback?.impactOccurred('light');
@@ -11370,6 +11413,9 @@ async function loadHome() {
   if (loadHome.pending) return;
   loadHome.pending = true;
   if (typeof loadHomeProjects === 'function') loadHomeProjects();
+  // Значок колокольчика: отдельная лёгкая ручка (только счётчик), чтобы
+  // главный экран не тянул ленту уведомлений ради одного числа.
+  if (typeof refreshNotifBadge === 'function') refreshNotifBadge();
   modernizeIcons(document.getElementById('s-home'));
   const cached = loadHome.lastData || getCached('infragram_cache_home');
   if (cached && !loadHome.lastData) { renderCards(cached); renderAct(cached.recent_activity||[]); }
@@ -38193,5 +38239,7 @@ function renderAudSegChart(segments) {
 <script src="screens/infra.js"></script>
 <script src="screens/clone_adapt.js"></script>
 <script src="screens/persona_peers.js"></script>
+<script src="screens/notifications_feed.js"></script>
+<script src="screens/ux_kit.js"></script>
 </body>
 </html>
