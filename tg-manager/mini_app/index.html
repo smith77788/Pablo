@@ -31101,6 +31101,7 @@ async function openErrorReport() {
 const ERR_REP_STATUS = {new:'🆕 Новый', viewing:'👀 Просмотрен', fixing:'🔧 В работе',
   fixed:'✅ Исправлен', duplicate:'🔁 Дубликат'};
 let _ERR_REPS = [];
+let _ERR_PAGE = null;   // конверт страницы отчётов
 // Ответ на отчёт писали в заметки разбора, и он никогда не доходил до того,
 // кто отчёт прислал: экран показывал только статус и первые 120 символов
 // собственного текста.
@@ -31111,28 +31112,47 @@ function errRepTap(i) {
   if (r.answer) parts.push('', '— Ответ —', String(r.answer));
   showInfo(parts.join('\n'));
 }
-async function loadErrReports() {
-  txt('errRepList', '<div class="spin-wrap"><div class="spin"></div></div>');
+async function loadErrReports(more) {
+  // Отчёты листаются: было жёсткое LIMIT 20, то есть двадцать первый отчёт —
+  // и ответ разбора в нём — до отправителя не доходил вообще.
+  if (!more) {
+    _ERR_REPS = []; _ERR_PAGE = null;
+    txt('errRepList', '<div class="spin-wrap"><div class="spin"></div></div>');
+  }
   try {
-    const d = await api('/api/miniapp/error_reports');
-    _ERR_REPS = d.reports||[];
-    if (!_ERR_REPS.length) {
-      txt('errRepList', empty('🐛','Отчётов пока нет',
-        'Опишите проблему в поле выше — отчёт появится здесь, и сюда же придёт ответ по нему'));
-      return;
-    }
-    txt('errRepList', _ERR_REPS.map((r,i)=>`
+    const d = await api('/api/miniapp/error_reports?limit=20&offset=' + _ERR_REPS.length);
+    _ERR_REPS = _ERR_REPS.concat(d.reports || []);
+    _ERR_PAGE = d.page || null;
+    _errRepsRender();
+  } catch(e) {
+    if (_ERR_REPS.length) { toast('⚠️ ' + errRu(e, 'Не удалось подгрузить')); return; }
+    txt('errRepList', empty('⚠️','Ошибка',errRu(e), {label:'↺ Повторить',fn:retryCall('loadErrReports')}));
+  }
+}
+
+function _errRepsRender() {
+  if (!_ERR_REPS.length) {
+    txt('errRepList', empty('🐛','Отчётов пока нет',
+      'Опишите проблему в поле выше — отчёт появится здесь, и сюда же придёт ответ по нему'));
+    return;
+  }
+  txt('errRepList', _ERR_REPS.map((r,i)=>`
       <div class="li tap" onclick="errRepTap(${i})" role="button" tabindex="0">
         <div class="row-body">
-          <div class="row-name">№${r.id} · ${esc(ERR_REP_STATUS[r.status]||r.status)}${
+          <div class="row-name">№${esc(r.id)} · ${esc(ERR_REP_STATUS[r.status]||r.status)}${
             r.answer?' · <span style="color:var(--green)">есть ответ</span>':''}</div>
           <div class="li-sub wrap">${esc(String(r.description||'').slice(0,120))}${
             String(r.description||'').length>120?'…':''}</div>
           <div class="li-sub" style="color:var(--hint)">${esc(ago(r.created_at))}</div>
         </div><span class="chev">›</span></div>
-    `).join(''));
-  } catch(e) { txt('errRepList', empty('⚠️','Ошибка',errRu(e), {label:'↺ Повторить',fn:retryCall('loadErrReports')})); }
+    `).join('')
+    + UI.more({shown: _ERR_REPS.length, total: _ERR_PAGE ? _ERR_PAGE.total : null,
+               maybeMore: !!(_ERR_PAGE && _ERR_PAGE.has_more), fn: 'errRepsMore',
+               allLabel: 'Показаны все отчёты'}));
 }
+
+function errRepsMore() { loadErrReports(true); }
+
 async function submitErrReport() {
   const description = document.getElementById('errRepText').value.trim();
   const errEl = document.getElementById('errRepErr');

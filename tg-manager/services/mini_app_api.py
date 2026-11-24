@@ -8012,12 +8012,20 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         uid = _get_uid(request)
         if not uid:
             return _err("Unauthorized", 401)
+        limit = _list_limit(request, 20, 200)
+        offset = _list_offset(request)
         try:
+            # Страницами и с общим числом: было жёсткое LIMIT 20, то есть
+            # двадцать первый отчёт (и ответ разбора в нём) до отправителя не
+            # доходил вообще.
+            total = await _safe_count(
+                pool, "SELECT COUNT(*) FROM error_reports WHERE user_id=$1", uid)
             rows = await pool.fetch(
                 "SELECT id, description, status, created_at, updated_at, notes "
                 "FROM error_reports "
-                "WHERE user_id=$1 ORDER BY created_at DESC LIMIT 20",
-                uid,
+                "WHERE user_id=$1 ORDER BY created_at DESC, id DESC "
+                "LIMIT $2 OFFSET $3",
+                uid, limit, offset,
             )
         except Exception:
             log.exception("my_error_reports uid=%d", uid)
@@ -8036,7 +8044,8 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 "answer": (r.get("notes") or "").strip() or None,
             }
             for r in rows
-        ]})
+        ],
+            "page": _page_meta(offset, limit, len(rows), total)})
 
     # ── Bot toggle / edit ─────────────────────────────────────────────────────
 
@@ -11146,15 +11155,31 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         try:
             # Только операции самого пользователя (oq.owner_id = uid).
             # Без этого фильтра юзер видел бы аудит ВСЕХ владельцев — утечка.
+            limit = _list_limit(request, 200, 1000)
+            offset = _list_offset(request)
+            # Двести строк за неделю набирает одна массовая операция, а
+            # владелец приходит сюда разбираться именно после большой: журнал
+            # обрывался на самом интересном и молчал об этом.
+            total = await _safe_count(
+                pool,
+                "SELECT COUNT(*) FROM operation_log ol "
+                "JOIN operation_queue oq ON oq.id = ol.op_id "
+                "WHERE oq.owner_id = $1 "
+                "AND ol.created_at > NOW() - INTERVAL '7 days'",
+                uid)
             rows = await pool.fetch(
                 "SELECT ol.op_id, ol.step_num, ol.target, ol.status, ol.message, ol.created_at, "
                 "oq.owner_id, oq.op_type, oq.label "
                 "FROM operation_log ol JOIN operation_queue oq ON oq.id = ol.op_id "
                 "WHERE oq.owner_id = $1 AND ol.created_at > NOW() - INTERVAL '7 days' "
-                "ORDER BY ol.created_at DESC LIMIT 200",
-                uid,
+                "ORDER BY ol.created_at DESC, ol.op_id DESC, ol.step_num DESC "
+                "LIMIT $2 OFFSET $3",
+                uid, limit, offset,
             )
-            return _json_resp({"entries": [dict(r) for r in rows]})
+            return _json_resp({
+                "entries": [dict(r) for r in rows],
+                "page": _page_meta(offset, limit, len(rows), total),
+            })
         except Exception:
             log.exception("audit_trail")
             return _err(_INTERNAL_ERROR, 500)
