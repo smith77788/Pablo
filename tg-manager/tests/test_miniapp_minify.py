@@ -136,12 +136,17 @@ def test_first_open_budget():
     добавляет код в каждый экран; база стояла в 0,3 КБ от потолка, и пачка
     из пяти экранов дала +1 КБ. Первое открытие от этого не растёт — экраны
     ленивые, его бюджет отдельно стережёт test_miniapp_lazy. Следующий шаг
-    при упоре — не новая цифра, а вынос редких экранов из index.html."""
+    при упоре — не новая цифра, а вынос редких экранов из index.html.
+    24.11.2026: 740 -> 746 КБ. Новый экран «Запланировано»
+    (screens/planner.js, ~5,6 КБ) по заданию владельца — видимая функция,
+    а не рефакторинг; база стояла на 738 КБ. Вынос экранов в screens/*.js
+    общий итог не уменьшает (считаются оба), поэтому резать дальше —
+    только удалением дублей, это отдельная работа."""
     raw = open(INDEX, encoding="utf-8").read()
     total = len(gzip.compress(mm.minify_html(raw).encode(), 6))
     for f in glob.glob(os.path.join(ROOT, "mini_app", "screens", "*.js")):
         total += len(gzip.compress(mm.strip_js(open(f, encoding="utf-8").read()).encode(), 6))
-    assert total < 740 * 1024, f"весь код мини-аппа {total // 1024} КБ — больше потолка 740 КБ"
+    assert total < 746 * 1024, f"весь код мини-аппа {total // 1024} КБ — больше потолка 746 КБ"
 
 
 def test_service_worker_waits_for_the_first_minutes():

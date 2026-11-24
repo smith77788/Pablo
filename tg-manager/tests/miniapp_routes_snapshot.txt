@@ -305,6 +305,8 @@ GET /api/miniapp/persona/{persona_id}/memory
 GET /api/miniapp/personas
 GET /api/miniapp/physics
 GET /api/miniapp/physics/{account_id}/telemetry
+GET /api/miniapp/planner
+GET /api/miniapp/planner/candidates
 GET /api/miniapp/platform_users
 GET /api/miniapp/platform_users/export
 GET /api/miniapp/presence/map
@@ -677,6 +679,8 @@ HEAD /api/miniapp/persona/{persona_id}/memory
 HEAD /api/miniapp/personas
 HEAD /api/miniapp/physics
 HEAD /api/miniapp/physics/{account_id}/telemetry
+HEAD /api/miniapp/planner
+HEAD /api/miniapp/planner/candidates
 HEAD /api/miniapp/platform_users
 HEAD /api/miniapp/platform_users/export
 HEAD /api/miniapp/presence/map
@@ -1104,6 +1108,10 @@ POST /api/miniapp/persona/preview
 POST /api/miniapp/persona/{persona_id}/apply_profile
 POST /api/miniapp/persona/{persona_id}/memory/rebuild
 POST /api/miniapp/phone_check
+POST /api/miniapp/planner/broadcast/{sch_id}
+POST /api/miniapp/planner/operation/{op_id}
+POST /api/miniapp/planner/operation/{op_id}/schedule
+POST /api/miniapp/planner/operation/{op_id}/stop_repeat
 POST /api/miniapp/presence_pack
 POST /api/miniapp/presence_pack/{pack_id}/promote
 POST /api/miniapp/presence_pack/{pack_id}/seed
