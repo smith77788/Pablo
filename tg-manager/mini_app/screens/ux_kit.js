@@ -136,6 +136,10 @@ function uxInit() {
   document.addEventListener('touchcancel', uxPullEnd, { passive: true });
   document.addEventListener('touchstart', uxSwipeStart, { passive: true });
   document.addEventListener('touchend', uxSwipeEnd, { passive: true });
+  document.addEventListener('touchstart', uxHoldStart, { passive: true });
+  document.addEventListener('touchmove', uxHoldMove, { passive: true });
+  document.addEventListener('touchend', uxHoldCancel, { passive: true });
+  document.addEventListener('touchcancel', uxHoldCancel, { passive: true });
 
   window.addEventListener('offline', () => uxOffline(true));
   window.addEventListener('online', () => uxOffline(false));
@@ -397,4 +401,59 @@ function uxStale(id, on) {
   note.setAttribute('role', 'status');
   note.textContent = '⏳ Показаны последние данные, обновляем…';
   el.parentNode.insertBefore(note, el);
+}
+
+// ── Долгий тап — скопировать ───────────────────────────────────────────────
+// Номер аккаунта, его Telegram ID, ник бота — это то, что переносят руками в
+// другой чат, в таблицу, в поддержку. Скопировать их было нельзя НИГДЕ: в
+// мини-аппе выделение текста отключено (иначе любой скролл превращается в
+// выделение), а кнопки «копировать» стояли только у ссылок. Владелец
+// переписывал номер с экрана глазами.
+//
+// Значение объявляет сама строка — data-copy="+79990000001". Долгий тап по
+// ней копирует и говорит, что скопировано. Копирует ЕДИНСТВЕННАЯ дверь
+// (copyToClipboard): она честно отвечает об отказе и умеет запасной путь для
+// незащищённого контекста, где navigator.clipboard нет.
+const UX_HOLD_MS = 550;
+let UX_HOLD = null;
+
+// Ближайший предок со значением: палец попадает в подпись или в значок внутри
+// строки, а значение объявлено на строке.
+function uxCopyTarget(el) {
+  for (let n = el; n; n = n.parentNode) {
+    if (n.dataset && n.dataset.copy) return n;
+    if (n.tagName === 'BODY') return null;
+  }
+  return null;
+}
+
+function uxHoldStart(ev) {
+  uxHoldCancel();
+  const t = ev.touches;
+  if (!t || t.length !== 1) return;
+  const node = uxCopyTarget(ev.target);
+  if (!node) return;
+  const y0 = t[0].clientY;
+  const timer = setTimeout(() => {
+    UX_HOLD = null;
+    const what = node.dataset.copyWhat || 'Скопировано';
+    try { tg && tg.HapticFeedback && tg.HapticFeedback.impactOccurred('medium'); } catch (_) {}
+    if (typeof copyToClipboard === 'function') {
+      copyToClipboard(node.dataset.copy, '📋 ' + what);
+    }
+  }, UX_HOLD_MS);
+  UX_HOLD = { timer, y0 };
+}
+
+// Палец поехал — это прокрутка, а не удержание: копировать на ней значило бы
+// копировать при каждом листании списка.
+function uxHoldMove(ev) {
+  if (!UX_HOLD) return;
+  const t = ev.touches;
+  if (!t || t.length !== 1 || Math.abs(t[0].clientY - UX_HOLD.y0) > 10) uxHoldCancel();
+}
+
+function uxHoldCancel() {
+  if (UX_HOLD) clearTimeout(UX_HOLD.timer);
+  UX_HOLD = null;
 }

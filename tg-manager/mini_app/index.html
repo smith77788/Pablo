@@ -14463,8 +14463,8 @@ function buildAccDetail(d) {
 
     <div class="sec">Профиль</div>
     <div class="lst">
-      ${a.phone?`<div class="row"><div class="row-ico" style="background:var(--bg-green-16)">📞</div><div class="row-body"><div class="row-name">Телефон</div><div class="row-val">${esc(a.phone)}</div></div></div>`:''}
-      ${a.tg_user_id?`<div class="row"><div class="row-ico" style="background:var(--bg-blue-16)">🆔</div><div class="row-body"><div class="row-name">Telegram ID</div><div class="row-val">${a.tg_user_id}</div></div></div>`:''}
+      ${a.phone?`<div class="row" data-copy="${esc(a.phone)}" data-copy-what="Телефон скопирован" title="Удерживайте, чтобы скопировать"><div class="row-ico" style="background:var(--bg-green-16)">📞</div><div class="row-body"><div class="row-name">Телефон</div><div class="row-val">${esc(a.phone)}</div></div></div>`:''}
+      ${a.tg_user_id?`<div class="row" data-copy="${a.tg_user_id}" data-copy-what="Telegram ID скопирован" title="Удерживайте, чтобы скопировать"><div class="row-ico" style="background:var(--bg-blue-16)">🆔</div><div class="row-body"><div class="row-name">Telegram ID</div><div class="row-val">${a.tg_user_id}</div></div></div>`:''}
       <div class="row"><div class="row-ico" style="background:rgba(20,184,166,.16)">🛡</div>
         <div class="row-body">
           <div class="row-name">Уровень доверия</div>
@@ -21890,8 +21890,8 @@ async function openContactDetail(id) {
     document.getElementById('cdFavBtn').style.opacity = c.is_favorite ? '1' : '.4';
     let html = `<div class="lst" style="margin:12px 16px 0">
       <div class="row"><div class="row-body"><div class="row-name">Имя</div><div class="row-val">${esc(name)}</div></div></div>
-      ${c.username?`<div class="row"><div class="row-body"><div class="row-name">Имя в Telegram</div><div class="row-val">@${esc(c.username)}</div></div></div>`:''}
-      ${c.telegram_user_id?`<div class="row"><div class="row-body"><div class="row-name">Telegram ID</div><div class="row-val">${c.telegram_user_id}</div></div></div>`:''}
+      ${c.username?`<div class="row" data-copy="@${esc(c.username)}" data-copy-what="Ник скопирован" title="Удерживайте, чтобы скопировать"><div class="row-body"><div class="row-name">Имя в Telegram</div><div class="row-val">@${esc(c.username)}</div></div></div>`:''}
+      ${c.telegram_user_id?`<div class="row" data-copy="${c.telegram_user_id}" data-copy-what="Telegram ID скопирован" title="Удерживайте, чтобы скопировать"><div class="row-body"><div class="row-name">Telegram ID</div><div class="row-val">${c.telegram_user_id}</div></div></div>`:''}
       ${c.is_premium?`<div class="row"><div class="row-body"><div class="row-name">Premium</div><div class="row-val">💎 Да</div></div></div>`:''}
       ${c.registered_estimate?`<div class="row"><div class="row-body"><div class="row-name">Регистрация (оценка)</div><div class="row-val">📅 ≈ ${esc(c.registered_estimate)}</div></div></div>`:''}
       ${lastSeenLabel(c.last_seen_type, c.last_seen_at)?`<div class="row"><div class="row-body"><div class="row-name">Был в сети</div><div class="row-val">${esc(lastSeenLabel(c.last_seen_type, c.last_seen_at))}${c.last_seen_at?' · '+esc(String(c.last_seen_at).slice(0,16).replace('T',' ')):''}</div></div></div>`:''}
@@ -21899,8 +21899,8 @@ async function openContactDetail(id) {
       ${c.is_mutual?`<div class="row"><div class="row-body"><div class="row-name">Взаимный</div><div class="row-val">↔ Да</div></div></div>`:''}
       ${enr.activity&&enr.activity.level!=='unknown'?`<div class="row"><div class="row-body"><div class="row-name">Активность</div><div class="row-val">${enr.activity.level==='hot'?'🔥':enr.activity.level==='warm'?'🌤':'❄️'} ${esc(enr.activity.label)}</div></div></div>`:''}
       ${enr.language&&enr.language.code?`<div class="row"><div class="row-body"><div class="row-name">Язык (оценка)</div><div class="row-val">${esc(({ru:'🇷🇺 Русский',en:'🌐 Латиница',cjk:'🀄 Иероглифы',ar:'☪ Арабский'})[enr.language.code]||enr.language.code)} · ${Math.round((enr.language.confidence||0)*100)}%</div></div></div>`:''}
-      ${Array.isArray(c.phones)&&c.phones.length?`<div class="row"><div class="row-body"><div class="row-name">Телефон</div><div class="row-val">${esc(c.phones.join(', '))}</div></div></div>`:''}
-      ${Array.isArray(c.emails)&&c.emails.length?`<div class="row"><div class="row-body"><div class="row-name">Почта</div><div class="row-val">${esc(c.emails.join(', '))}</div></div></div>`:''}
+      ${Array.isArray(c.phones)&&c.phones.length?`<div class="row" data-copy="${esc(c.phones.join(', '))}" data-copy-what="Телефон скопирован" title="Удерживайте, чтобы скопировать"><div class="row-body"><div class="row-name">Телефон</div><div class="row-val">${esc(c.phones.join(', '))}</div></div></div>`:''}
+      ${Array.isArray(c.emails)&&c.emails.length?`<div class="row" data-copy="${esc(c.emails.join(', '))}" data-copy-what="Почта скопирована" title="Удерживайте, чтобы скопировать"><div class="row-body"><div class="row-name">Почта</div><div class="row-val">${esc(c.emails.join(', '))}</div></div></div>`:''}
       ${c.company?`<div class="row"><div class="row-body"><div class="row-name">Компания</div><div class="row-val">${esc(c.company)}</div></div></div>`:''}
       ${c.position?`<div class="row"><div class="row-body"><div class="row-name">Должность</div><div class="row-val">${esc(c.position)}</div></div></div>`:''}
       ${c.websites&&c.websites.length?`<div class="row"><div class="row-body"><div class="row-name">Сайты</div><div class="row-val">${c.websites.map(w=>'<a href="'+esc(w)+'" target="_blank" style="color:var(--accent)">'+esc(w)+'</a>').join(', ')}</div></div></div>`:''}
