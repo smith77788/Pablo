@@ -77,3 +77,9 @@
 .ui-skel{background:var(--ui-surface);border-radius:var(--ui-r);min-height:76px;animation:uiPulse 1.2s ease-in-out infinite}
 @keyframes uiPulse{0%,100%{opacity:.55}50%{opacity:1}}
 @media (prefers-reduced-motion:reduce){.ui-skel{animation:none}}
+
+/* Форма подключения почты: подписи и поля в .field (кант 16px, мелкая серая
+   подпись, оформленные поля), между полями — воздух перед подписью. */
+.mb-form > label{margin-top:var(--ui-s3)}
+.mb-form > label:first-child{margin-top:0}
+.mb-form > .btn{margin-top:var(--ui-s3)}

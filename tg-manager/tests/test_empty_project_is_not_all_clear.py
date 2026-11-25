@@ -56,7 +56,9 @@ def test_list_tools_hide_while_list_is_empty():
     bots = (APP / "screens" / "bots_list.js").read_text(encoding="utf-8")
     accs = (APP / "screens" / "accounts_list.js").read_text(encoding="utf-8")
     for tools, inner in (("botTools", 'id="botSelToggle"'), ("accTools", 'id="accKpi"')):
-        start = html.index(f'<div id="{tools}">')
+        # Обёртка несёт класс .sb-pass (кант 16px для её содержимого), поэтому
+        # ищем начало тега, а не тег целиком.
+        start = html.index(f'<div id="{tools}"')
         assert start < html.index(inner), f"{inner} должен лежать внутри {tools}"
     assert "getElementById('botTools')" in bots
     assert "_accToolsShown(" in accs
