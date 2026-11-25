@@ -24,7 +24,7 @@ function _fgScreen(id, title) {
       '<div class="hdr-title">' + esc(title) + '</div>' +
       '<div class="hdr-burger" onclick="openFloodGuard(' + '_fgBotId' + ')" title="Обновить">⟳</div>' +
     '</div>' +
-    '<div class="sb"><div id="' + id + '-body" style="padding:6px 0">' +
+    '<div class="sb"><div id="' + id + '-body" class="sb-pass" style="padding:6px 0">' +
       '<div class="spin-wrap"><div class="spin"></div></div>' +
     '</div></div>';
   document.body.appendChild(el);

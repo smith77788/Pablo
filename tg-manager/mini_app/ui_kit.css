@@ -94,3 +94,8 @@
 .ui-promo-sub { font-size:13px; color:var(--hint); line-height:1.45; }
 .ui-promo-act { display:flex; gap:8px; margin-top:10px; flex-wrap:wrap; }
 .ui-promo-act .btn { flex:1 1 auto; min-height:36px; font-size:13px; }
+/* Форма подключения почты: подписи и поля в .field (кант 16px, мелкая серая
+   подпись, оформленные поля), между полями — воздух перед подписью. */
+.mb-form > label{margin-top:var(--ui-s3)}
+.mb-form > label:first-child{margin-top:0}
+.mb-form > .btn{margin-top:var(--ui-s3)}

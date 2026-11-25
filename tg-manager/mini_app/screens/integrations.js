@@ -23,7 +23,7 @@ function _igScreen(id, title, reloadFn) {
     '</div>' +
     // Экран «Интеграций» — вкладка модуля (SCREEN_MODULES.integrations).
     (id === 's-integrations' ? '<div class="filter-chips mod-tabs" data-module="integrations" data-tab="connect" role="tablist" aria-label="Вкладки модуля «Интеграции»"></div>' : '') +
-    '<div class="sb"><div id="' + id + '-body" style="padding:6px 0">' +
+    '<div class="sb"><div id="' + id + '-body" class="sb-pass" style="padding:6px 0">' +
       '<div class="spin-wrap"><div class="spin"></div></div>' +
     '</div></div>';
   document.body.appendChild(el);

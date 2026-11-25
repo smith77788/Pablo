@@ -11,9 +11,14 @@ POST   /api/miniapp/notify_routes/{route_id}/test — тестовое сооб�
 """
 from __future__ import annotations
 
+import asyncio
+import os
+import time
+
 from aiohttp import web
 
-_bot_username_cache: dict[str, str] = {}
+# "u" — @username главного бота; "failed_at" — момент последней неудачи getMe.
+_bot_username_cache: dict[str, object] = {}
 
 
 async def _main_call(method: str, **params) -> dict:
@@ -27,15 +32,35 @@ async def _main_call(method: str, **params) -> dict:
         return await bot_api._call(http, BOT_TOKEN, method, **params)
 
 
+_USERNAME_RETRY_S = 300.0
+
+
 async def _main_username() -> str:
-    if "u" not in _bot_username_cache:
-        try:
-            me = (await _main_call("getMe")).get("result") or {}
-            if me.get("username"):
-                _bot_username_cache["u"] = me["username"]
-        except Exception:
-            return ""
-    return _bot_username_cache.get("u", "")
+    """@username главного бота для ссылки «добавить в канал».
+
+    Сначала BOT_USERNAME из среды (без похода в Telegram), иначе getMe с
+    кэшем. Неудача тоже запоминается — на пять минут: раньше её не
+    запоминали, и пока Telegram не отвечал, КАЖДОЕ открытие экрана
+    «Каналы уведомлений» ждало таймаут запроса (на стенде — 3 с на ответ).
+    """
+    env_u = os.getenv("BOT_USERNAME", "").lstrip("@").strip()
+    if env_u:
+        return env_u
+    if "u" in _bot_username_cache:
+        return _bot_username_cache["u"]
+    failed_at = _bot_username_cache.get("failed_at")
+    if failed_at and time.monotonic() - float(failed_at) < _USERNAME_RETRY_S:
+        return ""
+    try:
+        me = (await _main_call("getMe")).get("result") or {}
+    except Exception:
+        me = {}
+    if me.get("username"):
+        _bot_username_cache.pop("failed_at", None)
+        _bot_username_cache["u"] = me["username"]
+        return me["username"]
+    _bot_username_cache["failed_at"] = time.monotonic()
+    return ""
 
 
 def setup_routes(app: web.Application, pool) -> None:
@@ -70,10 +95,12 @@ def setup_routes(app: web.Application, pool) -> None:
         for r in routes:
             if r.get("updated_at") is not None:
                 r["updated_at"] = r["updated_at"].isoformat()
-        uname = await _main_username()
+        # Имя бота, чаты и боты независимы — разом, а не друг за другом.
+        uname, chats, bots = await asyncio.gather(
+            _main_username(), _chats(uid), _bots(uid))
         return _json_resp({
-            "ok": True, "routes": routes, "chats": await _chats(uid),
-            "bots": await _bots(uid), "events": R.EVENT_LABELS,
+            "ok": True, "routes": routes, "chats": chats,
+            "bots": bots, "events": R.EVENT_LABELS,
             "add_url": (f"https://t.me/{uname}?startchannel=notify&admin=post_messages+invite_users"
                         if uname else ""),
             "bot_username": uname,

@@ -37,7 +37,14 @@ async function openMailboxes() {
       }
     }
     list.replaceChildren();
-    if (!mailboxes.length) list.textContent = 'Почтовые ящики пока не подключены. Добавьте свой ниже.';
+    if (!mailboxes.length) {
+      // Голый текст в .lst упирался в край своей плашки: у списка нет
+      // внутреннего отступа, его держат строки. Пустому списку — своя строка.
+      const empty = document.createElement('div');
+      empty.className = 'empty-inline';
+      empty.textContent = 'Почтовые ящики пока не подключены. Добавьте свой ниже.';
+      list.appendChild(empty);
+    }
     for (const mailbox of mailboxes) {
       const row = document.createElement('div');
       row.className = 'li';
