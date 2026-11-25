@@ -12,24 +12,41 @@ async function openNiche() {
   nrLoad();
 }
 
-async function nrLoad() {
+// Ниши листаются: было жёсткое LIMIT 50 без счёта, то есть ниша за
+// пятидесятой для экрана не существовала — ни открыть, ни удалить.
+async function nrLoad(more) {
   const box = document.getElementById('nrList');
   if (!box) return;
-  box.innerHTML = '<div class="spin-wrap"><div class="spin"></div></div>';
-  nrCloseForm();
+  const have = more ? ((NR.data && NR.data.campaigns) || []).length : 0;
+  if (!more) {
+    box.innerHTML = '<div class="spin-wrap"><div class="spin"></div></div>';
+    nrCloseForm();
+  }
+  let d;
   try {
-    NR.data = await api('/api/miniapp/niche/overview');
+    d = await api('/api/miniapp/niche/overview?limit=20&offset=' + have);
   } catch (e) {
+    // Догрузка не должна стирать то, что человек уже видит.
+    if (more) { toast('⚠️ ' + errRu(e, 'Не удалось подгрузить ниши')); return; }
     box.innerHTML = errHtml(errRu(e, 'Не удалось загрузить радар'), 'nrLoad()');
     return;
   }
+  if (more) d.campaigns = ((NR.data && NR.data.campaigns) || []).concat(d.campaigns || []);
+  NR.data = d;
   const rows = NR.data.campaigns || [];
   txt('nrAccNote', NR.data.accounts
     ? `Работают ${_nrNum(NR.data.accounts)} ${plural(NR.data.accounts, 'аккаунт', 'аккаунта', 'аккаунтов')} флота`
     : 'Нет рабочих аккаунтов — поиск и присутствие им не на чем делать');
-  box.innerHTML = rows.length ? rows.map(_nrRow).join('')
+  const page = NR.data.page || null;
+  box.innerHTML = rows.length
+    ? rows.map(_nrRow).join('') + UI.more({
+        shown: rows.length, total: page ? page.total : null,
+        maybeMore: !!(page && page.has_more), fn: 'nrMore',
+        allLabel: 'Показаны все ниши'})
     : empty('🔭', 'Ниш пока нет', 'Опишите нишу — агент найдёт по ней максимум чатов и каналов, флот вступит и будет там работать.', {label: '+ Добавить нишу', fn: 'nrOpenForm()'});
 }
+
+function nrMore() { nrLoad(true); }
 
 function _nrRow(c) {
   const s = c.stats || {};

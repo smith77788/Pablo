@@ -27614,6 +27614,7 @@ async function deleteDm(id, status, _el) {
 // Правка идущего плана живёт в той же форме: id плана — режим правки.
 let WARMUP_EDIT_ID = null;
 let _WU_PLANS = [];
+let _WU_PAGE = null;   // конверт страницы планов прогрева
 const _WU_KEEP = '<option value="" data-keep="1">— не менять —</option>';
 function _warmupMode(edit) {
   WARMUP_EDIT_ID = edit || null;
@@ -27780,14 +27781,19 @@ const WARMUP_STATUS = {active:'🟢 Активен',paused:'⏸ Пауза',comp
 const WARMUP_STATE_COLOR = {running:'var(--green)', stalled:'var(--orange,#f59e0b)',
                             blocked:'var(--red,#ef4444)', paused:'var(--hint)',
                             completed:'var(--blue,#3b82f6)', cancelled:'var(--hint)'};
-async function openWarmup() {
+async function openWarmup(more) {
+  // Планы листаются: флот из двух сотен аккаунтов давал ровно 50 строк, а
+  // «Всего планов» рядом показывало настоящее число — экран противоречил сам
+  // себе, и плана за пятидесятым нельзя было ни открыть, ни остановить.
+  if (more) { openWarmupPage(true); return; }
   push('s-warmup');
+  _WU_PLANS = []; _WU_PAGE = null;
   txt('warmupStats','<div class="spin-wrap"><div class="spin"></div></div>');
   txt('warmupList','');
   const warnBox = document.getElementById('warmupWarn');
   if (warnBox) { warnBox.style.display='none'; warnBox.innerHTML=''; }
   try {
-    const d = await api('/api/miniapp/warmup');
+    const d = await api('/api/miniapp/warmup?limit=50&offset=0');
     const att = d.attention||0;
     txt('warmupStats',`
       <div class="kpi-card"><div class="kpi-val">${d.total||0}</div><div class="kpi-lbl">Всего планов</div></div>
@@ -27803,10 +27809,18 @@ async function openWarmup() {
     }
     const plans = d.plans||[];
     _WU_PLANS = plans;
+    _WU_PAGE = d.page||null;
     const bulkBox = document.getElementById('warmupBulk');
     if (bulkBox) bulkBox.style.display = plans.some(p=>p.status==='active'||p.status==='paused') ? 'flex' : 'none';
     if (!plans.length) { txt('warmupList', empty('🌱','Нет планов прогрева','Нажмите + Запустить', {label:'🌱 Запустить прогрев', fn:'openWarmupModal()'})); return; }
-    txt('warmupList', plans.map(p=>{
+    warmupRenderList();
+  } catch(e) {
+    txt('warmupStats','');
+    txt('warmupList', empty('⚠️','Ошибка',errRu(e), {label:'↺ Повторить',fn:retryCall('openWarmup')}));
+  }
+}
+function warmupRenderList() {
+  txt('warmupList', _WU_PLANS.map(p=>{
       const h = p.health || {state:'running', label:(WARMUP_STATUS[p.status]||p.status), hint:'', resumable:p.status==='paused'};
       const col = WARMUP_STATE_COLOR[h.state] || 'var(--hint)';
       return `
@@ -27826,12 +27840,24 @@ async function openWarmup() {
           <button class="icon-btn sm danger" onclick="deleteWarmupPlan(${p.id}, this)" aria-label="Удалить" title="Удалить">🗑</button>
         </div>
       </div>`;
-    }).join(''));
-  } catch(e) {
-    txt('warmupStats','');
-    txt('warmupList', empty('⚠️','Ошибка',errRu(e), {label:'↺ Повторить',fn:retryCall('openWarmup')}));
-  }
+    }).join('')
+      + UI.more({shown: _WU_PLANS.length,
+                 total: _WU_PAGE ? _WU_PAGE.total : null,
+                 maybeMore: !!(_WU_PAGE && _WU_PAGE.has_more), fn: 'warmupMore',
+                 allLabel: 'Показаны все планы прогрева'}));
 }
+// Догрузка следующей страницы планов. Шапка и счётчики уже на экране —
+// перерисовываем только список, иначе каждая догрузка мигала бы всем экраном.
+async function openWarmupPage() {
+  try {
+    const d = await api('/api/miniapp/warmup?limit=50&offset=' + _WU_PLANS.length);
+    _WU_PLANS = _WU_PLANS.concat(d.plans || []);
+    _WU_PAGE = d.page || null;
+    warmupRenderList();
+  } catch (e) { toast('⚠️ ' + errRu(e, 'Не удалось подгрузить планы')); }
+}
+function warmupMore() { openWarmupPage(); }
+
 // ── Восстановление аккаунтов ───────────────────────────────────────────
 // Модуль существовал и работал, но был невидим целиком: ни экрана, ни
 // уведомления. Аккаунт со спам-блоком выглядел потерянным, хотя система его
@@ -34023,6 +34049,7 @@ async function submitMeshCreate() {
 // ── Narrative Engine ────────────────────────────────────
 // Страницы по СМЕЩЕНИЮ — см. комментарий у openNewUsers.
 let NARR_ROWS = [], NARR_OFFSET = 0;
+let _NARRD_POSTS = [], _NARRD_PAGE = null, _NARRD_CID = 0;   // посты одной нарратив-кампании
 async function openNarrativeMore() { NARR_OFFSET = NARR_ROWS.length; await openNarrative(true); }
 async function openNarrative(keep) {
   if (!keep) { NARR_ROWS = []; NARR_OFFSET = 0; push('s-narrative'); }
@@ -34056,9 +34083,12 @@ async function openNarrativeDetail(cid, topic) {
   document.getElementById('narr-name').textContent = topic||'Кампания';
   txt('narr-body', '<div class="spin-wrap"><div class="spin"></div></div>');
   try {
-    const d = await api(`/api/miniapp/narrative/${cid}`);
+    const d = await api(`/api/miniapp/narrative/${cid}?limit=50&offset=0`);
     const c = d.campaign;
-    const posts = d.posts||[];
+    _NARRD_CID = cid;
+    _NARRD_POSTS = d.posts||[];
+    _NARRD_PAGE = d.page||null;
+    const posts = _NARRD_POSTS;
     const typeLabel = {trend:'📈 Тренд',launch:'🚀 Запуск',awareness:'💡 Осведомлённость',counter:'⚔️ Контр'};
     let html = `
       <div class="lst" style="margin:12px 16px 0">
@@ -34073,28 +34103,43 @@ async function openNarrativeDetail(cid, topic) {
           ? `<button class="btn btn-g" onclick="resumeNarrative(${c.id})">▶ Возобновить</button>`
           : `<button class="btn btn-o" onclick="pauseNarrative(${c.id})">⏸ Пауза</button>`}
       </div>`:''}
-      <div class="sec" style="margin-top:8px">Посты (${posts.length})</div>
+      <div class="sec" style="margin-top:8px">Посты (${_NARRD_PAGE ? _NARRD_PAGE.total : posts.length})</div>
+      <div id="narrPosts"></div>
     `;
-    if (!posts.length) {
-      html += empty('📭','Постов нет','');
-    } else {
-      const anglE = {news:'📰',expert:'🎓',story:'📖',stats:'📊',opinion:'💬',question:'❓'};
-      html += '<div class="lst" style="margin:0 16px">';
-      posts.forEach(p => {
-        const [cls,lbl]=stb(p.status);
-        html += `
-          <div class="row">
-            <div class="row-body">
-              <div class="row-name">${anglE[p.angle]||'•'} ${esc(p.channel_username)} · ${esc(p.angle||'—')}</div>
-              <div class="row-val"><span class="badge ${cls}">${lbl}</span> · ${p.published_at?ago(p.published_at):ago(p.scheduled_at)}</div>
-            </div>
-          </div>
-        `;
-      });
-      html += '</div>';
-    }
     txt('narr-body', html);
+    narrPostsRender();
   } catch(e) { txt('narr-body', empty('⚠️','Ошибка',errRu(e), {label:'↺ Повторить',fn:retryCall('openNarrativeDetail', cid, topic)})); }
+}
+
+// Посты кампании листаются. Было жёсткое LIMIT 50: у кампании на три месяца
+// посты за пятидесятым не показывались, а подпись «Посты (50)» выдавала это
+// за всё их число. Теперь число берётся из конверта страницы, а не из длины
+// отданного куска.
+function narrPostsRender() {
+  const box = document.getElementById('narrPosts');
+  if (!box) return;
+  if (!_NARRD_POSTS.length) { box.innerHTML = empty('📭','Постов нет','Кампания ещё не разложила посты по каналам и времени'); return; }
+  const anglE = {news:'📰',expert:'🎓',story:'📖',stats:'📊',opinion:'💬',question:'❓'};
+  box.innerHTML = '<div class="lst" style="margin:0 16px">'
+    + _NARRD_POSTS.map(p => {
+        const [cls,lbl]=stb(p.status);
+        return `<div class="row"><div class="row-body">
+            <div class="row-name">${anglE[p.angle]||'•'} ${esc(p.channel_username)} · ${esc(p.angle||'—')}</div>
+            <div class="row-val"><span class="badge ${cls}">${lbl}</span> · ${p.published_at?ago(p.published_at):ago(p.scheduled_at)}</div>
+          </div></div>`;
+      }).join('')
+    + '</div>'
+    + UI.more({shown: _NARRD_POSTS.length, total: _NARRD_PAGE ? _NARRD_PAGE.total : null,
+               maybeMore: !!(_NARRD_PAGE && _NARRD_PAGE.has_more), fn: 'narrPostsMore',
+               allLabel: 'Показаны все посты кампании'});
+}
+async function narrPostsMore() {
+  try {
+    const d = await api(`/api/miniapp/narrative/${_NARRD_CID}?limit=50&offset=` + _NARRD_POSTS.length);
+    _NARRD_POSTS = _NARRD_POSTS.concat(d.posts || []);
+    _NARRD_PAGE = d.page || null;
+    narrPostsRender();
+  } catch (e) { toast('⚠️ ' + errRu(e, 'Не удалось подгрузить посты')); }
 }
 
 async function pauseNarrative(cid) {
