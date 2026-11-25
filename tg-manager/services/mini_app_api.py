@@ -1815,6 +1815,27 @@ def _geo_code(raw) -> str:
     return cc if len(cc) == 2 and cc.isalpha() and cc.isascii() else ""
 
 
+def _page_meta(offset: int, limit: int, shown: int, total=None) -> dict:
+    """Конверт страницы — ОДНА форма на все списки мини-аппа.
+
+    Экран должен уметь ответить на два вопроса: сколько строк он показывает и
+    есть ли ещё. Раньше каждый список отвечал по-своему (где-то `has_more`,
+    где-то `shown`, где-то ничего), и экраны, у которых формы не было вовсе,
+    рисовали первые тридцать строк как «всё, что есть»: тридцать из восьмидесяти
+    на экране выглядят ровно как восемьдесят из восьмидесяти.
+
+    `total=None` допустим — не у каждого списка счёт по всей выборке дёшев. Тогда
+    «есть ещё» определяется по полной странице, и фронт (UI.more) пишет только
+    показанное, не выдумывая итог.
+    """
+    has_more = (offset + shown) < int(total) if total is not None else shown >= limit
+    out = {"offset": int(offset), "limit": int(limit), "shown": int(shown),
+           "has_more": bool(has_more)}
+    if total is not None:
+        out["total"] = int(total)
+    return out
+
+
 def _list_limit(request: web.Request, default: int, maximum: int) -> int:
     """Потолок списка: по умолчанию короткий, по просьбе экрана — больший.
 
@@ -7990,12 +8011,20 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         uid = _get_uid(request)
         if not uid:
             return _err("Unauthorized", 401)
+        limit = _list_limit(request, 20, 200)
+        offset = _list_offset(request)
         try:
+            # Страницами и с общим числом: было жёсткое LIMIT 20, то есть
+            # двадцать первый отчёт (и ответ разбора в нём) до отправителя не
+            # доходил вообще.
+            total = await _safe_count(
+                pool, "SELECT COUNT(*) FROM error_reports WHERE user_id=$1", uid)
             rows = await pool.fetch(
                 "SELECT id, description, status, created_at, updated_at, notes "
                 "FROM error_reports "
-                "WHERE user_id=$1 ORDER BY created_at DESC LIMIT 20",
-                uid,
+                "WHERE user_id=$1 ORDER BY created_at DESC, id DESC "
+                "LIMIT $2 OFFSET $3",
+                uid, limit, offset,
             )
         except Exception:
             log.exception("my_error_reports uid=%d", uid)
@@ -8014,7 +8043,8 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 "answer": (r.get("notes") or "").strip() or None,
             }
             for r in rows
-        ]})
+        ],
+            "page": _page_meta(offset, limit, len(rows), total)})
 
     # ── Bot toggle / edit ─────────────────────────────────────────────────────
 
@@ -9161,22 +9191,37 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             return _err("Не удалось сохранить", 500)
 
     async def payments_history(request: web.Request) -> web.Response:
+        """История оплат владельца, страницами и с общим числом.
+
+        Было `LIMIT 20` без слова о том, что платежей больше: двадцать первая
+        оплата для владельца не существовала, а именно её он и ищет, когда
+        сверяет списанное с продлениями. Счёт по всей истории здесь дёшев
+        (строк единицы-десятки) и нужен: «показано 20 из 34» — это ответ, а
+        «показано 20» — нет.
+        """
         uid = _get_uid(request)
         if not uid:
             return _err("Unauthorized", 401)
+        limit = _list_limit(request, 20, 200)
+        offset = _list_offset(request)
         try:
+            total = await _safe_count(
+                pool, "SELECT COUNT(*) FROM payments WHERE user_id=$1", uid)
             rows = await pool.fetch(
                 """SELECT plan, period_months, amount_usd, currency, status, created_at
                    FROM payments
                    WHERE user_id=$1
-                   ORDER BY created_at DESC
-                   LIMIT 20""",
-                uid,
+                   ORDER BY created_at DESC, id DESC
+                   LIMIT $2 OFFSET $3""",
+                uid, limit, offset,
             )
-            return _json_resp([dict(r) for r in rows])
+            return _json_resp({
+                "items": [dict(r) for r in rows],
+                "page": _page_meta(offset, limit, len(rows), total),
+            })
         except Exception as e:
             log.warning("payments_history uid=%d: %s", uid, e)
-            return _json_resp([])
+            return _json_resp({"items": [], "page": _page_meta(offset, limit, 0, 0)})
 
     async def referral(request: web.Request) -> web.Response:
         uid = _get_uid(request)
@@ -11127,15 +11172,35 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         try:
             # Только операции самого пользователя (oq.owner_id = uid).
             # Без этого фильтра юзер видел бы аудит ВСЕХ владельцев — утечка.
+            limit = _list_limit(request, 200, 1000)
+            offset = _list_offset(request)
+            # Двести строк за неделю набирает одна массовая операция, а
+            # владелец приходит сюда разбираться именно после большой: журнал
+            # обрывался на самом интересном и молчал об этом.
+            total = await _safe_count(
+                pool,
+                "SELECT COUNT(*) FROM operation_log ol "
+                "JOIN operation_queue oq ON oq.id = ol.op_id "
+                "WHERE oq.owner_id = $1 "
+                "AND ol.created_at > NOW() - INTERVAL '7 days'",
+                uid)
             rows = await pool.fetch(
                 "SELECT ol.op_id, ol.step_num, ol.target, ol.status, ol.message, ol.created_at, "
                 "oq.owner_id, oq.op_type, oq.label "
                 "FROM operation_log ol JOIN operation_queue oq ON oq.id = ol.op_id "
                 "WHERE oq.owner_id = $1 AND ol.created_at > NOW() - INTERVAL '7 days' "
-                "ORDER BY ol.created_at DESC LIMIT 200",
-                uid,
+                # Добивка — первичный ключ строки журнала: порядок внутри равного
+                # времени Postgres не обещает, а пара (op_id, step_num)
+                # уникальной не объявлена, так что страницы могли
+                # повторить одну запись и потерять другую.
+                "ORDER BY ol.created_at DESC, ol.id DESC "
+                "LIMIT $2 OFFSET $3",
+                uid, limit, offset,
             )
-            return _json_resp({"entries": [dict(r) for r in rows]})
+            return _json_resp({
+                "entries": [dict(r) for r in rows],
+                "page": _page_meta(offset, limit, len(rows), total),
+            })
         except Exception:
             log.exception("audit_trail")
             return _err(_INTERNAL_ERROR, 500)

@@ -27,8 +27,9 @@ from aiohttp import web
 def setup_routes(app: web.Application, pool) -> None:
     """Зарегистрировать маршруты прогрева на приложении мини-аппа."""
     from services.mini_app_api import (
-        _INTERNAL_ERROR, _err, _get_uid, _json_resp, _obus, _owner_ru, _safe_fetch,
-        _safe_fetchrow, _warmup_bulk_core, alive_accounts, bad_body_response, log,
+        _INTERNAL_ERROR, _err, _get_uid, _json_resp, _list_limit, _list_offset,
+        _obus, _owner_ru, _page_meta, _safe_fetch, _safe_fetchrow,
+        _warmup_bulk_core, alive_accounts, bad_body_response, log,
     )
     from services import account_status as _acc_status
     from services.security import (
@@ -66,18 +67,26 @@ def setup_routes(app: web.Application, pool) -> None:
                    FROM account_warmup_plans wp
                    JOIN tg_accounts ta ON ta.id = wp.account_id
                    WHERE wp.owner_id=$1
-                   ORDER BY wp.started_at DESC LIMIT 50"""
+                   ORDER BY wp.started_at DESC, wp.id DESC
+                   LIMIT $2 OFFSET $3"""
+            # Страницами: флот из двух сотен аккаунтов давал ровно 50 планов
+            # и ни слова о том, что остальные есть. Общее число тут уже
+            # считалось (`total`) — экран показывал его рядом с усечённым
+            # списком, то есть сам себе противоречил.
+            limit = _list_limit(request, 50, 200)
+            offset = _list_offset(request)
             try:
                 plans = await pool.fetch(
                     _PLAN_SQL.format(cols=_PLAN_COLS + """,
                           wp.pause_reason, wp.pause_detail,
                           wp.last_skip_reason, wp.last_skip_at"""),
-                    uid,
+                    uid, limit, offset,
                 )
             except Exception:
                 log.warning("warmup_overview uid=%d: нет колонок причин, "
                             "показываем план без диагностики", uid)
-                plans = await pool.fetch(_PLAN_SQL.format(cols=_PLAN_COLS), uid)
+                plans = await pool.fetch(
+                    _PLAN_SQL.format(cols=_PLAN_COLS), uid, limit, offset)
             total = await pool.fetchval(
                 "SELECT COUNT(*) FROM account_warmup_plans WHERE owner_id=$1", uid
             )
@@ -104,6 +113,7 @@ def setup_routes(app: web.Application, pool) -> None:
                 "total": total, "active": active,
                 "attention": attention,
                 "plans": out,
+                "page": _page_meta(offset, limit, len(out), total),
             })
         except Exception:
             log.exception("warmup_overview uid=%d", uid)

@@ -1533,6 +1533,12 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
          видел сначала стену нулей, а выбор цели — за нижним краем экрана
          (обход 08.11.2026). -->
     <div id="onboardCard" style="margin:12px 16px 12px;display:none"></div>
+    <!-- Хранилище диалогов — главное умение продукта, и оно было спрятано:
+         подсказка копайлота о нём стоит с приоритетом 72, а экран показывает
+         пять подсказок, поэтому у владельца с живым флотом она не попадала в
+         выдачу НИ РАЗУ. Эта полоса не соревнуется за место: она видна, пока
+         хранилище не подключено, и исчезает сама после подключения. -->
+    <div id="vaultPromo" style="display:none"></div>
     <section id="homeProjects" hidden aria-label="Проекты"></section>
     <div id="summaryWrap"></div>
     <div id="homeDataStatus" role="status" aria-live="polite" class="home-data-status"></div>
@@ -8388,6 +8394,11 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
       <div class="field-note"><span id="bcastLen">0</span>/4096 · <span id="bcastRecip">0 получателей</span> · <a href="#" onclick="pickTplInto('bcastText','bcastLen');return false" style="color:var(--accent)">📝 Из шаблона</a> · <a href="#" onclick="saveTextAsTpl('bcastText');return false" style="color:var(--accent)">💾 В шаблоны</a></div>
     </div>
     <div class="field">
+      <label>Второй вариант текста — A/B-тест (необязательно)</label>
+      <textarea id="bcastTextB" rows="4" maxlength="4096" oninput="updateBcastAb()" placeholder="Оставьте пустым, если тест не нужен"></textarea>
+      <div class="field-note" id="bcastAbNote">Аудитория разделится случайно пополам: половина получит первый текст, половина — второй. Что сработало лучше, видно в «Аналитике рассылок».</div>
+    </div>
+    <div class="field">
       <label>Кому отправить</label>
       <select id="bcastSegment" onchange="updateBcastRecip()">
         <option value="all">Всем подписчикам</option>
@@ -11186,6 +11197,9 @@ function syncSelBarGap(wrapId) {
 
 function push(sid) {
   closeAllModals();
+  // Привязываем экран к функции, которой его открыли: это даёт
+  // тянуть-обновить на экранах без явного data-reload.
+  if (typeof uxNoteScreenFn === 'function') uxNoteScreenFn(sid);
   // Экраны — синглтоны по id, и один и тот же id дважды подряд в стеке не
   // означает ничего, кроме ловушки: «назад» снимет верхний и покажет ТОТ ЖЕ
   // экран. Так и было везде, где экран перерисовывают повторным вызовом своей
@@ -11543,6 +11557,7 @@ async function loadHome() {
   if (typeof refreshTabBadges === 'function') refreshTabBadges(true);
   // Закреплённые разделы — на первом экране, а не за двумя нажатиями.
   if (typeof uxPinnedHome === 'function') uxPinnedHome();
+  if (typeof vaultPromoHome === 'function') vaultPromoHome();
   if (typeof uxResumeHome === 'function') uxResumeHome();
   modernizeIcons(document.getElementById('s-home'));
   const cached = loadHome.lastData || getCached('infragram_cache_home');
@@ -15042,6 +15057,11 @@ function chGrowthHtml(g) {
 // их всего, есть срез по статусу (неудачные ищут именно так) и догрузка.
 const BCAST_PAGE = 30;
 let BCAST_ROWS = [], BCAST_TOTAL = 0, BCAST_COUNTS = {}, BCAST_FILTER = '', BCAST_LOADING = false;
+let PAY_ROWS = [], PAY_PAGE = null;   // история оплат: страницы и конверт
+let FUN_ROWS = [], FUN_PAGE = null;   // воронки: страницы и конверт
+let ECO_ROWS = [], ECO_PAGE = null;   // экосистемы: страницы и конверт
+let EXP_ROWS = [], EXP_PAGE = null;   // эксперименты: страницы и конверт
+let SCH_ROWS = [], SCH_PAGE = null;   // расписание бота: страницы и конверт
 let BCAST_SEARCH = '', _bcastSearchT = null, BCAST_FOUND = null;
 function _bcastQuery(offset, limit) {
   let u = '/api/miniapp/broadcasts?limit=' + (limit || BCAST_PAGE) + '&offset=' + offset;
@@ -15080,7 +15100,7 @@ async function loadBroadcasts() {
     const [bd, cd, fd] = await Promise.all([
       api(_bcastQuery(0, want)),
       api('/api/miniapp/campaigns'),
-      api('/api/miniapp/funnels'),
+      api('/api/miniapp/funnels?limit=30&offset=0'),
     ]);
     BCAST_ROWS = bd.broadcasts||[];
     BCAST_TOTAL = (bd.total != null) ? bd.total : BCAST_ROWS.length;
@@ -15088,7 +15108,9 @@ async function loadBroadcasts() {
     BCAST_COUNTS = bd.counts || {};
     renderBcasts(BCAST_ROWS);
     renderCmps(cd.campaigns||[]);
-    renderFuns(fd.funnels||[]);
+    FUN_ROWS = fd.funnels||[];
+    FUN_PAGE = fd.page||null;
+    renderFuns();
   } catch(e) {
     txt('bcastList', errHtml(errRu(e),'loadBroadcasts()'));
     txt('bcastChips',''); txt('bcastMore','');
@@ -15269,17 +15291,33 @@ function renderCmps(items) {
   }).join('');
 }
 
-function renderFuns(items) {
+function renderFuns() {
   const el = document.getElementById('funList');
-  if (!items.length) { el.innerHTML=empty('🔄','Нет воронок'); return; }
-  el.innerHTML = items.map(f=>`<div class="li tap" onclick="openFunnelDetail(${f.id},'${escJs(f.name||'Воронка')}')">
+  if (!el) return;
+  if (!FUN_ROWS.length) { el.innerHTML=empty('🔄','Нет воронок'); return; }
+  el.innerHTML = FUN_ROWS.map(f=>`<div class="li tap" onclick="openFunnelDetail(${Number(f.id)},'${escJs(f.name||'Воронка')}')">
     <div class="ava ava-orange">🔄</div>
     <div class="li-body">
       <div class="li-name">${esc(f.name||'Воронка')}</div>
       <div class="li-sub">${f.bot_username?'@'+esc(f.bot_username):''} · Активных: ${num(f.active_subs||0)}</div>
     </div>
     <span class="badge ${f.is_active?'b-gr':'b-gy'}">${f.is_active?'▶ Активна':'⏸ Пауза'}</span>
-  </div>`).join('');
+  </div>`).join('')
+    + UI.more({shown: FUN_ROWS.length, total: FUN_PAGE ? FUN_PAGE.total : null,
+               maybeMore: !!(FUN_PAGE && FUN_PAGE.has_more), fn: 'loadMoreFuns',
+               allLabel: 'Показаны все воронки'});
+}
+
+// Догрузка воронок. Список отсортирован по числу активных подписчиков, то есть
+// воронка БЕЗ подписчиков — та самая, которую надо починить, — стоит в конце и
+// раньше уходила за потолок молча.
+async function loadMoreFuns() {
+  try {
+    const d = await api('/api/miniapp/funnels?limit=30&offset=' + FUN_ROWS.length);
+    FUN_ROWS = FUN_ROWS.concat(d.funnels||[]);
+    FUN_PAGE = d.page||null;
+    renderFuns();
+  } catch(e) { toast('⚠️ ' + errRu(e, 'Не удалось подгрузить')); }
 }
 
 // ── Broadcast modal ────────────────────────────────────
@@ -15289,6 +15327,8 @@ function openBcastPick() {
   document.getElementById('bcastText').value='';
   { const _bb=document.getElementById('bcastButtons'); if(_bb) _bb.value=''; }
   { const _bs=document.getElementById('bcastSilent'); if(_bs) _bs.checked=false; }
+  { const _tb=document.getElementById('bcastTextB'); if(_tb) _tb.value=''; }
+  if (typeof updateBcastAb === 'function') updateBcastAb();
   { const _sg=document.getElementById('bcastSegment'); if(_sg) _sg.value='all'; }
   { const _sc=document.getElementById('bcastSchedule'); if(_sc) _sc.value='0'; }
   document.getElementById('bcastLen').textContent='0';
@@ -15477,6 +15517,26 @@ function parseInlineButtons(raw) {
   });
   return out;
 }
+// A/B-тест: подпись под вторым текстом говорит, сколько человек получит
+// каждый вариант. Без этого «пополам» — слово, а не число: на сегменте из
+// семи подписчиков тест бессмыслен, и это должно быть видно ДО отправки.
+function updateBcastAb() {
+  const note = document.getElementById('bcastAbNote');
+  const b = (document.getElementById('bcastTextB')?.value || '').trim();
+  const btn = document.getElementById('bcastBtn');
+  if (btn) btn.textContent = b ? '🧪 Запустить A/B-тест' : '📢 Отправить';
+  if (!note) return;
+  if (!b) {
+    note.textContent = 'Аудитория разделится случайно пополам: половина получит первый текст, половина — второй. Что сработало лучше, видно в «Аналитике рассылок».';
+    return;
+  }
+  const recip = parseInt(String(document.getElementById('bcastRecip')?.textContent || '').replace(/\D/g, '')) || 0;
+  note.textContent = recip
+    ? 'Первый текст получат ' + num(Math.floor(recip / 2)) + ', второй — ' + num(recip - Math.floor(recip / 2))
+      + (recip < 40 ? '. Аудитория мала: разница между текстами на таком числе ничего не докажет.' : '. Результат сравните в «Аналитике рассылок».')
+    : 'Сначала выберите бота и сегмент — тогда будет видно, сколько человек получит каждый вариант.';
+}
+
 async function sendBcast() {
   const botId = document.getElementById('bcastBot').value;
   const text = document.getElementById('bcastText').value.trim();
@@ -15489,13 +15549,15 @@ async function sendBcast() {
     errEl.textContent='Кнопки в формате: Текст | https://ссылка'; errEl.style.display='block'; return;
   }
   const silent = !!document.getElementById('bcastSilent')?.checked;
+  const textB = (document.getElementById('bcastTextB')?.value || '').trim();
   const segment = document.getElementById('bcastSegment')?.value || 'all';
   const segLabel = {all:'Всем', active_7d:'Активным 7д', active_30d:'Активным 30д'}[segment] || 'Всем';
   const schedMin = parseInt(document.getElementById('bcastSchedule')?.value||'0')||0;
   const schedLabel = document.getElementById('bcastSchedule')?.selectedOptions[0]?.textContent || 'Сейчас';
   // Предпросмотр перед отправкой — защита от случайной рассылки
   const recip = document.getElementById('bcastRecip')?.textContent || '';
-  const preview = `${schedMin>0?'Запланировать':'Отправить'} рассылку?\n\n🕐 ${schedLabel}\n👥 ${segLabel}\n📨 ${recip}\n\n«${text.slice(0,160)}${text.length>160?'…':''}»`
+  const preview = `${schedMin>0?'Запланировать':'Отправить'} ${textB?'A/B-тест':'рассылку'}?\n\n🕐 ${schedLabel}\n👥 ${segLabel}\n📨 ${recip}\n\n«${text.slice(0,160)}${text.length>160?'…':''}»`
+    + (textB?`\n\nВариант Б: «${textB.slice(0,160)}${textB.length>160?'…':''}»\n🧪 Аудитория делится пополам случайно`:'')
     + (buttons.length?`\n\n🔘 Кнопок: ${buttons.length}`:'')
     + (silent?'\n🔕 Без звука':'');
   if (!await askConfirm(preview)) return;
@@ -15507,12 +15569,22 @@ async function sendBcast() {
     if (silent) payload.silent = true;
     if (segment !== 'all') payload.segment = segment;
     if (schedMin > 0) payload.schedule_minutes = schedMin;
-    const d = await api('/api/miniapp/broadcast', {method:'POST', body:JSON.stringify(payload)});
+    // Второй текст — это A/B-тест: движок делит аудиторию и ставит по
+    // рассылке на вариант. Сегмент, кнопки, тихая отправка и отсрочка те же,
+    // поэтому экран ничего не обещает мимо исполнителя.
+    let d;
+    if (textB) {
+      d = await api('/api/miniapp/broadcast/ab_test', {method:'POST', body:JSON.stringify(
+        Object.assign({}, payload, {variants: [{text, weight: 1}, {text: textB, weight: 1}]}))});
+    } else {
+      d = await api('/api/miniapp/broadcast', {method:'POST', body:JSON.stringify(payload)});
+    }
     clearDraft('bcast');                       // отправлено — черновик больше не нужен
     saveFormPrefs('bcast', {segment});         // запоминаем выбранный сегмент
     closeBcast();
     tg.HapticFeedback?.notificationOccurred('success');
-    toast(schedMin>0 ? `⏰ Рассылка запланирована (${schedLabel.toLowerCase()}) · ${num(d.total_users)} получателей`
+    toast(textB ? `🧪 A/B-тест запущен · ${num(d.total_users)} получателей, ${(d.broadcasts||[]).length} ${plural((d.broadcasts||[]).length,'вариант','варианта','вариантов')}`
+        : schedMin>0 ? `⏰ Рассылка запланирована (${schedLabel.toLowerCase()}) · ${num(d.total_users)} получателей`
                      : '✅ Рассылка запущена · '+num(d.total_users)+' получателей');
     LOADED['broadcasts']=false; if (CUR==='broadcasts') { LOADED['broadcasts']=true; loadBroadcasts(); }
   } catch(e) {
@@ -17135,19 +17207,34 @@ async function openSchedule(botId, botName) {
   await loadSchedules();
 }
 
-async function loadSchedules() {
+async function loadSchedules(more) {
+  // Расписание листается: было жёсткое LIMIT 20 по времени отправки, то есть у
+  // бота с регулярной рассылкой экран показывал последние двадцать строк как
+  // всё расписание — и отменить двадцать первую было нельзя.
+  if (!more) { SCH_ROWS = []; SCH_PAGE = null; }
   try {
-    const d = await api('/api/miniapp/bot/'+SCH_BOT_ID+'/schedules');
-    const items = d.schedules||[];
-    if (!items.length) {
-      txt('schList', empty('⏰','Нет запланированных рассылок','Нажмите + Запланировать'));
-      return;
-    }
+    const d = await api('/api/miniapp/bot/'+SCH_BOT_ID+'/schedules?limit=20&offset=' + SCH_ROWS.length);
+    SCH_ROWS = SCH_ROWS.concat(d.schedules||[]);
+    SCH_PAGE = d.page||null;
+    schRender();
+  } catch(e) {
+    if (SCH_ROWS.length) { toast('⚠️ ' + errRu(e, 'Не удалось подгрузить')); return; }
+    txt('schList', errHtml(errRu(e), retryCall('loadSchedules')));
+  }
+}
+
+function schMore() { loadSchedules(true); }
+
+function schRender() {
+  if (!SCH_ROWS.length) {
+    txt('schList', empty('⏰','Нет запланированных рассылок','Нажмите + Запланировать'));
+    return;
+  }
     const statIco = {pending:'⏳',done:'✅',cancelled:'❌',missed:'⚠️'};
     // Время печатается в часовом поясе устройства (toLocaleString), а подпись
     // рядом утверждала «UTC»: в Киеве рассылка на 12:00 выглядела как
     // назначенная на 12:00 по Гринвичу, то есть на два часа позже.
-    txt('schList', items.map(s=>{
+    txt('schList', SCH_ROWS.map(s=>{
       // Пустое или битое время печаталось как «Invalid Date» — по-английски и
       // без смысла. Без даты строка честно говорит «время не задано».
       const _at = new Date(s.execute_at);
@@ -17168,10 +17255,10 @@ async function loadSchedules() {
           </div>
         </div>
       </div>`;
-    }).join(''));
-  } catch(e) {
-    txt('schList', errHtml(errRu(e), retryCall('loadSchedules')));
-  }
+    }).join('')
+      + UI.more({shown: SCH_ROWS.length, total: SCH_PAGE ? SCH_PAGE.total : null,
+                 maybeMore: !!(SCH_PAGE && SCH_PAGE.has_more), fn: 'schMore',
+                 allLabel: 'Показано всё расписание'}));
 }
 
 function openSchModal() {
@@ -27616,6 +27703,7 @@ async function deleteDm(id, status, _el) {
 // Правка идущего плана живёт в той же форме: id плана — режим правки.
 let WARMUP_EDIT_ID = null;
 let _WU_PLANS = [];
+let _WU_PAGE = null;   // конверт страницы планов прогрева
 const _WU_KEEP = '<option value="" data-keep="1">— не менять —</option>';
 function _warmupMode(edit) {
   WARMUP_EDIT_ID = edit || null;
@@ -27782,14 +27870,19 @@ const WARMUP_STATUS = {active:'🟢 Активен',paused:'⏸ Пауза',comp
 const WARMUP_STATE_COLOR = {running:'var(--green)', stalled:'var(--orange,#f59e0b)',
                             blocked:'var(--red,#ef4444)', paused:'var(--hint)',
                             completed:'var(--blue,#3b82f6)', cancelled:'var(--hint)'};
-async function openWarmup() {
+async function openWarmup(more) {
+  // Планы листаются: флот из двух сотен аккаунтов давал ровно 50 строк, а
+  // «Всего планов» рядом показывало настоящее число — экран противоречил сам
+  // себе, и плана за пятидесятым нельзя было ни открыть, ни остановить.
+  if (more) { openWarmupPage(true); return; }
   push('s-warmup');
+  _WU_PLANS = []; _WU_PAGE = null;
   txt('warmupStats','<div class="spin-wrap"><div class="spin"></div></div>');
   txt('warmupList','');
   const warnBox = document.getElementById('warmupWarn');
   if (warnBox) { warnBox.style.display='none'; warnBox.innerHTML=''; }
   try {
-    const d = await api('/api/miniapp/warmup');
+    const d = await api('/api/miniapp/warmup?limit=50&offset=0');
     const att = d.attention||0;
     txt('warmupStats',`
       <div class="kpi-card"><div class="kpi-val">${d.total||0}</div><div class="kpi-lbl">Всего планов</div></div>
@@ -27805,10 +27898,18 @@ async function openWarmup() {
     }
     const plans = d.plans||[];
     _WU_PLANS = plans;
+    _WU_PAGE = d.page||null;
     const bulkBox = document.getElementById('warmupBulk');
     if (bulkBox) bulkBox.style.display = plans.some(p=>p.status==='active'||p.status==='paused') ? 'flex' : 'none';
     if (!plans.length) { txt('warmupList', empty('🌱','Нет планов прогрева','Нажмите + Запустить', {label:'🌱 Запустить прогрев', fn:'openWarmupModal()'})); return; }
-    txt('warmupList', plans.map(p=>{
+    warmupRenderList();
+  } catch(e) {
+    txt('warmupStats','');
+    txt('warmupList', empty('⚠️','Ошибка',errRu(e), {label:'↺ Повторить',fn:retryCall('openWarmup')}));
+  }
+}
+function warmupRenderList() {
+  txt('warmupList', _WU_PLANS.map(p=>{
       const h = p.health || {state:'running', label:(WARMUP_STATUS[p.status]||p.status), hint:'', resumable:p.status==='paused'};
       const col = WARMUP_STATE_COLOR[h.state] || 'var(--hint)';
       return `
@@ -27828,12 +27929,24 @@ async function openWarmup() {
           <button class="icon-btn sm danger" onclick="deleteWarmupPlan(${p.id}, this)" aria-label="Удалить" title="Удалить">🗑</button>
         </div>
       </div>`;
-    }).join(''));
-  } catch(e) {
-    txt('warmupStats','');
-    txt('warmupList', empty('⚠️','Ошибка',errRu(e), {label:'↺ Повторить',fn:retryCall('openWarmup')}));
-  }
+    }).join('')
+      + UI.more({shown: _WU_PLANS.length,
+                 total: _WU_PAGE ? _WU_PAGE.total : null,
+                 maybeMore: !!(_WU_PAGE && _WU_PAGE.has_more), fn: 'warmupMore',
+                 allLabel: 'Показаны все планы прогрева'}));
 }
+// Догрузка следующей страницы планов. Шапка и счётчики уже на экране —
+// перерисовываем только список, иначе каждая догрузка мигала бы всем экраном.
+async function openWarmupPage() {
+  try {
+    const d = await api('/api/miniapp/warmup?limit=50&offset=' + _WU_PLANS.length);
+    _WU_PLANS = _WU_PLANS.concat(d.plans || []);
+    _WU_PAGE = d.page || null;
+    warmupRenderList();
+  } catch (e) { toast('⚠️ ' + errRu(e, 'Не удалось подгрузить планы')); }
+}
+function warmupMore() { openWarmupPage(); }
+
 // ── Восстановление аккаунтов ───────────────────────────────────────────
 // Модуль существовал и работал, но был невидим целиком: ни экрана, ни
 // уведомления. Аккаунт со спам-блоком выглядел потерянным, хотя система его
@@ -29084,27 +29197,50 @@ const EXP_TYPE = {start_message:'Приветствие',auto_reply:'Авто-о
 async function openExperiments() {
   push('s-experiments');
   txt('experimentsList','<div class="spin-wrap"><div class="spin"></div></div>');
+  EXP_ROWS = []; EXP_PAGE = null;
+  await expLoadPage();
+}
+
+// Эксперименты листаются. Было жёсткое LIMIT 50 и подпись «N экспериментов» по
+// длине страницы: сравнить сегодняшний опыт с прошлогодним было нельзя — его
+// просто не существовало на экране, а число в плитке раздела было неверным и
+// выдавалось как факт.
+async function expLoadPage() {
   try {
-    const d = await api('/api/miniapp/experiments');
-    const exps = d.experiments||[];
-    txt('m-exp-cnt', exps.length+' экспериментов');
-    if (!exps.length) { txt('experimentsList', empty('🧪','Экспериментов ещё нет',
-      'Эксперимент показывает двум половинам пользователей разные тексты приветствия или авто-ответа и считает, какой сработал лучше',
-      {label:'+ Создать эксперимент', fn:'openExpModal()'})); return; }
-    txt('experimentsList', exps.map(e=>`
-      <div class="row tap" onclick="openExpDetail(${e.id},'${escJs(e.name)}')">
-        <div class="row-ico" style="background:var(--bg-yellow-16)">🧪</div>
-        <div class="row-body">
-          <div class="row-name">${esc(e.name)}</div>
-          <div class="row-val">${EXP_STATUS[e.status]||e.status||'—'} · @${esc(e.bot_username||'')} · ${EXP_TYPE[e.experiment_type]||e.experiment_type||'—'} · ${e.variant_count||0} вариантов</div>
-        </div>
-        <div class="row-right chev">›</div>
-      </div>
-    `).join(''));
+    const d = await api('/api/miniapp/experiments?limit=50&offset=' + EXP_ROWS.length);
+    EXP_ROWS = EXP_ROWS.concat(d.experiments || []);
+    EXP_PAGE = d.page || null;
+    expRender();
   } catch(e) {
+    if (EXP_ROWS.length) { toast('⚠️ ' + errRu(e, 'Не удалось подгрузить')); return; }
     txt('experimentsList', errHtml(errRu(e), 'openExperiments()'));
   }
 }
+
+function expRender() {
+  const total = EXP_PAGE && EXP_PAGE.total != null ? EXP_PAGE.total : EXP_ROWS.length;
+  txt('m-exp-cnt', num(total)+' экспериментов');
+  if (!EXP_ROWS.length) {
+    txt('experimentsList', empty('🧪','Экспериментов ещё нет',
+      'Эксперимент показывает двум половинам пользователей разные тексты приветствия или авто-ответа и считает, какой сработал лучше',
+      {label:'+ Создать эксперимент', fn:'openExpModal()'}));
+    return;
+  }
+  txt('experimentsList', EXP_ROWS.map(e=>`
+      <div class="row tap" onclick="openExpDetail(${Number(e.id)},'${escJs(e.name)}')">
+        <div class="row-ico" style="background:var(--bg-yellow-16)">🧪</div>
+        <div class="row-body">
+          <div class="row-name">${esc(e.name)}</div>
+          <div class="row-val">${EXP_STATUS[e.status]||e.status||'—'} · @${esc(e.bot_username||'')} · ${EXP_TYPE[e.experiment_type]||e.experiment_type||'—'} · ${esc(e.variant_count||0)} вариантов</div>
+        </div>
+        <div class="row-right chev">›</div>
+      </div>
+    `).join('')
+    + UI.more({shown: EXP_ROWS.length, total: EXP_PAGE ? EXP_PAGE.total : null,
+               maybeMore: !!(EXP_PAGE && EXP_PAGE.has_more), fn: 'expLoadPage',
+               allLabel: 'Показаны все эксперименты'}));
+}
+
 async function openExpDetail(id, name) {
   push('s-expdetail');
   txt('expdetail-title','🧪 '+esc(name));
@@ -31143,6 +31279,7 @@ async function openErrorReport() {
 const ERR_REP_STATUS = {new:'🆕 Новый', viewing:'👀 Просмотрен', fixing:'🔧 В работе',
   fixed:'✅ Исправлен', duplicate:'🔁 Дубликат'};
 let _ERR_REPS = [];
+let _ERR_PAGE = null;   // конверт страницы отчётов
 // Ответ на отчёт писали в заметки разбора, и он никогда не доходил до того,
 // кто отчёт прислал: экран показывал только статус и первые 120 символов
 // собственного текста.
@@ -31153,28 +31290,47 @@ function errRepTap(i) {
   if (r.answer) parts.push('', '— Ответ —', String(r.answer));
   showInfo(parts.join('\n'));
 }
-async function loadErrReports() {
-  txt('errRepList', '<div class="spin-wrap"><div class="spin"></div></div>');
+async function loadErrReports(more) {
+  // Отчёты листаются: было жёсткое LIMIT 20, то есть двадцать первый отчёт —
+  // и ответ разбора в нём — до отправителя не доходил вообще.
+  if (!more) {
+    _ERR_REPS = []; _ERR_PAGE = null;
+    txt('errRepList', '<div class="spin-wrap"><div class="spin"></div></div>');
+  }
   try {
-    const d = await api('/api/miniapp/error_reports');
-    _ERR_REPS = d.reports||[];
-    if (!_ERR_REPS.length) {
-      txt('errRepList', empty('🐛','Отчётов пока нет',
-        'Опишите проблему в поле выше — отчёт появится здесь, и сюда же придёт ответ по нему'));
-      return;
-    }
-    txt('errRepList', _ERR_REPS.map((r,i)=>`
+    const d = await api('/api/miniapp/error_reports?limit=20&offset=' + _ERR_REPS.length);
+    _ERR_REPS = _ERR_REPS.concat(d.reports || []);
+    _ERR_PAGE = d.page || null;
+    _errRepsRender();
+  } catch(e) {
+    if (_ERR_REPS.length) { toast('⚠️ ' + errRu(e, 'Не удалось подгрузить')); return; }
+    txt('errRepList', empty('⚠️','Ошибка',errRu(e), {label:'↺ Повторить',fn:retryCall('loadErrReports')}));
+  }
+}
+
+function _errRepsRender() {
+  if (!_ERR_REPS.length) {
+    txt('errRepList', empty('🐛','Отчётов пока нет',
+      'Опишите проблему в поле выше — отчёт появится здесь, и сюда же придёт ответ по нему'));
+    return;
+  }
+  txt('errRepList', _ERR_REPS.map((r,i)=>`
       <div class="li tap" onclick="errRepTap(${i})" role="button" tabindex="0">
         <div class="row-body">
-          <div class="row-name">№${r.id} · ${esc(ERR_REP_STATUS[r.status]||r.status)}${
+          <div class="row-name">№${esc(r.id)} · ${esc(ERR_REP_STATUS[r.status]||r.status)}${
             r.answer?' · <span style="color:var(--green)">есть ответ</span>':''}</div>
           <div class="li-sub wrap">${esc(String(r.description||'').slice(0,120))}${
             String(r.description||'').length>120?'…':''}</div>
           <div class="li-sub" style="color:var(--hint)">${esc(ago(r.created_at))}</div>
         </div><span class="chev">›</span></div>
-    `).join(''));
-  } catch(e) { txt('errRepList', empty('⚠️','Ошибка',errRu(e), {label:'↺ Повторить',fn:retryCall('loadErrReports')})); }
+    `).join('')
+    + UI.more({shown: _ERR_REPS.length, total: _ERR_PAGE ? _ERR_PAGE.total : null,
+               maybeMore: !!(_ERR_PAGE && _ERR_PAGE.has_more), fn: 'errRepsMore',
+               allLabel: 'Показаны все отчёты'}));
 }
+
+function errRepsMore() { loadErrReports(true); }
+
 async function submitErrReport() {
   const description = document.getElementById('errRepText').value.trim();
   const errEl = document.getElementById('errRepErr');
@@ -31756,16 +31912,16 @@ async function openGpCreateModal(presetAssetType) {
     if (_gpE) _gpE.innerHTML = '<option value="">Загрузка экосистем…</option>'; }
   // Load ecosystems
   try {
-    const ecos = await api('/api/miniapp/ecosystems');
+    const ecos = await api('/api/miniapp/ecosystems?limit=300');
     const sel = document.getElementById('gpEcosystem');
-    // /api/miniapp/ecosystems отдаёт МАССИВ (экран «Экосистемы» так его и
-    // читает: rows.length, rows.map). Здесь читали ecos.ecosystems — у массива
-    // такого поля нет, выражение всегда давало [], и в выпадашке навсегда
-    // оставалось одно «Не привязывать». То есть привязать к экосистеме было
-    // нельзя, сколько бы их владелец ни создал.
-    const ecoList = Array.isArray(ecos) ? ecos : [];
+    // Раньше /api/miniapp/ecosystems отдавал МАССИВ, а здесь читали
+    // ecos.ecosystems — у массива такого поля нет, выражение всегда давало [],
+    // и в выпадашке навсегда оставалось одно «Не привязывать». С 25.11.2026
+    // ручка отдаёт конверт страницы ({ecosystems, page}), поэтому читаем обе
+    // формы одной дверью listOf — она и есть защита от следующей такой смены.
+    const ecoList = listOf(ecos, 'ecosystems');
     sel.innerHTML = '<option value="">Не привязывать</option>' +
-      ecoList.map(e=>`<option value="${e.id}">${esc(e.name||'Экосистема #'+e.id)}</option>`).join('');
+      ecoList.map(e=>`<option value="${Number(e.id)}">${esc(e.name||'Экосистема #'+e.id)}</option>`).join('');
   } catch(e) {
     const sel = document.getElementById('gpEcosystem');
     if (sel) sel.innerHTML = '<option value="">Не привязывать</option>'
@@ -32490,9 +32646,23 @@ async function openEcosystems() {
   txt('ecoList','<div class="spin-wrap"><div class="spin"></div></div>');
   ecoLoadRecs();
   try {
-    const rows = await api('/api/miniapp/ecosystems');
-    if (!rows.length) { txt('ecoList', empty('🌐','Экосистем нет','Объедините активы в управляемую сеть',{label:'➕ Создать экосистему',fn:'openEcosystemModal()'})); return; }
-    txt('ecoList', rows.map(r => `
+    const d = await api('/api/miniapp/ecosystems?limit=30&offset=0');
+    ECO_ROWS = listOf(d, 'ecosystems');
+    ECO_PAGE = (d && !Array.isArray(d) && d.page) ? d.page : null;
+    openEcosystemsRender();
+  } catch(e) { txt('ecoList', empty('⚠️','Ошибка',errRu(e), {label:'↺ Повторить',fn:retryCall('openEcosystems')})); }
+}
+
+// Отрисовка списка экосистем: читает глобалы, поэтому догрузка не
+// перезапрашивает первую страницу и не схлопывает уже показанное.
+function openEcosystemsRender() {
+  if (!ECO_ROWS.length) {
+    txt('ecoList', empty('🌐','Экосистем нет','Объедините активы в управляемую сеть',{label:'➕ Создать экосистему',fn:'openEcosystemModal()'}));
+    const _el = document.getElementById('m-eco-val');
+    if (_el) _el.textContent = '0 экосистем';
+    return;
+  }
+  txt('ecoList', ECO_ROWS.map(r => `
       <div class="row tap" onclick="openEcoDetail(${r.id},'${escJs(r.name)}')">
         <div class="row-ico" style="background:var(--bg-green-16)">${[...(ECO_TYPES[r.ecosystem_type]||'🌐')][0]}</div>
         <div class="row-body">
@@ -32506,10 +32676,27 @@ async function openEcosystems() {
           <span class="chev">›</span>
         </div>
       </div>
-    `).join(''));
-    document.getElementById('m-eco-val').textContent = rows.length+' экосистем';
-  } catch(e) { txt('ecoList', empty('⚠️','Ошибка',errRu(e), {label:'↺ Повторить',fn:retryCall('openEcosystems')})); }
+    `).join('')
+      + UI.more({shown: ECO_ROWS.length, total: ECO_PAGE ? ECO_PAGE.total : null,
+                 maybeMore: !!(ECO_PAGE && ECO_PAGE.has_more), fn: 'ecoMore',
+                 allLabel: 'Показаны все экосистемы'}));
+  const _ecoTotal = ECO_PAGE && ECO_PAGE.total != null ? ECO_PAGE.total : ECO_ROWS.length;
+  const _ecoEl = document.getElementById('m-eco-val');
+  if (_ecoEl) _ecoEl.textContent = num(_ecoTotal)+' экосистем';
 }
+
+// Догрузка экосистем. Кнопка UI.more звала ecoMore, а функции не было:
+// нажатие бросало ReferenceError и не делало НИЧЕГО — то есть «Загрузить ещё»
+// был нарисованной кнопкой. Поймал сторож кнопок без функции.
+async function ecoMore() {
+  try {
+    const d = await api('/api/miniapp/ecosystems?limit=30&offset=' + ECO_ROWS.length);
+    ECO_ROWS = ECO_ROWS.concat(listOf(d, 'ecosystems'));
+    ECO_PAGE = (d && !Array.isArray(d) && d.page) ? d.page : null;
+    openEcosystemsRender();
+  } catch (e) { toast('⚠️ ' + errRu(e, 'Не удалось подгрузить экосистемы')); }
+}
+
 let CUR_ECO_ID = null;
 // Состав экосистемы приходил типами и номерами строк («account #17»),
 // ролями и типами событий по-английски. Владелец читает интерфейс по-русски, и
@@ -33963,6 +34150,7 @@ async function submitMeshCreate() {
 // ── Narrative Engine ────────────────────────────────────
 // Страницы по СМЕЩЕНИЮ — см. комментарий у openNewUsers.
 let NARR_ROWS = [], NARR_OFFSET = 0;
+let _NARRD_POSTS = [], _NARRD_PAGE = null, _NARRD_CID = 0;   // посты одной нарратив-кампании
 async function openNarrativeMore() { NARR_OFFSET = NARR_ROWS.length; await openNarrative(true); }
 async function openNarrative(keep) {
   if (!keep) { NARR_ROWS = []; NARR_OFFSET = 0; push('s-narrative'); }
@@ -33996,9 +34184,12 @@ async function openNarrativeDetail(cid, topic) {
   document.getElementById('narr-name').textContent = topic||'Кампания';
   txt('narr-body', '<div class="spin-wrap"><div class="spin"></div></div>');
   try {
-    const d = await api(`/api/miniapp/narrative/${cid}`);
+    const d = await api(`/api/miniapp/narrative/${cid}?limit=50&offset=0`);
     const c = d.campaign;
-    const posts = d.posts||[];
+    _NARRD_CID = cid;
+    _NARRD_POSTS = d.posts||[];
+    _NARRD_PAGE = d.page||null;
+    const posts = _NARRD_POSTS;
     const typeLabel = {trend:'📈 Тренд',launch:'🚀 Запуск',awareness:'💡 Осведомлённость',counter:'⚔️ Контр'};
     let html = `
       <div class="lst" style="margin:12px 16px 0">
@@ -34013,28 +34204,43 @@ async function openNarrativeDetail(cid, topic) {
           ? `<button class="btn btn-g" onclick="resumeNarrative(${c.id})">▶ Возобновить</button>`
           : `<button class="btn btn-o" onclick="pauseNarrative(${c.id})">⏸ Пауза</button>`}
       </div>`:''}
-      <div class="sec" style="margin-top:8px">Посты (${posts.length})</div>
+      <div class="sec" style="margin-top:8px">Посты (${_NARRD_PAGE ? _NARRD_PAGE.total : posts.length})</div>
+      <div id="narrPosts"></div>
     `;
-    if (!posts.length) {
-      html += empty('📭','Постов нет','');
-    } else {
-      const anglE = {news:'📰',expert:'🎓',story:'📖',stats:'📊',opinion:'💬',question:'❓'};
-      html += '<div class="lst" style="margin:0 16px">';
-      posts.forEach(p => {
-        const [cls,lbl]=stb(p.status);
-        html += `
-          <div class="row">
-            <div class="row-body">
-              <div class="row-name">${anglE[p.angle]||'•'} ${esc(p.channel_username)} · ${esc(p.angle||'—')}</div>
-              <div class="row-val"><span class="badge ${cls}">${lbl}</span> · ${p.published_at?ago(p.published_at):ago(p.scheduled_at)}</div>
-            </div>
-          </div>
-        `;
-      });
-      html += '</div>';
-    }
     txt('narr-body', html);
+    narrPostsRender();
   } catch(e) { txt('narr-body', empty('⚠️','Ошибка',errRu(e), {label:'↺ Повторить',fn:retryCall('openNarrativeDetail', cid, topic)})); }
+}
+
+// Посты кампании листаются. Было жёсткое LIMIT 50: у кампании на три месяца
+// посты за пятидесятым не показывались, а подпись «Посты (50)» выдавала это
+// за всё их число. Теперь число берётся из конверта страницы, а не из длины
+// отданного куска.
+function narrPostsRender() {
+  const box = document.getElementById('narrPosts');
+  if (!box) return;
+  if (!_NARRD_POSTS.length) { box.innerHTML = empty('📭','Постов нет','Кампания ещё не разложила посты по каналам и времени'); return; }
+  const anglE = {news:'📰',expert:'🎓',story:'📖',stats:'📊',opinion:'💬',question:'❓'};
+  box.innerHTML = '<div class="lst" style="margin:0 16px">'
+    + _NARRD_POSTS.map(p => {
+        const [cls,lbl]=stb(p.status);
+        return `<div class="row"><div class="row-body">
+            <div class="row-name">${anglE[p.angle]||'•'} ${esc(p.channel_username)} · ${esc(p.angle||'—')}</div>
+            <div class="row-val"><span class="badge ${cls}">${lbl}</span> · ${p.published_at?ago(p.published_at):ago(p.scheduled_at)}</div>
+          </div></div>`;
+      }).join('')
+    + '</div>'
+    + UI.more({shown: _NARRD_POSTS.length, total: _NARRD_PAGE ? _NARRD_PAGE.total : null,
+               maybeMore: !!(_NARRD_PAGE && _NARRD_PAGE.has_more), fn: 'narrPostsMore',
+               allLabel: 'Показаны все посты кампании'});
+}
+async function narrPostsMore() {
+  try {
+    const d = await api(`/api/miniapp/narrative/${_NARRD_CID}?limit=50&offset=` + _NARRD_POSTS.length);
+    _NARRD_POSTS = _NARRD_POSTS.concat(d.posts || []);
+    _NARRD_PAGE = d.page || null;
+    narrPostsRender();
+  } catch (e) { toast('⚠️ ' + errRu(e, 'Не удалось подгрузить посты')); }
 }
 
 async function pauseNarrative(cid) {
@@ -36044,28 +36250,49 @@ function renderBillingPlans() {
       </div>
     `).join(''));
 }
-async function _billingHistory() {
+async function _billingHistory(more) {
+  // История оплат листается. Раньше экран брал первые двадцать строк и
+  // показывал их как всю историю: владелец, сверяющий списания с продлениями,
+  // не мог дойти до двадцать первой оплаты вообще.
+  if (!more) { PAY_ROWS = []; PAY_PAGE = null; }
   try {
-    const hist = await api('/api/miniapp/payments');
-    if (!hist || !hist.length) {
-      txt('billingHistory', empty('💳','Платежей нет','История оплат появится здесь'));
-    } else {
-      txt('billingHistory', hist.map(p=>`
-        <div class="row">
-          <div class="row-ico" style="background:rgba(52,211,153,.12)">💳</div>
-          <div class="row-body">
-            <div class="row-name">${esc(({paid:'Подписка',starter:'Подписка',pro:'Подписка',enterprise:'Подписка',strike:'Массовые жалобы',host_server:'Аренда сервера'})[p.plan]||p.plan||'—')}${Number(p.period_months)>0?' · '+p.period_months+' мес.':''}</div>
-            <div class="row-val">${p.currency||'—'} · $${p.amount_usd||0}</div>
-            <div class="row-val" style="color:var(--hint)">${ago(p.created_at)}</div>
-          </div>
-          <div class="row-right"><span class="badge ${p.status==='confirmed'?'b-gr':'b-gy'}">${({confirmed:'✓ Оплачен',pending:'⏳ Ждёт оплаты',confirming:'⏳ Подтверждается',expired:'Истёк',failed:'Ошибка'})[p.status]||'—'}</span></div>
-        </div>
-      `).join(''));
-    }
+    const d = await api('/api/miniapp/payments?limit=20&offset=' + PAY_ROWS.length);
+    PAY_ROWS = PAY_ROWS.concat(d.items || []);
+    PAY_PAGE = d.page || null;
+    _billingHistoryRender();
   } catch(e) {
+    if (PAY_ROWS.length) { toast('⚠️ ' + errRu(e, 'Не удалось подгрузить')); return; }
     txt('billingHistory', empty('⚠️','Ошибка загрузки истории',errRu(e),{label:'↺ Повторить',fn:'openBilling()'}));
   }
 }
+
+function _billingHistoryRender() {
+  if (!PAY_ROWS.length) {
+    txt('billingHistory', empty('💳','Платежей нет','История оплат появится здесь'));
+    return;
+  }
+  const PLANS = {paid:'Подписка',starter:'Подписка',pro:'Подписка',enterprise:'Подписка',
+                 strike:'Массовые жалобы',host_server:'Аренда сервера'};
+  const ST = {confirmed:'✓ Оплачен',pending:'⏳ Ждёт оплаты',confirming:'⏳ Подтверждается',
+              expired:'Истёк',failed:'Ошибка'};
+  txt('billingHistory', PAY_ROWS.map(p => `
+        <div class="row">
+          <div class="row-ico" style="background:rgba(52,211,153,.12)">💳</div>
+          <div class="row-body">
+            <div class="row-name">${esc(PLANS[p.plan]||p.plan||'—')}${Number(p.period_months)>0?' · '+esc(p.period_months)+' мес.':''}</div>
+            <div class="row-val">${esc(p.currency||'—')} · $${esc(p.amount_usd||0)}</div>
+            <div class="row-val" style="color:var(--hint)">${esc(ago(p.created_at))}</div>
+          </div>
+          <div class="row-right"><span class="badge ${p.status==='confirmed'?'b-gr':'b-gy'}">${esc(ST[p.status]||'—')}</span></div>
+        </div>
+      `).join('')
+    + UI.more({shown: PAY_ROWS.length, total: PAY_PAGE ? PAY_PAGE.total : null,
+               maybeMore: !!(PAY_PAGE && PAY_PAGE.has_more), fn: 'billingHistoryMore',
+               allLabel: 'Показаны все платежи'}));
+}
+
+function billingHistoryMore() { _billingHistory(true); }
+
 function initPayment(planKey, label, price) {
   // Имя бота — только из конфигурации сервера. Раньше при неизвестном имени
   // открывался @infragram_bot — чужой бот, которому человек понёс бы деньги.
@@ -38422,6 +38649,7 @@ function renderAudSegChart(segments) {
 <script src="screens/crm_inbox.js"></script>
 <script src="screens/vault_dialogs.js"></script>
 <script src="screens/vault_connect.js"></script>
+<script src="screens/vault_promo.js"></script>
 <script src="screens/resource_actions.js"></script>
 <script src="screens/money_funnel.js"></script>
 <script src="screens/cohorts.js"></script>

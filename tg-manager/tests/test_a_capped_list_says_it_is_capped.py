@@ -60,6 +60,13 @@ from miniapp_source import (  # noqa: E402
 # Ключ настоящего итога. Не только `total`: compliance_overview отдаёт
 # `recent_total`, uch_timeline — `truncated`, список контактов — `has_more`.
 _HONEST = re.compile(r"""["'](?:[a-z_]*total|truncated|has_more)["']\s*:""")
+# Честный ответ может приходить не ключом в самой ручке, а ОДНОЙ дверью:
+# `_page_meta(offset, limit, shown, total)` собирает конверт страницы
+# (offset/limit/shown/has_more и total, когда он есть) для всех списков сразу.
+# Мерка, которая знает только литеральные ключи, объявляет сломанной каждую
+# ручку, переехавшую на общий помощник, — тот же класс, что описан в CLAUDE.md:
+# код уехал в одно место, а измеритель остался смотреть на прежнюю форму.
+_ENVELOPE = re.compile(r"_page_meta\(")
 _REG = re.compile(
     r'app\.router\.add_(?:get|post|put|delete|patch)\(\s*"([^"]+)"\s*,\s*([A-Za-z_]\w*)')
 
@@ -75,7 +82,8 @@ def is_capped(code: str) -> bool:
 
 
 def is_honest(code: str) -> bool:
-    return bool(_HONEST.search(_uncommented(code)))
+    clean = _uncommented(code)
+    return bool(_HONEST.search(clean) or _ENVELOPE.search(clean))
 
 
 @functools.lru_cache(maxsize=1)
@@ -131,6 +139,22 @@ def test_the_detector_spares_a_healthy_handler():
     excuse = ('# total считается на экране\n'
               'rows = await pool.fetch(SQL, _list_limit(request, 30, 200))')
     assert not is_honest(excuse), "объяснение в комментарии сошло за итог"
+
+
+def test_the_shared_page_envelope_counts_as_an_honest_answer():
+    """Проба на общую дверь: `_page_meta` — это и есть названный потолок.
+
+    Форма конверта (offset/limit/shown/has_more/total) проверяется отдельно, в
+    tests/test_one_door_for_paging.py. Здесь важно только, что мерка не ругает
+    ручку за переезд на общего помощника и при этом не прощает молчаливую.
+    """
+    on_door = ('rows = await pool.fetch(SQL, uid, _list_limit(request, 30, 200))\n'
+               'return _json_resp({"items": [dict(r) for r in rows],\n'
+               '                   "page": _page_meta(offset, limit, len(rows), total)})')
+    silent = ('rows = await pool.fetch(SQL, uid, _list_limit(request, 30, 200))\n'
+              'return _json_resp({"items": [dict(r) for r in rows]})')
+    assert is_capped(on_door) and is_honest(on_door)
+    assert is_capped(silent) and not is_honest(silent)
 
 
 def test_the_key_of_the_total_need_not_be_named_total():

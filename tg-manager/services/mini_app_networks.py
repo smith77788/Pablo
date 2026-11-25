@@ -20,8 +20,8 @@ from aiohttp import web
 def setup_routes(app: web.Application, pool) -> None:
     """Зарегистрировать маршруты сетей и экосистем на приложении мини-аппа."""
     from services.mini_app_api import (
-        _INTERNAL_ERROR, _err, _get_uid, _json_resp, _list_limit, _safe_count,
-        _safe_fetch, _safe_fetchrow, log,
+        _INTERNAL_ERROR, _err, _get_uid, _json_resp, _list_limit, _list_offset,
+        _page_meta, _safe_count, _safe_fetch, _safe_fetchrow, log,
     )
     from services.security import tg_id, validate_integer, validate_string
 
@@ -74,10 +74,20 @@ def setup_routes(app: web.Application, pool) -> None:
         })
 
     async def ecosystems_list(request: web.Request) -> web.Response:
+        """Экосистемы владельца, страницами и с общим числом.
+
+        Было `LIMIT 30` голым массивом, с сортировкой по времени правки: всё,
+        к чему давно не прикасались, уходило за потолок и для экрана не
+        существовало.
+        """
         uid = _get_uid(request)
         if not uid:
             return _err("Unauthorized", 401)
+        limit = _list_limit(request, 30, 300)
+        offset = _list_offset(request)
         try:
+            total = await _safe_count(
+                pool, "SELECT COUNT(*) FROM ecosystems WHERE owner_id=$1", uid)
             rows = await pool.fetch(
                 """
                 SELECT e.id, e.name, e.ecosystem_type, e.status, e.health_score,
@@ -88,12 +98,15 @@ def setup_routes(app: web.Application, pool) -> None:
                 WHERE e.owner_id=$1
                 GROUP BY e.id, e.name, e.ecosystem_type, e.status, e.health_score,
                          e.risk_level, e.region, e.created_at, e.updated_at
-                ORDER BY e.updated_at DESC NULLS LAST
-                LIMIT 30
+                ORDER BY e.updated_at DESC NULLS LAST, e.id DESC
+                LIMIT $2 OFFSET $3
                 """,
-                uid,
+                uid, limit, offset,
             )
-            return _json_resp([dict(r) for r in rows])
+            return _json_resp({
+                "ecosystems": [dict(r) for r in rows],
+                "page": _page_meta(offset, limit, len(rows), total),
+            })
         except Exception:
             log.exception("ecosystems_list uid=%d", uid)
             return _err(_INTERNAL_ERROR, 500)

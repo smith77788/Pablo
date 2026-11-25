@@ -239,7 +239,7 @@ def setup_routes(app: web.Application, pool) -> None:
         """A/B тестирование рассылок: POST /api/miniapp/broadcast/ab_test"""
         uid = _get_uid(request)
         if not uid:
-            return _err("Unauthorized", 401)
+            return _err("Нужно войти заново", 401)
         try:
             body = await request.json()
         except Exception:
@@ -257,9 +257,20 @@ def setup_routes(app: web.Application, pool) -> None:
         for v in variants:
             if not isinstance(v, dict) or not v.get("text"):
                 return _err("У каждого варианта должен быть текст")
+        segment = str(body.get("segment") or "all")
+        if segment not in ("all", "active_7d", "active_30d", "inactive_14d"):
+            return _err("Неизвестный сегмент аудитории")
+        buttons = body.get("buttons") if isinstance(body.get("buttons"), list) else None
+        try:
+            sched = max(0, min(int(body.get("schedule_minutes") or 0), 7 * 24 * 60))
+        except (TypeError, ValueError):
+            return _err("Неверная отсрочка отправки")
         try:
             from services.broadcaster import ab_test_broadcast
-            result = await ab_test_broadcast(pool, uid, bot_id_int, variants)
+            result = await ab_test_broadcast(
+                pool, uid, bot_id_int, variants,
+                segment=segment, buttons=buttons,
+                silent=bool(body.get("silent")), schedule_minutes=sched)
             if result.get("ok"):
                 return _json_resp(result)
             return _err(result.get("error") or "Не удалось поставить рассылку", 400)
