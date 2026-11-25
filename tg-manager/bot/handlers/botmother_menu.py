@@ -235,6 +235,8 @@ def _main_menu_kb(live: dict | None = None):
         rows.append(1)
     if _app_button(kb, "🌐 Открыть приложение"):
         rows.append(1)
+        kb.button(text="🌐 Telegram X / браузер", callback_data=BmCb(action="browser_login"))
+        rows.append(1)
     kb.button(text="📊 Итоги за неделю", callback_data=BmCb(action="summary"))
     rows.append(1)
     secs = [s for s in CORE if s.key != "overview"]
@@ -538,11 +540,27 @@ _TOOLS_MENU_TEXT = (
 
 @router.message(Command("menu"))
 async def cmd_menu(message: Message) -> None:
+    await send_main_menu(message)
+
+
+async def send_main_menu(message: Message, extra: str = "") -> None:
+    """Единый экран для /start и /menu во всех клиентах."""
     await message.answer(
-        _MAIN_MENU_TEXT,
+        _MAIN_MENU_TEXT + ("\n\n" + extra if extra else ""),
         parse_mode="HTML",
         reply_markup=_main_menu_kb(),
     )
+
+
+@router.callback_query(BmCb.filter(F.action == "browser_login"))
+async def cb_browser_login(callback: CallbackQuery, pool: asyncpg.Pool) -> None:
+    from bot.handlers.start import send_browser_login
+    if not callback.message or callback.message.chat.type != "private":
+        await safe_answer(callback,
+            "Для входа через браузер отправьте /pair в личном чате с ботом.", show_alert=True)
+        return
+    await safe_answer(callback)
+    await send_browser_login(callback.message, pool, callback.from_user.id)
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────

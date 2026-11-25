@@ -181,6 +181,7 @@ async def _onboarding_message(pool: asyncpg.Pool, uid: int):
     url = _valid_mini_app_url(MINI_APP_URL)
     if url:
         kb.button(text="🚀 Открыть быстрый старт", web_app=WebAppInfo(url=f"{url}#onboarding"))
+        kb.button(text="🌐 Telegram X / браузер", callback_data=BmCb(action="browser_login"))
     acc_step = next((st for st in d["steps"] if st["id"] == "accounts"), None)
     if acc_step and not acc_step["done"]:
         kb.button(text="📱 Подключить аккаунт здесь", callback_data=AccCb(action="add"))
@@ -476,14 +477,10 @@ async def cmd_start(message: Message, pool: asyncpg.Pool) -> None:
     summary = " · ".join(stats_lines[:2])
     extra = f"\n{stats_lines[2]}" if active_broadcasts else ""
 
-    await message.answer(
-        f"👋 <b>Infragram OS</b>  <code>v{BUILD_VERSION}</code>\n\n"
-        f"{summary}{extra}{result_line}\n\n"
-        f"<i>Ваш ID: <code>{uid}</code></i>\n\n"
-        "Нажмите на бота в списке — откроется его меню.",
-        parse_mode="HTML",
-        reply_markup=main_menu(is_admin=admin),
-    )
+    from bot.handlers.botmother_menu import send_main_menu
+    await send_main_menu(message,
+        f"{summary}{extra}{result_line}\n"
+        f"<i>Infragram OS · v{BUILD_VERSION} · Ваш ID: <code>{uid}</code></i>")
 
 
 @router.callback_query(BotCb.filter(F.action == "help"))
@@ -863,10 +860,13 @@ async def cmd_app(message: Message) -> None:
 
     kb = InlineKeyboardBuilder()
     kb.button(text="🌐 Открыть приложение", web_app=WebAppInfo(url=url))
+    kb.button(text="🌐 Telegram X / браузер", callback_data=BmCb(action="browser_login"))
     kb.adjust(1)
     await message.answer(
         "📱 <b>Infragram Mini App</b>\n\n"
-        "Нажмите кнопку ниже чтобы открыть панель управления:",
+        "Откройте приложение кнопкой ниже. Если Telegram X не поддерживает "
+        "мини-приложения, выберите «Telegram X / браузер»: вход подтверждается "
+        "одноразовым кодом из этого бота.",
         parse_mode="HTML",
         reply_markup=kb.as_markup(),
     )
@@ -880,10 +880,31 @@ async def cmd_pair(message: Message, pool) -> None:
     так: здесь берём код и вводим его в приложении один раз. Дальше приложение
     входит само.
     """
+    if message.chat.type != "private":
+        await message.answer("Для получения кода отправьте /pair в личном чате с ботом.")
+        return
+    await send_browser_login(message, pool, message.from_user.id)
+
+
+async def send_browser_login(message: Message, pool, owner_id: int) -> None:
+    """Одноразовый вход: секрет только в личном сообщении, не в URL."""
     from services import device_pairing
     from services.device_pairing import CODE_TTL_SEC, DEVICE_TTL_DAYS
+    if message.chat.type != "private":
+        await message.answer("Для входа отправьте /pair в личном чате с ботом.")
+        return
+    from config import MINI_APP_URL
+    from bot.handlers.botmother_menu import _valid_mini_app_url
+    from aiogram.utils.keyboard import InlineKeyboardBuilder
+    url = _valid_mini_app_url(MINI_APP_URL)
+    if not url:
+        await message.answer("Приложение пока недоступно. Все разделы есть в /menu.")
+        return
+    kb = InlineKeyboardBuilder()
+    kb.button(text="🌐 Открыть в браузере", url=url)
+    kb.adjust(1)
     try:
-        code = await device_pairing.create_pairing_code(pool, message.from_user.id)
+        code = await device_pairing.create_pairing_code(pool, owner_id)
     except Exception:
         await message.answer(
             "⚠️ Не удалось создать код связывания. Попробуйте позже.", reply_markup=terminal_kb())
@@ -896,5 +917,5 @@ async def cmd_pair(message: Message, pool) -> None:
         f"само примерно {DEVICE_TTL_DAYS} дней — код больше не понадобится.\n\n"
         "Код одноразовый. Никому его не передавайте: тот, кто введёт код, "
         "получит доступ к вашей панели.",
-        parse_mode="HTML", reply_markup=terminal_kb(),
+        parse_mode="HTML", reply_markup=kb.as_markup(),
     )

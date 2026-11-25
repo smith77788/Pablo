@@ -10102,6 +10102,11 @@ function _reAuth() {
   if (_reAuthInFlight) return _reAuthInFlight;
   _reAuthInFlight = (async () => {
     try {
+      if (!tg.initData) {
+        TK = await acquireSessionToken();
+        openSSE();
+        return;
+      }
       const _rb = {initData: tg.initData || ''};
       const _rm = _mirrorId(); if (_rm) _rb.mirror = _rm;
       const r = await fetchT('/api/miniapp/auth', {
