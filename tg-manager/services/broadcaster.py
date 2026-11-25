@@ -1315,10 +1315,12 @@ async def ab_test_broadcast(
             if silent:
                 _op_params["silent"] = True
             from services import operation_bus
-            _when = None
-            if int(schedule_minutes or 0) > 0:
-                from datetime import timedelta, timezone
-                _when = datetime.now(timezone.utc) + timedelta(minutes=int(schedule_minutes))
+            # Время запуска считает общий помощник: окно идемпотентности
+            # сравнивает scheduled_for ТОЧНО, а «сейчас + N минут» у двух
+            # тапов различается микросекундами — дедуп не срабатывал бы ни
+            # разу, и два тапа дали бы два A/B по той же аудитории.
+            _when = (operation_bus.quantized_schedule_iso(int(schedule_minutes))
+                     if int(schedule_minutes or 0) > 0 else None)
             op_id = await operation_bus.submit(
                 pool, owner_id, "run_broadcast", _op_params,
                 total_items=len(chunk), scheduled_for=_when,

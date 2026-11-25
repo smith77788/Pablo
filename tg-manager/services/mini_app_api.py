@@ -11172,7 +11172,11 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 "oq.owner_id, oq.op_type, oq.label "
                 "FROM operation_log ol JOIN operation_queue oq ON oq.id = ol.op_id "
                 "WHERE oq.owner_id = $1 AND ol.created_at > NOW() - INTERVAL '7 days' "
-                "ORDER BY ol.created_at DESC, ol.op_id DESC, ol.step_num DESC "
+                # Добивка — первичный ключ строки журнала: порядок внутри равного
+                # времени Postgres не обещает, а пара (op_id, step_num)
+                # уникальной не объявлена, так что страницы могли
+                # повторить одну запись и потерять другую.
+                "ORDER BY ol.created_at DESC, ol.id DESC "
                 "LIMIT $2 OFFSET $3",
                 uid, limit, offset,
             )

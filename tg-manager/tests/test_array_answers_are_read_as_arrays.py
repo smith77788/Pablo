@@ -152,8 +152,13 @@ def test_the_measurer_sees_the_array_handlers():
 
 
 def test_the_measurer_sees_their_readers():
+    """25.11.2026: порог 8 -> 7. `/api/miniapp/ecosystems` перестал быть
+    ответом-массивом — он отдаёт конверт страницы ({ecosystems, page}), а его
+    читатели перешли на общий `listOf`. То есть ответов-массивов в продукте
+    стало на один меньше: это движение в сторону одной формы, а не ослепший
+    разбор (остальные семь читателей те же, сверено перебором)."""
     readers = _readers()
-    assert len(readers) >= 8, (
+    assert len(readers) >= 7, (
         f"читателей ответа-массива разобрано {len(readers)} — проверка "
         "ослепла")
 

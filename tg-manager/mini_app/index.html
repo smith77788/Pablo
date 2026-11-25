@@ -1499,6 +1499,12 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
          видел сначала стену нулей, а выбор цели — за нижним краем экрана
          (обход 08.11.2026). -->
     <div id="onboardCard" style="margin:12px 16px 12px;display:none"></div>
+    <!-- Хранилище диалогов — главное умение продукта, и оно было спрятано:
+         подсказка копайлота о нём стоит с приоритетом 72, а экран показывает
+         пять подсказок, поэтому у владельца с живым флотом она не попадала в
+         выдачу НИ РАЗУ. Эта полоса не соревнуется за место: она видна, пока
+         хранилище не подключено, и исчезает сама после подключения. -->
+    <div id="vaultPromo" style="display:none"></div>
     <section id="homeProjects" hidden aria-label="Проекты"></section>
     <div id="summaryWrap"></div>
     <div id="homeDataStatus" role="status" aria-live="polite" class="home-data-status"></div>
@@ -11517,6 +11523,7 @@ async function loadHome() {
   if (typeof refreshTabBadges === 'function') refreshTabBadges(true);
   // Закреплённые разделы — на первом экране, а не за двумя нажатиями.
   if (typeof uxPinnedHome === 'function') uxPinnedHome();
+  if (typeof vaultPromoHome === 'function') vaultPromoHome();
   if (typeof uxResumeHome === 'function') uxResumeHome();
   modernizeIcons(document.getElementById('s-home'));
   const cached = loadHome.lastData || getCached('infragram_cache_home');
@@ -32635,6 +32642,18 @@ function openEcosystemsRender() {
   if (_ecoEl) _ecoEl.textContent = num(_ecoTotal)+' экосистем';
 }
 
+// Догрузка экосистем. Кнопка UI.more звала ecoMore, а функции не было:
+// нажатие бросало ReferenceError и не делало НИЧЕГО — то есть «Загрузить ещё»
+// был нарисованной кнопкой. Поймал сторож кнопок без функции.
+async function ecoMore() {
+  try {
+    const d = await api('/api/miniapp/ecosystems?limit=30&offset=' + ECO_ROWS.length);
+    ECO_ROWS = ECO_ROWS.concat(listOf(d, 'ecosystems'));
+    ECO_PAGE = (d && !Array.isArray(d) && d.page) ? d.page : null;
+    openEcosystemsRender();
+  } catch (e) { toast('⚠️ ' + errRu(e, 'Не удалось подгрузить экосистемы')); }
+}
+
 let CUR_ECO_ID = null;
 // Состав экосистемы приходил типами и номерами строк («account #17»),
 // ролями и типами событий по-английски. Владелец читает интерфейс по-русски, и
@@ -38587,6 +38606,7 @@ function renderAudSegChart(segments) {
 <script src="screens/crm_inbox.js"></script>
 <script src="screens/vault_dialogs.js"></script>
 <script src="screens/vault_connect.js"></script>
+<script src="screens/vault_promo.js"></script>
 <script src="screens/resource_actions.js"></script>
 <script src="screens/money_funnel.js"></script>
 <script src="screens/cohorts.js"></script>
