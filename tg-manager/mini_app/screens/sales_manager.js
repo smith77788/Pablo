@@ -184,7 +184,7 @@ function _spScreen(id, title, refreshFn) {
       (refreshFn ? '<div class="hdr-burger" onclick="' + refreshFn + '" title="Обновить">⟳</div>'
                  : '<div class="hdr-burger"></div>') +
     '</div>' +
-    '<div class="sb"><div id="' + id + '-body" style="padding:6px 0">' +
+    '<div class="sb"><div id="' + id + '-body" class="sb-pass" style="padding:6px 0">' +
       '<div class="spin-wrap"><div class="spin"></div></div>' +
     '</div></div>';
   document.body.appendChild(el);

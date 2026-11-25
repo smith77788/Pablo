@@ -123,9 +123,11 @@ async def _gather_state(pool: asyncpg.Pool, uid: int) -> dict:
         ),
         "subscribers": _fv(
             pool,
+            # Массив ботов владельца, а не JOIN managed_bots: с JOIN Postgres
+            # шёл полным проходом по bot_users всей платформы.
             "SELECT COUNT(DISTINCT bu.user_id) FROM bot_users bu "
-            "JOIN managed_bots mb ON mb.bot_id=bu.bot_id "
-            "WHERE mb.added_by=$1 AND bu.is_active=true",
+            "WHERE bu.bot_id = ANY(ARRAY(SELECT bot_id FROM managed_bots WHERE added_by=$1)) "
+            "AND bu.is_active=true",
             uid,
         ),
         "dm_running": _fv(

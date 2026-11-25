@@ -439,6 +439,38 @@ def _reset_rate_limiter():
     _clear()
 
 
+_SECURITY_KNOBS = ("_RATE_LIMIT_ENABLED", "_RATE_LIMIT_WINDOW", "_RATE_LIMIT_MAX_REQUESTS",
+                   "_RATE_LIMIT_AUTH_MAX", "_RATE_LIMIT_USER_MAX", "_RATE_LIMIT_MAX_KEYS",
+                   "_TRUSTED_PROXY_HOPS")
+
+
+@pytest.fixture(autouse=True)
+def _restore_security_limits():
+    """Пороги лимитера читаются из окружения ПРИ ИМПОРТЕ services.security, и
+    тесты лимитера перечитывают модуль (`importlib.reload`) с узкими порогами —
+    например RATE_LIMIT_MAX_REQUESTS=5. monkeypatch возвращает окружение, но
+    модуль остаётся перечитанным: его миддлварь (общая для всех серверов
+    мини-аппа в процессе) дальше пускала пять запросов в минуту с 127.0.0.1.
+
+    Так в CI неделями краснел test_persona_knows_people (429 вместо 200): в
+    одиночку зелёный, в части набора — после test_auth_endpoints_rate_limit.
+
+    Фикстура стоит раньше monkeypatch теста, значит и разбирается ПОСЛЕ него —
+    окружение к этому моменту уже прежнее, и перечитанный модуль получает
+    штатные пороги."""
+    import importlib as _il
+    import sys as _sys
+
+    def _knobs():
+        m = _sys.modules.get("services.security")
+        return None if m is None else tuple(getattr(m, k, None) for k in _SECURITY_KNOBS)
+    before = _knobs()
+    yield
+    m = _sys.modules.get("services.security")
+    if m is not None and before is not None and _knobs() != before:
+        _il.reload(m)
+
+
 @pytest.fixture(autouse=True)
 def _reset_worker_pools():
     """Пул БД воркера операций и предохранителя — процессное состояние.

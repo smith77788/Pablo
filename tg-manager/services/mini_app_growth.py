@@ -33,8 +33,8 @@ from services import operation_bus as _obus
 def setup_routes(app: web.Application, pool) -> None:
     """Зарегистрировать маршруты роста, SEO, экспериментов и аналитики."""
     from services.mini_app_api import (
-        _INTERNAL_ERROR, _err, _get_uid, _json_resp, _safe_count, _safe_fetch,
-        _safe_fetchrow, log,
+        _INTERNAL_ERROR, _err, _get_uid, _json_resp, _list_limit, _list_offset,
+        _page_meta, _safe_count, _safe_fetch, _safe_fetchrow, log,
     )
     from services.security import (
         check_sql_suspicious, validate_integer, validate_string,
@@ -292,10 +292,22 @@ def setup_routes(app: web.Application, pool) -> None:
             target_keywords=kw if isinstance(kw, list) else None))
 
     async def experiments_list(request: web.Request) -> web.Response:
+        """Эксперименты владельца, страницами и с общим числом.
+
+        Было `LIMIT 50` без слова об остальных: экран показывал пятьдесят
+        последних как все, то есть сравнить сегодняшний опыт с прошлогодним
+        было нельзя — его просто не существовало на экране.
+        """
         uid = _get_uid(request)
         if not uid:
             return _err("Unauthorized", 401)
+        limit = _list_limit(request, 50, 500)
+        offset = _list_offset(request)
         try:
+            total = await _safe_count(
+                pool,
+                "SELECT COUNT(*) FROM experiments e "
+                "JOIN managed_bots b ON b.bot_id = e.bot_id WHERE b.added_by=$1", uid)
             rows = await pool.fetch(
                 """SELECT e.id, e.name, e.experiment_type, e.status, e.created_at,
                           b.username AS bot_username, b.first_name AS bot_name, e.bot_id,
@@ -303,13 +315,14 @@ def setup_routes(app: web.Application, pool) -> None:
                    FROM experiments e
                    JOIN managed_bots b ON b.bot_id = e.bot_id
                    WHERE b.added_by=$1
-                   ORDER BY e.created_at DESC LIMIT 50""",
-                uid,
+                   ORDER BY e.created_at DESC, e.id DESC
+                   LIMIT $2 OFFSET $3""",
+                uid, limit, offset,
             )
             return _json_resp({"experiments": [
                 {**dict(r), "created_at": r["created_at"].isoformat() if r["created_at"] else None}
                 for r in rows
-            ]})
+            ], "page": _page_meta(offset, limit, len(rows), total)})
         except Exception:
             log.exception("experiments_list uid=%d", uid)
             return _err(_INTERNAL_ERROR, 500)

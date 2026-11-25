@@ -59,3 +59,24 @@ async function api(u) { urls.push(u); return {days: Number(u.split('=')[1])}; }
 def test_period_row_is_rendered_and_errors_are_russian():
     assert "_sumPeriodRow(days)" in _fn("renderSummary")
     assert "e.message" not in JS
+
+
+def test_period_switch_sits_inside_the_summary_block():
+    """Переключатель периода стоял отдельной группой ПОСЛЕ блока итогов и
+    выпадал из отступов экрана: «Период» и кнопки прилипали к левому краю.
+    Теперь это UI.segmented внутри UI.block, под заголовком."""
+    body = _fn("renderSummary")
+    call = body[body.index("UI.block('📊 Итоги за '"):]
+    call = call[:call.index(");") + 2]
+    assert "_sumPeriodRow(days)" in call, "период снова вынесен за блок итогов"
+    assert "UI.segmented(" in _fn("_sumPeriodRow")
+    kit = (ROOT / "mini_app" / "screens" / "ui_kit.js").read_text(encoding="utf-8")
+    css = (ROOT / "mini_app" / "ui_kit.css").read_text(encoding="utf-8")
+    # Проверяем, что компонент ЕСТЬ и ЭКСПОРТИРОВАН, а не что он последний в
+    # списке экспорта: «segmented }» краснело от любого нового компонента,
+    # дописанного после него.
+    assert "function segmented(" in kit
+    exported = re.search(r"return \{([^}]*)\};", kit, re.S)
+    assert exported and "segmented" in exported.group(1), (
+        "компонент есть, но наружу не отдан — экран его не увидит")
+    assert ".ui-seg-btn{" in css and "aria-pressed" in kit

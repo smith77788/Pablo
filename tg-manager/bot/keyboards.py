@@ -18,6 +18,7 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 from bot.utils.picker_cap import cap_slice as _cap, cap_note_button as _cap_note
 from bot.callbacks import (
     AboutCb,
+    VaultCb,
     BotCb,
     EditCb,
     AudCb,
@@ -87,11 +88,16 @@ def main_menu(is_admin: bool = False) -> InlineKeyboardMarkup:
     # «Что за проект?» спрашивают чаще всего — кнопка отвечает за владельца и
     # отдаёт готовый текст для пересылки.
     kb.button(text="✨ Что умеет Infragram", callback_data=AboutCb(action="menu"))
+    # Хранилище диалогов было в боте только в чеклисте быстрого старта, то
+    # есть исчезало сразу после активации — а это главное умение продукта.
+    # Кнопка постоянная: не подключено — экран подключения, подключено —
+    # архив (send_vault_screen отвечает по состоянию).
+    kb.button(text="🗄 Хранилище диалогов", callback_data=VaultCb(a="how"))
     kb.button(text="💓 Пульс флота", callback_data=BotCb(action="pulse"))
     kb.button(text="💸 Экономика флота", callback_data=BotCb(action="budget"))
     if is_admin:
         kb.button(text="⚙️ Админка", callback_data="adm:main")
-    kb.adjust(2, 2, 2, 1, 1, 1 if not is_admin else 2)
+    kb.adjust(2, 2, 2, 1, 1, 1, 1 if not is_admin else 2)
     return kb.as_markup()
 
 

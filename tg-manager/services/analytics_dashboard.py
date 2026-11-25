@@ -70,7 +70,9 @@ async def get_dashboard_stats(pool: asyncpg.Pool, owner_id: int) -> dict[str, An
                      AND status = 'running'""",
                 (owner_id,),
             ),
-            # Audience (all managed bots of owner)
+            # Audience (all managed bots of owner). Массив ботов владельца, а
+            # не JOIN managed_bots: с JOIN база шла полным проходом по
+            # bot_users всей платформы.
             (
                 """SELECT
                        COUNT(DISTINCT bu.user_id) AS total_users,
@@ -81,9 +83,9 @@ async def get_dashboard_stats(pool: asyncpg.Pool, owner_id: int) -> dict[str, An
                            WHERE bu.first_seen > NOW() - INTERVAL '7 days'
                        ) AS new_7d
                    FROM bot_users bu
-                   JOIN managed_bots mb ON mb.bot_id = bu.bot_id
-                   WHERE mb.added_by = $1
-                     AND mb.is_active = TRUE
+                   WHERE bu.bot_id = ANY(ARRAY(
+                           SELECT bot_id FROM managed_bots
+                           WHERE added_by = $1 AND is_active = TRUE))
                      AND bu.is_active = TRUE""",
                 (owner_id,),
             ),
