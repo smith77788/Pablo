@@ -29,7 +29,11 @@ def test_reply_box_has_quick_replies():
 def test_fill_substitutes_the_person_and_resolves_variants():
     start = SRC.index("function _ibFill(")
     end = SRC.index("\nfunction inboxUseTpl(")
-    js = ("let _ibPeer = {name: 'Анна Петрова', username: 'anna'};\n" + SRC[start:end]
+    # Подстановка общая с чатом архива — screens/quick_replies.js::tplFill.
+    qr = (ROOT / "mini_app" / "screens" / "quick_replies.js").read_text(encoding="utf-8")
+    qs = qr.index("function tplFill(")
+    fill = qr[qs:qr.index("\nfunction ", qs + 1)]
+    js = ("let _ibPeer = {name: 'Анна Петрова', username: 'anna'};\n" + fill + "\n" + SRC[start:end]
           + "\nconsole.log(JSON.stringify(["
             "_ibFill('Привет, {name}! {Спасибо|Благодарим} за {вопрос|интерес}.'),"
             "_ibFill('{username}, {a|{b|c}}'),"

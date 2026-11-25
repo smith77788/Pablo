@@ -286,6 +286,8 @@ async function _ibQuickReplies() {
     try { _ibTpl = (await api('/api/miniapp/templates?limit=100')).templates || []; }
     catch (e) { _ibTpl = []; }
   }
+  // Частые первыми: порядок — по вставкам на этом устройстве (quick_replies.js).
+  _ibTpl = tplByUse(_ibTpl);
   const head = _ibTpl.slice(0, 6);
   box.innerHTML = head.map(function (t, k) {
     return '<span class="preset-chip" role="button" tabindex="0" onclick="inboxUseTpl(' + k + ')">' + esc(t.name || 'Шаблон') + '</span>';
@@ -295,23 +297,14 @@ async function _ibQuickReplies() {
 }
 function _ibFill(text) {
   const t = _ibPeer || {};
-  const first = String(t.name || '').split(' ')[0] || '';
-  let s = String(text || '')
-    .replace(/\{(name|first_name)\}/g, first)
-    .replace(/\{username\}/g, t.username ? '@' + t.username : first);
-  let guard = 0;
-  while (/\{[^{}]*\|[^{}]*\}/.test(s) && guard++ < 50) {
-    s = s.replace(/\{([^{}]*\|[^{}]*)\}/g, function (m, g) {
-      const p = g.split('|'); return p[Math.floor(Math.random() * p.length)];
-    });
-  }
-  return s;
+  return tplFill(text, {name: t.name, username: t.username});
 }
 function inboxUseTpl(k) {
   const t = _ibTpl && _ibTpl[k];
   const ta = _ibEl('ibReplyText');
   if (!t || !ta) return;
   ta.value = _ibFill(t.template && t.template.text);
+  tplNoteUse(t.id);
   _ibKeepDraft();
   ta.focus();
 }
@@ -349,24 +342,11 @@ function inboxFilter(q) {
   return shown;
 }
 async function inboxPickTpl() {
-  const id = await askChoice('📝 Быстрый ответ', (_ibTpl || []).map(function (t) {
-    return {value: t.id, label: t.name || 'Шаблон', sub: String((t.template && t.template.text) || '').slice(0, 80)};
-  }));
-  const k = (_ibTpl || []).findIndex(function (t) { return t.id === id; });
+  const k = await tplPickFrom(_ibTpl);
   if (k >= 0) inboxUseTpl(k);
 }
 async function inboxSaveTpl() {
-  const ta = _ibEl('ibReplyText');
-  const text = (ta && ta.value || '').trim();
-  if (!text) { toast('Сначала напишите ответ'); return; }
-  const name = ((await askPrompt('Название быстрого ответа', {value: text.slice(0, 40)})) || '').trim();
-  if (!name) return;
-  try {
-    await api('/api/miniapp/template', {method: 'POST', body: JSON.stringify({name: name, text: text})});
-    _ibTpl = null;
-    _ibQuickReplies();
-    toast('💾 Сохранено в шаблоны');
-  } catch (e) { toast('⚠️ ' + errRu(e, 'Не удалось сохранить')); }
+  if (await tplSaveFrom(_ibEl('ibReplyText'))) { _ibTpl = null; _ibQuickReplies(); }
 }
 
 // Индекс следующего ждущего ответа разговора после from (по кругу), -1 — нет.
