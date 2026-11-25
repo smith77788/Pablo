@@ -1206,25 +1206,60 @@ async def resend_undelivered(pool: asyncpg.Pool, owner_id: int, bc_id: int) -> d
         return {"ok": False, "error": "Не удалось создать повторную рассылку", "code": 500}
 
 
+# Сегменты аудитории бота — ОДИН список условий на продукт.
+#
+# Это условие стояло только внутри исполнителя рассылки
+# (`op_worker._exec_run_broadcast`), поэтому любой второй путь, которому нужна
+# та же аудитория (A/B-рассылка), выбирал между «взять всех» и «списать
+# условие себе». Второй список условий означал бы, что «Спящим» в двух местах
+# продукта — это две разные аудитории.
+SEGMENT_SQL = {
+    "active_7d": " AND last_seen >= now() - interval '7 days'",
+    "active_30d": " AND last_seen >= now() - interval '30 days'",
+    # Спящие: порог 14 дней — тот же, по которому audience_dna считает churn_risk_pct.
+    "inactive_14d": " AND (last_seen IS NULL OR last_seen < now() - interval '14 days')",
+}
+
+
+async def segment_audience(pool, bot_id: int, segment: str | None = None) -> list[int]:
+    """Активные подписчики бота, суженные сегментом. Пустой/незнакомый — все."""
+    cond = SEGMENT_SQL.get(str(segment or "all"), "")
+    rows = await pool.fetch(
+        "SELECT user_id FROM bot_users WHERE bot_id=$1 AND is_active=TRUE "
+        "AND is_blocked=FALSE AND suspect=FALSE" + cond, int(bot_id))
+    return [int(r["user_id"]) for r in (rows or [])]
+
+
 async def ab_test_broadcast(
     pool: asyncpg.Pool,
     owner_id: int,
     bot_id: int,
     variants: list[dict],
+    *,
+    segment: str | None = None,
+    buttons: list | None = None,
+    silent: bool = False,
+    schedule_minutes: int = 0,
 ) -> dict:
     """A/B тестирование рассылок.
 
     variants = [{"text": str, "weight": int}, ...]. Каждый вариант — отдельная
     рассылка, аудитория делится пропорционально weight.
     Возвращает {"ok": True, "broadcasts": [{"variant_index": int, "broadcast_id": int, ...}]}.
+
+    Сегмент, кнопки, тихая отправка и отсрочка — те же, что у обычной
+    рассылки, и доезжают до того же исполнителя: иначе экран обещал бы
+    «Спящим» и «через 3 часа», а A/B уходил бы всем и сразу.
+
+    Отказы — по-русски: они доезжают до экрана владельца как есть.
     """
     import json as _json
     import random as _rand
 
     if not variants or not isinstance(variants, list):
-        return {"ok": False, "error": "variants required (list of {text, weight})"}
+        return {"ok": False, "error": "Нужны варианты текста списком"}
     if len(variants) > 10:
-        return {"ok": False, "error": "Max 10 variants"}
+        return {"ok": False, "error": "Вариантов не больше десяти"}
 
     bot_row = await pool.fetchrow(
         "SELECT bot_id, token, username FROM managed_bots "
@@ -1232,11 +1267,11 @@ async def ab_test_broadcast(
         bot_id, owner_id,
     )
     if not bot_row:
-        return {"ok": False, "error": "Bot not found"}
+        return {"ok": False, "error": "Бот не найден"}
 
-    user_ids = await db.get_audience_user_ids(pool, bot_id)
+    user_ids = await segment_audience(pool, bot_id, segment)
     if not user_ids:
-        return {"ok": False, "error": "No active subscribers"}
+        return {"ok": False, "error": "В этом сегменте нет активных подписчиков"}
 
     total_weight = sum(max(1, v.get("weight", 1)) for v in variants)
     _rand.shuffle(user_ids)
@@ -1270,10 +1305,19 @@ async def ab_test_broadcast(
             )
             bc_id = row["id"]
             _op_params = {"bot_id": bot_id, "text": text, "broadcast_id": bc_id, "user_ids": chunk}
+            if buttons:
+                _op_params["buttons"] = buttons
+            if silent:
+                _op_params["silent"] = True
             from services import operation_bus
+            _when = None
+            if int(schedule_minutes or 0) > 0:
+                from datetime import timedelta, timezone
+                _when = datetime.now(timezone.utc) + timedelta(minutes=int(schedule_minutes))
             op_id = await operation_bus.submit(
                 pool, owner_id, "run_broadcast", _op_params,
-                total_items=len(chunk), label=f"A/B вариант {idx + 1}: {text[:30]}",
+                total_items=len(chunk), scheduled_for=_when,
+                label=f"A/B вариант {idx + 1}: {text[:30]}",
             )
             bc_id = await adopt_submitted_broadcast(pool, op_id, bc_id)
             results.append({"variant_index": idx, "broadcast_id": bc_id, "op_id": op_id, "users": len(chunk)})

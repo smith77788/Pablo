@@ -27278,14 +27278,6 @@ async def _exec_run_broadcast(
     buttons = params.get("buttons") or None
     silent = bool(params.get("silent"))
     segment = str(params.get("segment") or "all")
-    _seg_sql = {
-        "active_7d": " AND last_seen >= now() - interval '7 days'",
-        "active_30d": " AND last_seen >= now() - interval '30 days'",
-        # Спящие: ДНК аудитории советует реактивационную рассылку, а выбрать
-        # эту аудиторию было нечем. Порог 14 дней — тот же, по которому
-        # audience_dna считает churn_risk_pct.
-        "inactive_14d": " AND (last_seen IS NULL OR last_seen < now() - interval '14 days')",
-    }.get(segment, "")
 
     if not bot_id or not text:
         return {"status": "failed", "summary": "⚠️ bot_id и text обязательны"}
@@ -27308,10 +27300,11 @@ async def _exec_run_broadcast(
         if isinstance(explicit_ids, list) and explicit_ids:
             user_ids = [int(x) for x in explicit_ids]
         else:
-            user_ids = [r["user_id"] for r in await pool.fetch(
-                "SELECT user_id FROM bot_users WHERE bot_id=$1 AND is_active=TRUE "
-                "AND is_blocked=FALSE AND suspect=FALSE" + _seg_sql, int(bot_id)
-            )]
+            # Условие сегмента — общая дверь broadcaster.segment_audience:
+            # второй список условий означал бы, что «Спящим» в двух местах
+            # продукта — это две разные аудитории.
+            from services.broadcaster import segment_audience
+            user_ids = await segment_audience(pool, int(bot_id), segment)
     except Exception as exc:
         return {"status": "failed", "summary": f"⚠️ Ошибка получения подписчиков: {exc}"}
 
@@ -27327,7 +27320,10 @@ async def _exec_run_broadcast(
     # обе ветки ниже: они уже разъезжались — ветка с готовым broadcast_id
     # считала подмножеством только сегмент, и список недоставленных в строку
     # рассылки не попадал вовсе.
-    _is_subset = bool(_seg_sql) or bool(isinstance(explicit_ids, list) and explicit_ids)
+    # «Это подмножество аудитории?» — спрашиваем у того же списка сегментов,
+    # что и выборка: иначе ответ разъедется с тем, кого реально выбрали.
+    from services.broadcaster import SEGMENT_SQL as _SEG
+    _is_subset = bool(_SEG.get(segment)) or bool(isinstance(explicit_ids, list) and explicit_ids)
 
     # Create/reuse broadcast record
     if not broadcast_id:
