@@ -11548,6 +11548,12 @@ async function loadHome() {
   const cached = loadHome.lastData || getCached('infragram_cache_home');
   if (cached && !loadHome.lastData) { renderCards(cached); renderAct(cached.recent_activity||[]); }
   homeLoadState('homeDataStatus', cached ? 'Обновляем показатели. Пока показаны предыдущие данные.' : 'Загружаем показатели…');
+  // Чеклист, пульс и итоги от показателей не зависят — грузятся разом с
+  // ними, а не после ответа /dashboard: прежде главная ждала два похода к
+  // серверу подряд, и нижние блоки появлялись на целый ответ позже.
+  loadOnboarding();
+  loadOrganismPulse();
+  if (typeof loadSummary === 'function') loadSummary();
   try {
     const d = await api('/api/miniapp/dashboard');
     setCache('infragram_cache_home', d);
@@ -11565,10 +11571,7 @@ async function loadHome() {
       document.getElementById('actList').innerHTML = errorHtml;
     }
   } finally { loadHome.pending = false; }
-  loadOnboarding();
-  loadOrganismPulse();
   renderFrequent();
-  if (typeof loadSummary === 'function') loadSummary();
 }
 
 function homeLoadState(id, message, retry) {
