@@ -51,8 +51,18 @@ def test_own_text_is_returned_whole():
     assert '[:120]' not in h, h
 
 
+def _screen() -> str:
+    """Загрузка и отрисовка списка отчётов вместе.
+
+    Разметку рисует `_errRepsRender` (загрузка стала страничной, и рисование
+    уехало в свою функцию). Мерка, которая читает только `loadErrReports`,
+    видит ноль строк и объявляет мёртвым живой экран — чинить надо мерку.
+    """
+    return _fn("loadErrReports") + "\n" + _fn("_errRepsRender")
+
+
 def test_report_opens_and_shows_the_answer():
-    f = _fn("loadErrReports")
+    f = _screen()
     assert "errRepTap(" in f, "строка отчёта не нажимается"
     t = _fn("errRepTap")
     assert "r.answer" in t and "showInfo(" in t, t
@@ -61,7 +71,7 @@ def test_report_opens_and_shows_the_answer():
 
 
 def test_empty_state_says_what_will_happen():
-    f = _fn("loadErrReports")
+    f = _screen()
     i = f.index("Отчётов пока нет")
     chunk = f[i:f.index("));", i) + 3]
     assert "ответ" in chunk, chunk

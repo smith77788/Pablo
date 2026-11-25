@@ -153,7 +153,19 @@
   }
   function rgba(h, a) { var c = rgb(h); return 'rgba(' + c[0] + ',' + c[1] + ',' + c[2] + ',' + a + ')'; }
 
+  // Ручной выбор владельца сильнее темы клиента: в Telegram тема одна на всё
+  // приложение, а мини-апп у него открыт часами — работать в светлой теме
+  // ночью (или наоборот) человек не обязан.
+  var THEME_KEY = 'infragram_theme';
+  function savedScheme() {
+    try {
+      var v = localStorage.getItem(THEME_KEY);
+      return (v === 'light' || v === 'dark') ? v : '';
+    } catch (_) { return ''; }
+  }
   function scheme() {
+    var own = savedScheme();
+    if (own) return own;
     if (inTelegram() && (tg.colorScheme === 'light' || tg.colorScheme === 'dark')) return tg.colorScheme;
     return (mq && mq.matches) ? 'dark' : (mq ? 'light' : 'dark');
   }
@@ -232,6 +244,15 @@
 
   window.__applyTheme = apply;
   window.__themeScheme = function () { return root.getAttribute('data-theme') || 'dark'; };
+  // 'auto' — снять свой выбор и снова слушать клиента.
+  window.__setTheme = function (mode) {
+    try {
+      if (mode === 'light' || mode === 'dark') localStorage.setItem(THEME_KEY, mode);
+      else localStorage.removeItem(THEME_KEY);
+    } catch (_) {}
+    apply();
+  };
+  window.__themeMode = function () { return savedScheme() || 'auto'; };
   apply();
   try { if (tg && tg.onEvent) tg.onEvent('themeChanged', apply); } catch (_) {}
   try {
@@ -425,6 +446,23 @@ html.tg-back .hdr > .back{display:none}
    прежнего размера — растёт только площадь, по которой попадает палец.
    Замер на экране 360px показал значки 14–21px: промах по 🗑 в списке
    удаляет не то, что человек целил. */
+/* Общая механика экранов (screens/ux_kit.js): полоска «нет сети» и «наверх». */
+.ni-pin{margin-left:auto;flex:0 0 auto;display:inline-flex;align-items:center;justify-content:center;min-width:36px;min-height:36px;font-size:15px;color:var(--hint);cursor:pointer;border-radius:10px}
+.ni-pin:active{background:var(--sep)}
+.ux-netbar{position:fixed;left:0;right:0;top:0;z-index:70;padding:6px 12px;text-align:center;font-size:12px;font-weight:600;background:var(--orange,#e0b268);color:#1b1b1b}
+.ux-top{position:fixed;right:14px;bottom:calc(72px + env(safe-area-inset-bottom,0px));z-index:60;width:42px;height:42px;border:0;border-radius:50%;background:var(--bg3);color:var(--text);font-size:18px;line-height:42px;box-shadow:0 2px 10px rgba(0,0,0,.35);cursor:pointer}
+.ux-pullbar{position:fixed;left:50%;transform:translateX(-50%);top:calc(8px + env(safe-area-inset-top,0px));z-index:71;padding:6px 14px;border-radius:999px;font-size:12px;font-weight:600;background:var(--bg3);color:var(--text);box-shadow:0 2px 10px rgba(0,0,0,.35)}
+.ux-stale{padding:6px 16px;font-size:12px;color:var(--hint)}
+.fa-hit{background:rgba(var(--accent-rgb),.22);color:inherit;border-radius:3px;padding:0 1px}
+.ux-resume{margin:10px 16px;padding:10px 14px;border-radius:12px;background:var(--bg2);border:1px solid var(--sep);font-size:13px;color:var(--text);cursor:pointer}
+.op-live{position:fixed;left:12px;right:12px;bottom:calc(var(--tab-h) + var(--safe-b) + 8px);z-index:400;display:flex;align-items:center;gap:8px;padding:8px 12px;border-radius:12px;background:var(--bg3);color:var(--text);font-size:12px;cursor:pointer;overflow:hidden;box-shadow:0 6px 20px rgba(0,0,0,.35)}
+.op-live-txt{flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.op-live-pct{flex:0 0 auto;font-weight:700;color:var(--accent)}
+.op-live-fill{position:absolute;left:0;bottom:0;height:2px;background:var(--accent);transition:width .4s var(--ease)}
+.tab{position:relative}
+.tab-badge{position:absolute;top:2px;left:50%;margin-left:6px;min-width:16px;height:16px;padding:0 4px;border-radius:999px;background:var(--red,#f87171);color:#fff;font-size:10px;font-weight:700;line-height:16px;text-align:center;box-shadow:0 0 0 2px var(--bg,#111)}
+.ux-top:active{opacity:.7}
+.hdr-badge{position:absolute;top:-2px;right:-2px;min-width:16px;height:16px;padding:0 4px;border-radius:8px;background:var(--red);color:#fff;font-size:10px;font-weight:700;line-height:16px;text-align:center}
 .icon-tap{display:inline-flex;align-items:center;justify-content:center;min-width:36px;min-height:36px;flex-shrink:0;cursor:pointer;border-radius:10px;-webkit-tap-highlight-color:transparent}
 .icon-tap:active{background:var(--sep)}
 /* То же для коротких текстовых ссылок-действий: высота строки 14–15px мала
@@ -586,7 +624,17 @@ div[style*="background:var(--bg2)"]{border:1px solid var(--border)}
    уезжала за край экрана — нажать её на узком телефоне было нечем. Ужимается
    КОЛОНКА, а сами кнопки сохраняют размер (у них свой flex-shrink:0), то
    есть перенос происходит ровно так, как и описано выше. */
+/* Но ужиматься колонка может только до самой широкой своей кнопки:
+   min-width:0 пускал её уже кнопки, и кнопка, которая сама не ужимается,
+   вылезала из колонки ВЛЕВО — поверх имени. Так «Объединить» в дублях
+   контактов и «Выключить» в умных тегах закрывали название строки. У
+   переносящегося flex-контейнера min-content — это ширина самого широкого
+   элемента, то есть перенос по-прежнему происходит, а наезда нет. Только
+   для колонки действий .li-right: в колоночной строке (.li с
+   flex-direction:column) соседний блок — ряд чипов с многоточием, и его
+   min-content — полная длина имени, что выталкивало строку за край. */
 .li-body + div{min-width:0;flex-shrink:1;flex-wrap:wrap;justify-content:flex-end;row-gap:4px}
+.li-body + .li-right:not(.col){min-width:min-content}
 /* Колоночный вариант колонки действий. Ужимать его НЕЛЬЗЯ: в колоночном flex
    поперечная ось — горизонтальная, и ужатие сводит контейнер почти к нулю, а
    кнопки внутри сохраняют ширину и вылезают за него. Проверено обходом: с
@@ -757,7 +805,11 @@ div[style*="background:var(--bg2)"]{border:1px solid var(--border)}
 @keyframes mbin{from{opacity:0}to{opacity:1}}
 .modal{background:var(--bg2);border-radius:var(--radius-xl) var(--radius-xl) 0 0;padding:20px 16px calc(var(--safe-b) + 20px);width:100%;max-height:85vh;overflow-y:auto;animation:min .3s var(--spring);position:relative;box-shadow:0 -8px 40px rgba(0,0,0,.4)}
 @keyframes min{from{transform:translateY(100%)}to{transform:none}}
-.modal-title{font-size:17px;font-weight:700;margin-bottom:14px;text-align:center;letter-spacing:-.2px}
+/* Поля по 36px с обеих сторон — место под крестик .modal-x (30px + 14px от
+   края минус отступ окна): длинный заголовок «📅 Новая запланированная
+   рассылка» уходил последней буквой под крестик. Симметрично — чтобы
+   заголовок остался по центру. */
+.modal-title{font-size:17px;font-weight:700;margin-bottom:14px;text-align:center;letter-spacing:-.2px;padding:0 36px}
 .modal-x{position:absolute;top:14px;right:14px;width:30px;height:30px;border-radius:50%;background:var(--bg);display:flex;align-items:center;justify-content:center;cursor:pointer;color:var(--hint);font-size:14px;border:1px solid var(--border);transition:transform .15s var(--spring)}
 .modal-x:active{opacity:.6;transform:scale(.88)}
 .field{margin-bottom:12px}
@@ -834,6 +886,26 @@ div[style*="background:var(--bg2)"]{border:1px solid var(--border)}
      при width:auto, поэтому auto схлопывал их до надписи, хотя в разметке
      они заданы как width:100% — кнопки во всю ширину. calc даёт ровно
      ширину экрана за вычетом двух отступов. */
+  width:calc(100% - 32px) !important;margin-left:16px !important;margin-right:16px !important
+}
+/* Прозрачная обёртка содержимого экрана (.sb-pass). Правила выше смотрят
+   только на ПРЯМЫХ детей тела экрана, и любая обёртка с id выключала их для
+   всего, что внутри: так кнопки и поиск на вкладках «Аккаунты» и «Боты» (их
+   завернули в #accTools/#botTools, чтобы прятать на пустом списке) снова
+   легли от края до края под карточками счётчиков с отступом 16px. Тело
+   экранов, которые строит JS (интеграции, продажи, защита от накрутки,
+   отчёт ЛС…), — тоже обёртка с id, и там то же самое. Обёртка с этим
+   классом для правил отступа невидима: её дети получают тот же кант, что
+   дети самого тела экрана. Блок с фоном отступает полями, а не паддингом —
+   иначе фон всё равно лежал бы от края до края. */
+.sb-pass > .field{padding-left:16px;padding-right:16px}
+.sb-pass > .card,.sb-pass > .row,.sb-pass > .kpi-card,
+.sb-pass > div:not([class]):not([id]),.sb-pass > details:not([class]):not([id]),
+.sb-pass > label,.sb-pass > .field-note,.sb-pass > .hint,
+.sb > .field-note,.sub-sb > .field-note,.sb > label,.sub-sb > label{margin-left:16px !important;margin-right:16px !important}
+.sb-pass > div:not([class]):not([id]){flex-wrap:wrap}
+.sb-pass > button{display:flex;align-items:center;justify-content:center;white-space:normal;text-align:center}
+.sb-pass > button,.sb-pass > input:not([type=checkbox]):not([type=radio]),.sb-pass > select,.sb-pass > textarea{
   width:calc(100% - 32px) !important;margin-left:16px !important;margin-right:16px !important
 }
 /* Чекбоксы и радио — НЕ текстовые поля. Правило выше писалось под ввод текста
@@ -1436,10 +1508,14 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 <div id="content">
 
 <!-- ══════════════════════ HOME ══════════════════════ -->
-<div class="screen show" id="s-home">
+<div class="screen show" id="s-home" data-reload="loadHome">
   <div class="hdr">
     <div class="hdr-burger" onclick="openDrawer()" role="button" tabindex="0" aria-label="Меню">☰</div>
     <div class="hdr-title">📊 Итоги</div>
+    <!-- Колокольчик: лента уведомлений (screens/notifications_feed.js). Значок
+         показывает непрочитанное; счётчик спрашивается отдельной лёгкой
+         ручкой, а не загрузкой всей ленты. -->
+    <div class="icon-btn" role="button" tabindex="0" aria-label="Поиск по своему" onclick="openFindAll('')">🔍</div><div class="icon-btn" role="button" tabindex="0" aria-label="Уведомления" onclick="openNotificationsFeed()" style="position:relative">🔔<span id="homeNotifBadge" class="hdr-badge" style="display:none"></span></div>
     <div class="icon-btn" role="button" tabindex="0" aria-label="Обновить" onclick="loadHome()">🔄</div>
     <div class="hdr-meta">
       <div class="hdr-user" id="hUser">...</div>
@@ -1457,6 +1533,12 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
          видел сначала стену нулей, а выбор цели — за нижним краем экрана
          (обход 08.11.2026). -->
     <div id="onboardCard" style="margin:12px 16px 12px;display:none"></div>
+    <!-- Хранилище диалогов — главное умение продукта, и оно было спрятано:
+         подсказка копайлота о нём стоит с приоритетом 72, а экран показывает
+         пять подсказок, поэтому у владельца с живым флотом она не попадала в
+         выдачу НИ РАЗУ. Эта полоса не соревнуется за место: она видна, пока
+         хранилище не подключено, и исчезает сама после подключения. -->
+    <div id="vaultPromo" style="display:none"></div>
     <section id="homeProjects" hidden aria-label="Проекты"></section>
     <div id="summaryWrap"></div>
     <div id="homeDataStatus" role="status" aria-live="polite" class="home-data-status"></div>
@@ -1464,6 +1546,11 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
     <div id="opProgress" style="display:none;margin:10px 16px;background:var(--bg);border-radius:14px;padding:12px 16px;border:1px solid var(--sep)">
       <div style="font-size:13px;font-weight:600;margin-bottom:8px">⏳ Выполняется</div>
     </div>
+    <!-- «Продолжить: …» — последний открытый раздел (screens/ux_kit.js). -->
+    <div id="homeResume"></div>
+    <!-- Закреплённое владельцем: его собственные разделы выше наших плиток.
+         Пусто, пока ничего не закреплено (screens/ux_kit.js). -->
+    <div id="homePinned"></div>
     <!-- Quick actions -->
     <div class="sec">Быстрые действия</div>
     <!-- Плитки — ЧИСТАЯ навигация (без цифр): все счётчики живут один раз в верхней
@@ -1575,7 +1662,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 </div>
 
 <!-- ══════════════════════ BOTS LIST ══════════════════════ -->
-<div class="screen" id="s-bots">
+<div class="screen" id="s-bots" data-reload="loadBots">
   <div class="hdr">
     <div class="hdr-burger" onclick="openDrawer()" role="button" tabindex="0" aria-label="Меню">☰</div>
     <div class="hdr-title">🤖 Мои боты</div>
@@ -1592,7 +1679,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
     <!-- Инструменты списка прячутся, пока ботов нет (renderBots): десять
          действий над пустотой выталкивали «подключите первого бота» за край
          экрана, и новичок не понимал, с чего начать. -->
-    <div id="botTools">
+    <div id="botTools" class="sb-pass">
     <!-- Массовые действия по ботам -->
     <div style="display:flex;gap:8px;padding:0 0 6px">
       <button class="btn btn-p" onclick="goTab('broadcasts')" style="flex:1 1 auto;font-size:13px;padding:10px 6px">📢 Рассылка</button>
@@ -1727,7 +1814,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 </div>
 
 <!-- ══════════════════════ ACCOUNTS ══════════════════════ -->
-<div class="screen" id="s-accounts">
+<div class="screen" id="s-accounts" data-reload="loadAccounts">
   <div class="hdr">
     <div class="hdr-burger" onclick="openDrawer()" role="button" tabindex="0" aria-label="Меню">☰</div>
     <div class="hdr-title">📱 Аккаунты</div>
@@ -1744,7 +1831,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
     <!-- Инструменты списка прячутся, пока аккаунтов нет (renderAccounts):
          шесть нулевых счётчиков и семь действий над пустотой выталкивали
          «Добавьте аккаунт» за нижний край экрана. -->
-    <div id="accTools">
+    <div id="accTools" class="sb-pass">
     <!-- KPI status bar -->
     <div class="acc-kpi" id="accKpi">
       <div class="acc-kpi-card on" onclick="filterAcc('all',this)" data-filter="all">
@@ -2111,6 +2198,8 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
     <span class="vfilter" data-f="edited_only" onclick="setVaultFilter('edited_only')">✏️ Изменённые</span>
   </div>
   <div id="vchatBody" style="flex:1;overflow-y:auto;padding:10px 12px;display:flex;flex-direction:column;gap:8px"></div>
+  <!-- Быстрые ответы: шаблоны одним касанием (screens/quick_replies.js) -->
+  <div id="vchatQuick" class="preset-row" style="display:none;flex-wrap:nowrap;overflow-x:auto;padding:6px 10px 0;margin:0"></div>
   <div id="vchatComposer" style="display:none;padding:8px 10px;border-top:1px solid var(--sep);gap:8px;align-items:flex-end">
     <textarea id="vchatInput" rows="1" onkeydown="sendOnCtrlEnter(event, sendVaultReply)" oninput="autoGrowInput(this)" placeholder="Ответить от вашего имени… (Ctrl+Enter — отправить)" style="flex:1;box-sizing:border-box;padding:9px 12px;border-radius:16px;background:var(--bg3);color:var(--text);border:1px solid var(--border-input);font-size:14px;resize:none;max-height:120px"></textarea>
     <button class="btn btn-p" style="padding:9px 16px;border-radius:16px" onclick="sendVaultReply()" aria-label="Отправить">➤</button>
@@ -2207,7 +2296,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 </div>
 
 <!-- ══════════════════════ BROADCASTS ══════════════════════ -->
-<div class="screen" id="s-broadcasts">
+<div class="screen" id="s-broadcasts" data-reload="loadBroadcasts">
   <div class="hdr">
     <div class="hdr-burger" onclick="openDrawer()" role="button" tabindex="0" aria-label="Меню">☰</div>
     <div class="hdr-title">✉️ Сообщения</div>
@@ -2230,11 +2319,18 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
       <button class="btn btn-s" onclick="openNetBcModal()" style="flex:1 1 45%;font-size:13px;padding:9px 6px" title="Один текст подписчикам всех или выбранных ботов">🕸 По ботам</button>
     </div>
     <div style="display:flex;gap:8px;padding:0 0 2px">
+      <button class="btn btn-s" onclick="openPlanner()" style="flex:1 1 auto;font-size:13px;padding:9px 6px">🗓 Запланировано</button>
       <button class="btn btn-s" onclick="openBroadcastSchedule()" style="flex:1 1 auto;font-size:13px;padding:9px 6px">📅 Расписание</button>
       <button class="btn btn-s" onclick="openExperiments()" style="flex:1 1 auto;font-size:13px;padding:9px 6px">🧪 A/B Тесты</button>
       <button class="btn btn-s" onclick="openTemplates()" style="flex:1 1 auto;font-size:13px;padding:9px 6px">📝 Шаблоны</button>
     </div>
     <div class="sec-row"><div class="sec" id="bcastSec">Рассылки по ботам</div></div>
+    <!-- Поиск по истории рассылок: по тексту сообщения и по нику бота. Поле
+         стоит в РАЗМЕТКЕ, а не строится со списком: иначе оно теряло бы фокус
+         после первой же буквы (список перерисовывается на каждый ответ). -->
+    <div style="padding:0 16px 6px"><input type="text" id="bcastSearch" class="inp"
+         oninput="onBcastSearch(this.value)" placeholder="🔍 Поиск: текст рассылки или @бот"
+         autocomplete="off" aria-label="Поиск по рассылкам"></div>
     <div id="bcastChips" class="lf-chips"></div>
     <div class="lst" id="bcastList"><div class="spin-wrap"><div class="spin"></div></div></div>
     <div class="lst-more" id="bcastMore"></div>
@@ -2306,7 +2402,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 </div>
 
 <!-- ══════════════════════ PROXY POOL (Proxy Pool Manager) ══════════════════════ -->
-<div class="screen" id="s-proxy-pool">
+<div class="screen" id="s-proxy-pool" data-reload="loadProxyPool">
   <div class="hdr">
     <div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div>
     <div class="hdr-title">🔎 Поиск по прокси</div>
@@ -2429,7 +2525,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
     <!-- Статус аккаунта -->
     <div class="acc-status-bar">
       <div class="asb-item">💳 <span id="planVal">—</span></div>
-      <div class="asb-item">📡 <span id="sseVal">—</span></div>
+      <div class="asb-item" title="Живые обновления экрана">📡 <span id="sseVal">Подключение…</span></div>
       <div class="asb-item tap" onclick="goRef()">🎁 <span id="refVal">Реферал</span> ›</div>
     </div>
 
@@ -2474,6 +2570,16 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
         <div class="mgmt-tile-ico">📈</div>
         <div class="mgmt-tile-lbl">Конкуренты</div>
         <div class="mgmt-tile-val" id="m-comp-cnt"></div>
+      </div>
+      <div class="mgmt-tile" onclick="openNotificationsFeed()">
+        <div class="mgmt-tile-ico">🔔</div>
+        <div class="mgmt-tile-lbl">Уведомления</div>
+        <div class="mgmt-tile-val" id="m-notif-cnt"></div>
+      </div>
+      <div class="mgmt-tile" onclick="openFindAll('')">
+        <div class="mgmt-tile-ico">🔍</div>
+        <div class="mgmt-tile-lbl">Поиск по своему</div>
+        <div class="mgmt-tile-val"></div>
       </div>
     </div>
 
@@ -2545,6 +2651,14 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
       <div class="mgmt-tile" onclick="goTab('broadcasts')">
         <div class="mgmt-tile-ico">📨</div>
         <div class="mgmt-tile-lbl">Рассылки</div>
+        <div class="mgmt-tile-val"></div>
+      </div>
+      <!-- «Запланировано» — всё, что продукт сделает сам по времени: отложенные
+           рассылки ботов, отложенные публикации и повторяемые круги
+           (screens/planner.js, services/mini_app_planner.py). -->
+      <div class="mgmt-tile" onclick="openPlanner()">
+        <div class="mgmt-tile-ico">🗓</div>
+        <div class="mgmt-tile-lbl">Запланировано</div>
         <div class="mgmt-tile-val"></div>
       </div>
       <!-- Одни «Сценарии» с вкладками Сценарии / Авто-воронки (SCREEN_MODULES.scenarios):
@@ -3621,7 +3735,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 </div>
 
 <!-- ══════════════════════ COMPLIANCE HUB ══════════════════════ -->
-<div class="screen" id="s-compliance">
+<div class="screen" id="s-compliance" data-reload="loadCompliance">
   <div class="hdr"><div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div><div class="hdr-title">✅ Комплаенс</div></div>
   <div class="sub-sb">
     <div class="sec">Аудит операций <span class="sec-act" onclick="exportCompliance()">Выгрузить отчёт →</span></div>
@@ -3639,7 +3753,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 </div>
 
 <!-- ══════════════════════ MULTIGEO ══════════════════════ -->
-<div class="screen" id="s-multigeo">
+<div class="screen" id="s-multigeo" data-reload="loadMultigeo">
   <div class="hdr">
     <div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div>
     <div class="hdr-title">🌍 Гео-сеть</div>
@@ -4517,7 +4631,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
   <div class="sub-sb">
     <div id="semSettings"></div>
     <div style="display:flex;gap:8px;margin:8px 0">
-      <input id="semQ" type="search" placeholder="Поиск: имя, @username, город, интерес…" style="flex:1"
+      <input id="semQ" class="inp" type="search" placeholder="Поиск: имя, @username, город, интерес…" style="flex:1"
              oninput="semSearchSoon()" onkeydown="if(event.key==='Enter')retrySemFacts()">
     </div>
     <div class="lst" id="semfactsList"><div class="spin-wrap"><div class="spin"></div></div></div>
@@ -4622,11 +4736,11 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
     <div class="hdr-title">👥 Люди воронки</div>
     <div class="hdr-meta"><div class="hdr-user" id="fppl-title"></div></div>
   </div>
-  <div class="sub-sb"><div id="fpplBody"><div class="spin-wrap"><div class="spin"></div></div></div></div>
+  <div class="sub-sb"><div id="fpplBody" class="sb-pass"><div class="spin-wrap"><div class="spin"></div></div></div></div>
 </div>
 
 <!-- ══════════════════════ OPERATIONS ══════════════════════ -->
-<div class="screen" id="s-ops">
+<div class="screen" id="s-ops" data-reload="loadOps">
   <div class="hdr"><div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div><div class="hdr-title" id="opsTitle">⚙️ Операции</div>
     <div class="hdr-meta" style="display:flex;align-items:center;gap:6px">
       <span class="icon-btn" role="button" tabindex="0" onclick="exportOpsCSV()" title="Экспорт CSV" aria-label="Экспорт CSV">📥</span>
@@ -4694,7 +4808,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 </div>
 
 <!-- ══════════════════════ UNIFIED CONTACTS HUB ══════════════════════ -->
-<div class="screen" id="s-contacts">
+<div class="screen" id="s-contacts" data-reload="loadContacts">
   <div class="hdr"><div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div><div class="hdr-title">📇 Контакты</div>
     <div class="hdr-meta" style="display:flex;align-items:center;gap:6px">
       <span class="icon-btn" role="button" tabindex="0" onclick="openUchAI()" title="ИИ-ассистент" aria-label="ИИ-ассистент">🤖</span>
@@ -4917,7 +5031,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
   <div class="sub-sb" id="remBody"><div class="spin-wrap"><div class="spin"></div></div></div>
 </div>
 
-<div class="screen" id="s-uchsynccenter">
+<div class="screen" id="s-uchsynccenter" data-reload="loadSyncCenter">
   <div class="hdr"><div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div><div class="hdr-title">🔄 Центр синхронизации</div></div>
   <div class="sub-sb" id="syncBody"><div class="spin-wrap"><div class="spin"></div></div></div>
 </div>
@@ -4941,7 +5055,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 </div>
 
 <!-- ══════════════════════ BOT SUBSCRIBERS ══════════════════════ -->
-<div class="screen" id="s-botsubs">
+<div class="screen" id="s-botsubs" data-reload="loadBotSubs">
   <div class="hdr">
     <div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div>
     <div class="hdr-title" id="bs-name">Подписчики</div>
@@ -4962,7 +5076,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 </div>
 
 <!-- ══════════════════════ СВОДКА ══════════════════════ -->
-<div class="screen" id="s-dashboard">
+<div class="screen" id="s-dashboard" data-reload="loadDashboard">
   <div class="hdr">
     <div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div>
     <div class="hdr-title">📊 Дашборд</div>
@@ -4993,7 +5107,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 </div>
 
 <!-- ══════════════════════ ANALYTICS ══════════════════════ -->
-<div class="screen" id="s-analytics">
+<div class="screen" id="s-analytics" data-reload="loadAnalytics">
   <div class="hdr"><div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div><div class="hdr-title">📊 Аналитика</div></div>
   <div class="sub-sb">
     <div class="sec">Рост подписчиков (7 дней)</div>
@@ -5025,7 +5139,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 </div>
 
 <!-- ══════════════════════ COMPETITORS ══════════════════════ -->
-<div class="screen" id="s-competitors">
+<div class="screen" id="s-competitors" data-reload="loadCompetitors">
   <div class="hdr">
     <div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div>
     <div class="hdr-title">📈 Конкуренты</div>
@@ -5045,7 +5159,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 </div>
 
 <!-- ══════════════════════ CRM CONTACTS ══════════════════════ -->
-<div class="screen" id="s-crm">
+<div class="screen" id="s-crm" data-reload="loadCRM">
   <div class="hdr">
     <div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div>
     <div class="hdr-title">👤 CRM</div>
@@ -5078,7 +5192,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 </div>
 
 <!-- ══════════════════════ BOT SCHEDULE ══════════════════════ -->
-<div class="screen" id="s-schedule">
+<div class="screen" id="s-schedule" data-reload="loadSchedules">
   <div class="hdr">
     <div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div>
     <div class="hdr-title" id="sch-name">Расписание</div>
@@ -5090,7 +5204,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 </div>
 
 <!-- ══════════════════════ TEMPLATES ══════════════════════ -->
-<div class="screen" id="s-templates">
+<div class="screen" id="s-templates" data-reload="loadTemplates">
   <div class="hdr">
     <div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div>
     <div class="hdr-title">📝 Шаблоны</div>
@@ -5098,7 +5212,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
   </div>
   <div class="filter-chips mod-tabs" data-module="templates" data-tab="texts" role="tablist" aria-label="Вкладки модуля «Шаблоны»"></div>
   <div class="sub-sb">
-    <input id="tplSearch" placeholder="🔍 Поиск по названию и тексту" oninput="_tplSearchDebounced()" style="margin-bottom:8px" aria-label="Поиск шаблонов">
+    <input id="tplSearch" class="inp" placeholder="🔍 Поиск по названию и тексту" oninput="_tplSearchDebounced()" style="margin-bottom:8px" aria-label="Поиск шаблонов">
     <div class="lst" id="tplList"><div class="spin-wrap"><div class="spin"></div></div></div>
   </div>
 </div>
@@ -5160,8 +5274,8 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 
     <div class="sec">Мои ссылки <span id="lnkCount" style="opacity:.6"></span></div>
     <div style="display:flex;gap:6px;padding:0 6px 6px">
-      <input id="lnkSearch" placeholder="🔍 Код, название, адрес или тег" oninput="_lnkSearchDebounced()" style="flex:1;min-width:0" aria-label="Поиск ссылок">
-      <select id="lnkSort" onchange="lnkLoad()" style="width:auto" aria-label="Порядок">
+      <input id="lnkSearch" class="inp" placeholder="🔍 Код, название, адрес или тег" oninput="_lnkSearchDebounced()" style="flex:1;min-width:0" aria-label="Поиск ссылок">
+      <select id="lnkSort" class="inp" onchange="lnkLoad()" style="width:auto" aria-label="Порядок">
         <option value="recent">Новые</option>
         <option value="clicks">По переходам</option>
       </select>
@@ -5301,7 +5415,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 </div>
 
 <!-- ══════════════════════ PROXIES ══════════════════════ -->
-<div class="screen" id="s-proxies">
+<div class="screen" id="s-proxies" data-reload="loadProxies">
   <div class="hdr">
     <div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div>
     <div class="hdr-title">🌐 Прокси</div>
@@ -5384,7 +5498,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 </div>
 
 <!-- ══════════════════════ SCREEN: DEEPLINKS ══════════════════════ -->
-<div class="screen" id="s-deeplinks">
+<div class="screen" id="s-deeplinks" data-reload="loadDeeplinks">
   <div class="hdr">
     <div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div>
     <div class="hdr-title">🔗 Диплинки</div>
@@ -5398,7 +5512,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 </div>
 
 <!-- ══════════════════════ SCREEN: ENGAGEMENT ══════════════════════ -->
-<div class="screen" id="s-engagement">
+<div class="screen" id="s-engagement" data-reload="loadEngagement">
   <div class="hdr">
     <div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div>
     <div class="hdr-title">🔥 Активность аудитории</div>
@@ -5640,7 +5754,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
         <span class="chip" onclick="cleanerSelectAll(false)">⬜ Снять</span>
       </span>
     </div>
-    <input id="cleanerSearch" placeholder="🔍 Имя, @ник или телефон" oninput="renderCleanerAccounts()" style="margin-bottom:6px">
+    <input id="cleanerSearch" class="inp" placeholder="🔍 Имя, @ник или телефон" oninput="renderCleanerAccounts()" style="margin-bottom:6px">
     <div class="lst" id="cleanerAccList"><div class="spin-wrap"><div class="spin"></div></div></div>
     <div id="cleanerErr" style="color:var(--red);font-size:13px;margin:6px 0"></div>
     <button class="btn btn-d" id="cleanerBtn" onclick="submitCleaner()" style="width:100%;margin-top:6px" disabled>Выберите аккаунты</button>
@@ -6553,7 +6667,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
       просите запомнить в чате.
     </div>
     <div style="display:flex;gap:8px;margin:0 0 8px">
-      <input id="aiMemQ" type="search" placeholder="Поиск по записям и #тегам" style="flex:1"
+      <input id="aiMemQ" class="inp" type="search" placeholder="Поиск по записям и #тегам" style="flex:1"
              oninput="aiMemSearchSoon()" onkeydown="if(event.key==='Enter')openAiMemory(false, true)">
     </div>
     <div class="filter-chips" id="aiMemKinds" role="tablist" aria-label="Тип записи" style="margin-bottom:6px"></div>
@@ -7241,7 +7355,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
     <div class="hdr-meta"><div class="hdr-user" id="dmr-title"></div></div>
   </div>
   <div class="sub-sb">
-    <div id="dmrBody"><div class="spin-wrap"><div class="spin"></div></div></div>
+    <div id="dmrBody" class="sb-pass"><div class="spin-wrap"><div class="spin"></div></div></div>
   </div>
 </div>
 
@@ -7450,7 +7564,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
     <div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div>
     <div class="hdr-title">⚖️ Протокол</div>
   </div>
-  <div class="sub-sb"><div id="notaryCert"><div class="spin-wrap"><div class="spin"></div></div></div></div>
+  <div class="sub-sb"><div id="notaryCert" class="sb-pass"><div class="spin-wrap"><div class="spin"></div></div></div></div>
 </div>
 
 <div class="screen" id="s-folders">
@@ -7560,7 +7674,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
     <div class="hdr-title" id="expdetail-title">🧪 Эксперимент</div>
   </div>
   <div class="sub-sb">
-    <div id="expdetailBody"></div>
+    <div id="expdetailBody" class="sb-pass"></div>
   </div>
 </div>
 
@@ -7717,7 +7831,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
     <div class="hdr-title" id="webhook-title">🔗 Вебхук</div>
   </div>
   <div class="sub-sb">
-    <div id="webhookBody"><div class="spin-wrap"><div class="spin"></div></div></div>
+    <div id="webhookBody" class="sb-pass"><div class="spin-wrap"><div class="spin"></div></div></div>
   </div>
 </div>
 
@@ -7820,7 +7934,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
     <div id="mailboxOAuthButtons"></div>
     <div class="field-note">Вход открывается на сайте Google. Пароль Infragram не получает. После подключения вернитесь сюда и обновите список. OAuth не снимает сетевые ограничения SMTP на хостинге.</div>
     <div class="sec">Подключить почту</div>
-    <form onsubmit="connectMailbox(event)" autocomplete="off">
+    <form class="field mb-form" onsubmit="connectMailbox(event)" autocomplete="off">
       <label for="mailboxProvider">Почтовый провайдер</label>
       <select id="mailboxProvider" class="inp" required></select>
       <label for="mailboxEmail">Адрес вашего ящика</label>
@@ -7970,7 +8084,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
   <div class="sub-sb" id="wsdBody"><div class="spin-wrap"><div class="spin"></div></div></div>
 </div>
 
-<div class="screen" id="s-workspaces">
+<div class="screen" id="s-workspaces" data-reload="loadWorkspaces">
   <div class="hdr">
     <div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div>
     <div class="hdr-title">🏢 Рабочие пространства</div>
@@ -7986,7 +8100,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 </div>
 
 <!-- ══════════════════════ SCREEN: PROMO PLATFORM ══════════════════════ -->
-<div class="screen" id="s-promo">
+<div class="screen" id="s-promo" data-reload="loadPromo">
   <div class="hdr">
     <div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div>
     <div class="hdr-title">🔎 Поиск Telegram</div>
@@ -8021,6 +8135,34 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
       <div class="card" style="font-size:12px;color:var(--hint);margin-bottom:8px">Подключите GlobalSMM-совместимую панель через Telegram-бота (команда /promo).</div>
       <div class="lst" id="promoPanelList"><div class="spin-wrap"><div class="spin"></div></div></div>
     </div>
+  </div>
+</div>
+
+<!-- ══════════════════════ SCREEN: УВЕДОМЛЕНИЯ ══════════════════════ -->
+<!-- Лента событий: screens/notifications_feed.js, /api/miniapp/notifications -->
+<div class="screen" id="s-findall">
+  <div class="hdr">
+    <div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div>
+    <div class="hdr-title">🔍 Поиск по своему</div>
+  </div>
+  <div class="sub-sb">
+    <input class="inp" id="faQuery" type="search" autocomplete="off"
+           placeholder="Телефон, ник, канал, контакт, рассылка, операция"
+           oninput="faSearch(this.value)" style="width:calc(100% - 32px);margin:8px 16px">
+    <div id="faResults" style="margin:0 16px 16px"></div>
+  </div>
+</div>
+
+<div class="screen" id="s-notifications" data-reload="loadNotificationsFeed">
+  <div class="hdr">
+    <div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div>
+    <div class="hdr-title">🔔 Уведомления</div>
+    <div class="hdr-meta"><button class="btn btn-s" id="nfReadAll" style="padding:7px 12px;font-size:13px;display:none" onclick="nfReadAll()">Прочитать всё</button></div>
+  </div>
+  <div class="sub-sb">
+    <div class="lf-chips" id="nfChips" role="group" aria-label="Отбор уведомлений"></div>
+    <div class="lst" id="nfList" style="margin:0 16px"></div>
+    <div id="nfMore" style="margin:10px 16px"></div>
   </div>
 </div>
 
@@ -8139,6 +8281,19 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
     <!-- Валюта жила только в «Когортах и LTV», а часовой пояс брался молча у
          телефона — «Тихие часы» на компьютере в другом поясе работали не в те
          часы. Выгрузка и удаление своих данных были только командами бота. -->
+    <div class="sec" style="margin-top:16px">Оформление</div>
+    <div class="card" style="padding:12px 16px">
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;padding:4px 0">
+        <span style="font-size:14px">🎨 Тема</span>
+        <div id="set-theme"></div>
+      </div>
+      <div style="font-size:11px;color:var(--hint)">«Авто» — как в Telegram. Выбор сохраняется на этом устройстве.</div>
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;padding:10px 0 2px;border-top:1px solid var(--sep);margin-top:10px">
+        <span style="font-size:14px">🧹 Память приложения</span>
+        <button class="btn btn-s" style="padding:7px 12px;font-size:13px" onclick="forgetLocalData()">Очистить</button>
+      </div>
+      <div style="font-size:11px;color:var(--hint)">Забудет закреплённые и недавние разделы, историю поиска, «продолжить», кэш списков и выбор темы. Данные в облаке не трогает.</div>
+    </div>
     <div class="sec" style="margin-top:16px">Регион и деньги</div>
     <div class="card" style="padding:12px 16px">
       <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;padding:8px 0;border-bottom:1px solid var(--sep)">
@@ -8200,7 +8355,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 </div>
 
 <!-- ══════════════════════ SCREEN: ERROR REPORT ══════════════════════ -->
-<div class="screen" id="s-errreport">
+<div class="screen" id="s-errreport" data-reload="loadErrReports">
   <div class="hdr">
     <div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div>
     <div class="hdr-title">🐛 Баг-репорт</div>
@@ -8248,6 +8403,11 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
       <div class="preset-row" id="bcastPresetRow"></div>
       <textarea id="bcastText" rows="5" maxlength="4096" placeholder="Введите текст…"></textarea>
       <div class="field-note"><span id="bcastLen">0</span>/4096 · <span id="bcastRecip">0 получателей</span> · <a href="#" onclick="pickTplInto('bcastText','bcastLen');return false" style="color:var(--accent)">📝 Из шаблона</a> · <a href="#" onclick="saveTextAsTpl('bcastText');return false" style="color:var(--accent)">💾 В шаблоны</a></div>
+    </div>
+    <div class="field">
+      <label>Второй вариант текста — A/B-тест (необязательно)</label>
+      <textarea id="bcastTextB" rows="4" maxlength="4096" oninput="updateBcastAb()" placeholder="Оставьте пустым, если тест не нужен"></textarea>
+      <div class="field-note" id="bcastAbNote">Аудитория разделится случайно пополам: половина получит первый текст, половина — второй. Что сработало лучше, видно в «Аналитике рассылок».</div>
     </div>
     <div class="field">
       <label>Кому отправить</label>
@@ -8396,7 +8556,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
     <div class="field">
       <label>Текст сообщения</label>
       <textarea id="netbcText" rows="5" maxlength="4096" placeholder="Сообщение получат подписчики выбранных ботов…"></textarea>
-      <div class="field-note"><span id="netbcLen">0</span>/4096 · один текст — всем отмеченным ботам</div>
+      <div class="field-note"><span id="netbcLen">0</span>/4096 · один текст — всем отмеченным ботам · <a href="#" onclick="openTemplates('netbcText');return false" style="color:var(--accent)">📝 Вставить шаблон</a></div>
     </div>
     <!-- Выбор ботов: раньше рассылка уходила только ВСЕМ ботам сразу, хотя
          сервер (bot_ids) выбор умел давно — не было списка на экране. -->
@@ -8443,6 +8603,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
     <div class="field">
       <label>Текст сообщения</label>
       <textarea id="schText" rows="5" maxlength="4096" placeholder="Текст рассылки…"></textarea>
+      <div class="field-note"><a href="#" onclick="openTemplates('schText');return false" style="color:var(--accent)">📝 Вставить шаблон</a></div>
     </div>
     <div class="field">
       <label>Дата и время (по вашим часам)</label>
@@ -8474,8 +8635,9 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
     </div>
     <div class="field">
       <label>Текст шаблона</label>
+      <div class="preset-row" id="tplVars" aria-label="Вставить подстановку"></div>
       <textarea id="tplText" rows="6" maxlength="4096" placeholder="Поддерживается HTML: &lt;b&gt;жирный&lt;/b&gt;, &lt;i&gt;курсив&lt;/i&gt;…"></textarea>
-      <div class="field-note"><span id="tplLen">0</span>/4096 · варианты {Привет|Здравствуйте}, подстановки {name}</div>
+      <div class="field-note"><span id="tplLen">0</span>/4096 · кнопки выше вставляют подстановку: {name} — имя получателя, {А|Б} — один из вариантов</div>
       <div id="tplPreview" style="display:none;font-size:12px;color:var(--hint);background:var(--bg2);border-radius:8px;padding:8px;margin-top:6px;white-space:pre-wrap"></div>
       <span class="chip" style="margin-top:6px" onclick="previewTpl()">🎲 Как увидит получатель</span>
     </div>
@@ -8956,7 +9118,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
     <div class="field">
       <label>Текст поста</label>
       <textarea id="chPostText" rows="6" maxlength="4096" placeholder="Введите текст публикации…"></textarea>
-      <div class="field-note"><span id="chPostLen">0</span>/4096</div>
+      <div class="field-note"><span id="chPostLen">0</span>/4096 · <a href="#" onclick="openTemplates('chPostText');return false" style="color:var(--accent)">📝 Вставить шаблон</a></div>
     </div>
     <div class="field">
       <label>Когда опубликовать</label>
@@ -8987,7 +9149,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 </div>
 
 <!-- ══════════════════════ SCREEN: RANKING ENGINE ══════════════════════ -->
-<div class="screen" id="s-ranking">
+<div class="screen" id="s-ranking" data-reload="loadRanking">
   <div class="hdr">
     <div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div>
     <div class="hdr-title">🔎 Поиск Telegram</div>
@@ -9047,7 +9209,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 </div>
 
 <!-- ══════════════════════ SCREEN: NETWORK BUILDER ══════════════════════ -->
-<div class="screen" id="s-network-builder">
+<div class="screen" id="s-network-builder" data-reload="loadNetworkBuilder">
   <div class="hdr">
     <div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div>
     <div class="hdr-title">🕸️ Сетки — конструктор</div>
@@ -9212,7 +9374,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
 </div>
 
 <!-- ══════════════════════ SCREEN: WORKFLOWS ══════════════════════ -->
-<div class="screen" id="s-workflows">
+<div class="screen" id="s-workflows" data-reload="loadWorkflows">
   <div class="hdr">
     <div class="back" onclick="back()" role="button" tabindex="0" aria-label="Назад">←</div>
     <div class="hdr-title">🔄 Сценарии</div>
@@ -9502,7 +9664,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
     <div class="hdr-title">👥 Люди сегмента</div>
     <div class="hdr-meta"><div class="hdr-user" id="audseg-title"></div></div>
   </div>
-  <div class="sub-sb"><div id="audsegBody"><div class="spin-wrap"><div class="spin"></div></div></div></div>
+  <div class="sub-sb"><div id="audsegBody" class="sb-pass"><div class="spin-wrap"><div class="spin"></div></div></div></div>
 </div>
 
 <div class="screen" id="s-audience-analytics">
@@ -10210,7 +10372,7 @@ async function openSSE() {
     const hLive = document.getElementById('hLive');
     const sseVal = document.getElementById('sseVal');
     if (hLive) hLive.style.display='none';
-    if (sseVal) sseVal.textContent='🟡 Переподключение...';
+    if (sseVal) sseVal.textContent='🟡 Переподключение…';
     // Закрываем сами: иначе браузер переподключается параллельно с нашим
     // таймером, и на один поток приходится два соединения.
     try{SSE.close()}catch(_){}
@@ -10785,6 +10947,7 @@ function goTab(tab) {
   if (ti) ti.classList.add('on');
   CUR = tab;
   if (tab === 'more') { buildMoreCategories(); try { loadInboxBadge(); } catch(_) {} }
+  try { refreshTabBadges(); } catch(_) {}
   tg.HapticFeedback?.impactOccurred('light');
   if (!LOADED[tab]) { LOADED[tab]=true; loadTab(tab); }
   try { markDrawerActive(); } catch(_) {}
@@ -10795,6 +10958,8 @@ function goTab(tab) {
 // Пер-модульные описания «что делает» (по названию плитки). Показываются
 // подписью в боковом меню и как tooltip на плитках каталога «Все функции».
 const MODULE_DESCS = {
+  'Поиск по своему':'Один запрос по аккаунтам, ботам, каналам, контактам, рассылкам и операциям',
+  'Уведомления':'История событий: итоги операций, ограничения аккаунтов, новые подписчики',
   
   'Реферальная программа':'Код приглашения и приведённые пользователи',
   'Рабочие пространства':'Отдельные контуры с доступом по участникам',
@@ -10858,6 +11023,11 @@ function buildDrawer() {
    ['broadcasts','✉️','Сообщения'],['more','🧭','Разделы']].forEach(([tab,ico,lbl])=>{
     html += `<div class="nav-item" data-tab="${tab}" onclick="navGo('${tab}',null)"><span class="ni-ico">${ico}</span>${esc(lbl)}</div>`;
   });
+  // 1.5) Своё: закреплённое и недавнее (screens/ux_kit.js). Каталог — 80+
+  //      разделов, а человек ходит в пять-шесть; раньше их искали заново
+  //      каждый день. В `seen` эти пункты НЕ добавляем: они не заменяют
+  //      каталог, а стоят над ним ярлыками.
+  if (typeof uxNavBlocks === 'function') html += uxNavBlocks();
   // 2) Полный каталог — динамически из экрана «Ещё» (все секции и плитки), НО
   //    без дублей: верхние вкладки (Дашборд/Боты/Аккаунты/Рассылки/Все функции)
   //    и повторяющиеся ярлыки не выводятся повторно; секция «Быстрые действия»
@@ -10893,7 +11063,15 @@ function buildDrawer() {
         const descHtml = desc ? `<span class="ni-desc">${esc(desc)}</span>` : '';
         // has-desc: у пункта с пояснением значок выравнивается по ПЕРВОЙ строке,
         // иначе он повисал между названием и пояснением.
-        items += `<div class="nav-item${desc?' has-desc':''}" onclick="closeDrawer(); ${handler}"><span class="ni-ico">${ico}</span><span class="ni-body"><span>${esc(lbl)}</span>${descHtml}</span></div>`;
+        // Переход запоминается (блок «Недавние»), а звезда закрепляет пункт
+        // наверху каталога — обе памяти живут в screens/ux_kit.js.
+        const q = (typeof uxNavQ === 'function') ? uxNavQ : (x => String(x));
+        // Переход запоминается дважды: как «недавнее» в каталоге и как «то
+        // место», куда предлагает вернуться главный экран.
+        const remember = `uxNavRemember('${q(lbl)}','${q(ico)}','${q(handler)}'); uxRememberScreen('${q(lbl)}','${q(handler)}')`;
+        const pinned = (typeof uxNavPinned === 'function') && uxNavPinned(lbl);
+        const star = `<span class="ni-pin" role="button" tabindex="0" aria-label="${pinned?'Открепить':'Закрепить'}" onclick="event.stopPropagation(); uxNavPin('${q(lbl)}','${q(ico)}','${q(handler)}')">${pinned?'★':'☆'}</span>`;
+        items += `<div class="nav-item${desc?' has-desc':''}" onclick="closeDrawer(); ${remember}; ${handler}"><span class="ni-ico">${ico}</span><span class="ni-body"><span>${esc(lbl)}</span>${descHtml}</span>${star}</div>`;
       });
       if (items) html += `<div class="nav-cat">${esc((sec.textContent||'').trim())}</div>` + items;  // категорию — только если есть непустые пункты
     });
@@ -11032,6 +11210,9 @@ function syncSelBarGap(wrapId) {
 
 function push(sid) {
   closeAllModals();
+  // Привязываем экран к функции, которой его открыли: это даёт
+  // тянуть-обновить на экранах без явного data-reload.
+  if (typeof uxNoteScreenFn === 'function') uxNoteScreenFn(sid);
   // Экраны — синглтоны по id, и один и тот же id дважды подряд в стеке не
   // означает ничего, кроме ловушки: «назад» снимет верхний и покажет ТОТ ЖЕ
   // экран. Так и было везде, где экран перерисовывают повторным вызовом своей
@@ -11047,10 +11228,19 @@ function push(sid) {
   // Прячем все видимые экраны — иначе абсолютно спозиционированные элементы
   // предыдущего экрана (напр. кнопки удаления с z-index) «протекают» поверх
   // нового экрана.
+  // Перед уходом запоминаем, где человек стоял: «назад» вернёт его туда же
+  // (screens/ux_kit.js). Иначе список на триста строк листают заново после
+  // каждого открытия карточки.
+  if (typeof uxRememberScroll === 'function') {
+    document.querySelectorAll('.screen.show').forEach(s => uxRememberScroll(s.id));
+  }
   document.querySelectorAll('.screen.show').forEach(s=>s.classList.remove('show'));
   STACK.push(sid);
   const el = document.getElementById(sid);
+  // Новый экран открывается сверху — это переход, а не возврат.
+  if (typeof uxForgetScroll === 'function') uxForgetScroll(sid);
   if (el) { el.classList.add('show'); el.scrollTop = 0; }
+  if (typeof uxSyncTopButton === 'function') uxSyncTopButton(el);
   showTabbar(false);
   _syncBackButton();
   tg.HapticFeedback?.impactOccurred('light');
@@ -11062,11 +11252,15 @@ function back() {
   closeAllModals();
   if (!STACK.length) return;
   const id = STACK.pop();
+  if (typeof uxRememberScroll === 'function') uxRememberScroll(id);
   document.getElementById(id)?.classList.remove('show');
   // Возвращаем предыдущий экран стека, либо экран текущей вкладки.
   const prev = STACK.length ? STACK[STACK.length - 1] : ('s-' + CUR);
   const pel = document.getElementById(prev);
   if (pel) pel.classList.add('show');
+  // …и ровно туда, где человек его оставил (screens/ux_kit.js).
+  if (typeof uxRestoreScroll === 'function') uxRestoreScroll(prev);
+  if (typeof uxSyncTopButton === 'function') uxSyncTopButton(pel);
   if (!STACK.length) showTabbar(true);
   _syncBackButton();
   tg.HapticFeedback?.impactOccurred('light');
@@ -11370,10 +11564,24 @@ async function loadHome() {
   if (loadHome.pending) return;
   loadHome.pending = true;
   if (typeof loadHomeProjects === 'function') loadHomeProjects();
+  // Значки вкладок и колокольчик берут числа ОДНОЙ ручкой
+  // (screens/tab_badges.js): главный экран не тянет ленту ради одного числа,
+  // а таббар не делает по запросу на вкладку.
+  if (typeof refreshTabBadges === 'function') refreshTabBadges(true);
+  // Закреплённые разделы — на первом экране, а не за двумя нажатиями.
+  if (typeof uxPinnedHome === 'function') uxPinnedHome();
+  if (typeof vaultPromoHome === 'function') vaultPromoHome();
+  if (typeof uxResumeHome === 'function') uxResumeHome();
   modernizeIcons(document.getElementById('s-home'));
   const cached = loadHome.lastData || getCached('infragram_cache_home');
   if (cached && !loadHome.lastData) { renderCards(cached); renderAct(cached.recent_activity||[]); }
   homeLoadState('homeDataStatus', cached ? 'Обновляем показатели. Пока показаны предыдущие данные.' : 'Загружаем показатели…');
+  // Чеклист, пульс и итоги от показателей не зависят — грузятся разом с
+  // ними, а не после ответа /dashboard: прежде главная ждала два похода к
+  // серверу подряд, и нижние блоки появлялись на целый ответ позже.
+  loadOnboarding();
+  loadOrganismPulse();
+  if (typeof loadSummary === 'function') loadSummary();
   try {
     const d = await api('/api/miniapp/dashboard');
     setCache('infragram_cache_home', d);
@@ -11391,10 +11599,7 @@ async function loadHome() {
       document.getElementById('actList').innerHTML = errorHtml;
     }
   } finally { loadHome.pending = false; }
-  loadOnboarding();
-  loadOrganismPulse();
   renderFrequent();
-  if (typeof loadSummary === 'function') loadSummary();
 }
 
 function homeLoadState(id, message, retry) {
@@ -14369,8 +14574,8 @@ function buildAccDetail(d) {
 
     <div class="sec">Профиль</div>
     <div class="lst">
-      ${a.phone?`<div class="row"><div class="row-ico" style="background:var(--bg-green-16)">📞</div><div class="row-body"><div class="row-name">Телефон</div><div class="row-val">${esc(a.phone)}</div></div></div>`:''}
-      ${a.tg_user_id?`<div class="row"><div class="row-ico" style="background:var(--bg-blue-16)">🆔</div><div class="row-body"><div class="row-name">Telegram ID</div><div class="row-val">${a.tg_user_id}</div></div></div>`:''}
+      ${a.phone?`<div class="row" data-copy="${esc(a.phone)}" data-copy-what="Телефон скопирован" title="Удерживайте, чтобы скопировать"><div class="row-ico" style="background:var(--bg-green-16)">📞</div><div class="row-body"><div class="row-name">Телефон</div><div class="row-val">${esc(a.phone)}</div></div></div>`:''}
+      ${a.tg_user_id?`<div class="row" data-copy="${a.tg_user_id}" data-copy-what="Telegram ID скопирован" title="Удерживайте, чтобы скопировать"><div class="row-ico" style="background:var(--bg-blue-16)">🆔</div><div class="row-body"><div class="row-name">Telegram ID</div><div class="row-val">${a.tg_user_id}</div></div></div>`:''}
       <div class="row"><div class="row-ico" style="background:rgba(20,184,166,.16)">🛡</div>
         <div class="row-body">
           <div class="row-name">Уровень доверия</div>
@@ -14865,12 +15070,38 @@ function chGrowthHtml(g) {
 // их всего, есть срез по статусу (неудачные ищут именно так) и догрузка.
 const BCAST_PAGE = 30;
 let BCAST_ROWS = [], BCAST_TOTAL = 0, BCAST_COUNTS = {}, BCAST_FILTER = '', BCAST_LOADING = false;
+let PAY_ROWS = [], PAY_PAGE = null;   // история оплат: страницы и конверт
+let FUN_ROWS = [], FUN_PAGE = null;   // воронки: страницы и конверт
+let ECO_ROWS = [], ECO_PAGE = null;   // экосистемы: страницы и конверт
+let EXP_ROWS = [], EXP_PAGE = null;   // эксперименты: страницы и конверт
+let SCH_ROWS = [], SCH_PAGE = null;   // расписание бота: страницы и конверт
+let BCAST_SEARCH = '', _bcastSearchT = null, BCAST_FOUND = null;
 function _bcastQuery(offset, limit) {
   let u = '/api/miniapp/broadcasts?limit=' + (limit || BCAST_PAGE) + '&offset=' + offset;
   if (BCAST_FILTER) u += '&status=' + encodeURIComponent(BCAST_FILTER);
+  if (BCAST_SEARCH) u += '&q=' + encodeURIComponent(BCAST_SEARCH);
   return u;
 }
+// Поиск идёт на СЕРВЕР, а не по загруженной странице: в истории сотни
+// рассылок, а на экране тридцать, и «поиск» по ним находил бы только то, что
+// и так видно.
+function onBcastSearch(v) {
+  BCAST_SEARCH = (v || '').trim();
+  clearTimeout(_bcastSearchT);
+  _bcastSearchT = setTimeout(() => { BCAST_ROWS = []; loadBroadcasts(); }, 350);
+}
+function resetBcastSearch() {
+  BCAST_SEARCH = '';
+  const el = document.getElementById('bcastSearch');
+  if (el) el.value = '';
+  BCAST_ROWS = [];
+  loadBroadcasts();
+}
 function _bcastShownTotal() {
+  // Под поиском «всего» — это найденное: сервер считает его тем же условием,
+  // что и выдачу. Иначе строка «показано 30 из 412» называла бы число, не
+  // имеющее отношения к тому, что на экране.
+  if (BCAST_FOUND != null) return BCAST_FOUND;
   if (!BCAST_FILTER) return BCAST_TOTAL;
   const c = BCAST_COUNTS || {};
   return (c[BCAST_FILTER] != null) ? c[BCAST_FILTER] : BCAST_ROWS.length;
@@ -14882,14 +15113,17 @@ async function loadBroadcasts() {
     const [bd, cd, fd] = await Promise.all([
       api(_bcastQuery(0, want)),
       api('/api/miniapp/campaigns'),
-      api('/api/miniapp/funnels'),
+      api('/api/miniapp/funnels?limit=30&offset=0'),
     ]);
     BCAST_ROWS = bd.broadcasts||[];
     BCAST_TOTAL = (bd.total != null) ? bd.total : BCAST_ROWS.length;
+    BCAST_FOUND = (bd.q && bd.found != null) ? bd.found : null;
     BCAST_COUNTS = bd.counts || {};
     renderBcasts(BCAST_ROWS);
     renderCmps(cd.campaigns||[]);
-    renderFuns(fd.funnels||[]);
+    FUN_ROWS = fd.funnels||[];
+    FUN_PAGE = fd.page||null;
+    renderFuns();
   } catch(e) {
     txt('bcastList', errHtml(errRu(e),'loadBroadcasts()'));
     txt('bcastChips',''); txt('bcastMore','');
@@ -14926,6 +15160,7 @@ async function filterBcasts(status) {
     BCAST_ROWS = d.broadcasts||[];
     if (d.total != null) BCAST_TOTAL = d.total;
     if (d.counts) BCAST_COUNTS = d.counts;
+    BCAST_FOUND = (d.q && d.found != null) ? d.found : null;
   } catch(e) {
     if (el) el.innerHTML = errHtml(errRu(e), `filterBcasts('${BCAST_FILTER}')`);
     return;
@@ -14943,6 +15178,7 @@ async function loadMoreBcasts() {
     (d.broadcasts||[]).forEach(b => { if (!known.has(String(b.id))) BCAST_ROWS.push(b); });
     if (d.total != null) BCAST_TOTAL = d.total;
     if (d.counts) BCAST_COUNTS = d.counts;
+    BCAST_FOUND = (d.q && d.found != null) ? d.found : null;
   } catch(e) {
     txt('bcastMore','');
     toast('⚠️ '+errRu(e,'Не удалось догрузить'));
@@ -14955,15 +15191,21 @@ async function loadMoreBcasts() {
 function renderBcasts(items) {
   const el = document.getElementById('bcastList');
   const sec = document.getElementById('bcastSec');
-  if (sec) sec.textContent = BCAST_TOTAL
-    ? `Рассылки по ботам · ${String(items.length)} из ${String(_bcastShownTotal())}`
-    : 'Рассылки по ботам';
+  if (sec) sec.textContent = BCAST_SEARCH
+    ? `Найдено · ${String(items.length)} из ${String(_bcastShownTotal())}`
+    : (BCAST_TOTAL
+        ? `Рассылки по ботам · ${String(items.length)} из ${String(_bcastShownTotal())}`
+        : 'Рассылки по ботам');
   renderBcastChips();
   if (!items.length) {
     el.className='lst';
     // Под активным срезом «рассылок нет» — неправда: они есть, просто не этого
     // статуса, и предлагать создать новую здесь не то, что нужно человеку.
-    el.innerHTML = BCAST_FILTER
+    el.innerHTML = BCAST_SEARCH
+      ? empty('🔍','Ничего не найдено','По запросу «' + BCAST_SEARCH + '» рассылок нет' +
+              (BCAST_FILTER ? ' в этом срезе' : ''),
+              {label:'✖️ Сбросить поиск', fn:'resetBcastSearch()'})
+      : BCAST_FILTER
       ? empty('🔍','По этому срезу пусто','Смените срез, чтобы увидеть остальные рассылки',
               {label:'Показать все', fn:"filterBcasts('')"})
       : empty('📢','Нет рассылок','Рассылка отправляет сообщение всем подписчикам бота',
@@ -15062,17 +15304,33 @@ function renderCmps(items) {
   }).join('');
 }
 
-function renderFuns(items) {
+function renderFuns() {
   const el = document.getElementById('funList');
-  if (!items.length) { el.innerHTML=empty('🔄','Нет воронок'); return; }
-  el.innerHTML = items.map(f=>`<div class="li tap" onclick="openFunnelDetail(${f.id},'${escJs(f.name||'Воронка')}')">
+  if (!el) return;
+  if (!FUN_ROWS.length) { el.innerHTML=empty('🔄','Нет воронок'); return; }
+  el.innerHTML = FUN_ROWS.map(f=>`<div class="li tap" onclick="openFunnelDetail(${Number(f.id)},'${escJs(f.name||'Воронка')}')">
     <div class="ava ava-orange">🔄</div>
     <div class="li-body">
       <div class="li-name">${esc(f.name||'Воронка')}</div>
       <div class="li-sub">${f.bot_username?'@'+esc(f.bot_username):''} · Активных: ${num(f.active_subs||0)}</div>
     </div>
     <span class="badge ${f.is_active?'b-gr':'b-gy'}">${f.is_active?'▶ Активна':'⏸ Пауза'}</span>
-  </div>`).join('');
+  </div>`).join('')
+    + UI.more({shown: FUN_ROWS.length, total: FUN_PAGE ? FUN_PAGE.total : null,
+               maybeMore: !!(FUN_PAGE && FUN_PAGE.has_more), fn: 'loadMoreFuns',
+               allLabel: 'Показаны все воронки'});
+}
+
+// Догрузка воронок. Список отсортирован по числу активных подписчиков, то есть
+// воронка БЕЗ подписчиков — та самая, которую надо починить, — стоит в конце и
+// раньше уходила за потолок молча.
+async function loadMoreFuns() {
+  try {
+    const d = await api('/api/miniapp/funnels?limit=30&offset=' + FUN_ROWS.length);
+    FUN_ROWS = FUN_ROWS.concat(d.funnels||[]);
+    FUN_PAGE = d.page||null;
+    renderFuns();
+  } catch(e) { toast('⚠️ ' + errRu(e, 'Не удалось подгрузить')); }
 }
 
 // ── Broadcast modal ────────────────────────────────────
@@ -15082,6 +15340,8 @@ function openBcastPick() {
   document.getElementById('bcastText').value='';
   { const _bb=document.getElementById('bcastButtons'); if(_bb) _bb.value=''; }
   { const _bs=document.getElementById('bcastSilent'); if(_bs) _bs.checked=false; }
+  { const _tb=document.getElementById('bcastTextB'); if(_tb) _tb.value=''; }
+  if (typeof updateBcastAb === 'function') updateBcastAb();
   { const _sg=document.getElementById('bcastSegment'); if(_sg) _sg.value='all'; }
   { const _sc=document.getElementById('bcastSchedule'); if(_sc) _sc.value='0'; }
   document.getElementById('bcastLen').textContent='0';
@@ -15270,6 +15530,26 @@ function parseInlineButtons(raw) {
   });
   return out;
 }
+// A/B-тест: подпись под вторым текстом говорит, сколько человек получит
+// каждый вариант. Без этого «пополам» — слово, а не число: на сегменте из
+// семи подписчиков тест бессмыслен, и это должно быть видно ДО отправки.
+function updateBcastAb() {
+  const note = document.getElementById('bcastAbNote');
+  const b = (document.getElementById('bcastTextB')?.value || '').trim();
+  const btn = document.getElementById('bcastBtn');
+  if (btn) btn.textContent = b ? '🧪 Запустить A/B-тест' : '📢 Отправить';
+  if (!note) return;
+  if (!b) {
+    note.textContent = 'Аудитория разделится случайно пополам: половина получит первый текст, половина — второй. Что сработало лучше, видно в «Аналитике рассылок».';
+    return;
+  }
+  const recip = parseInt(String(document.getElementById('bcastRecip')?.textContent || '').replace(/\D/g, '')) || 0;
+  note.textContent = recip
+    ? 'Первый текст получат ' + num(Math.floor(recip / 2)) + ', второй — ' + num(recip - Math.floor(recip / 2))
+      + (recip < 40 ? '. Аудитория мала: разница между текстами на таком числе ничего не докажет.' : '. Результат сравните в «Аналитике рассылок».')
+    : 'Сначала выберите бота и сегмент — тогда будет видно, сколько человек получит каждый вариант.';
+}
+
 async function sendBcast() {
   const botId = document.getElementById('bcastBot').value;
   const text = document.getElementById('bcastText').value.trim();
@@ -15282,13 +15562,15 @@ async function sendBcast() {
     errEl.textContent='Кнопки в формате: Текст | https://ссылка'; errEl.style.display='block'; return;
   }
   const silent = !!document.getElementById('bcastSilent')?.checked;
+  const textB = (document.getElementById('bcastTextB')?.value || '').trim();
   const segment = document.getElementById('bcastSegment')?.value || 'all';
   const segLabel = {all:'Всем', active_7d:'Активным 7д', active_30d:'Активным 30д'}[segment] || 'Всем';
   const schedMin = parseInt(document.getElementById('bcastSchedule')?.value||'0')||0;
   const schedLabel = document.getElementById('bcastSchedule')?.selectedOptions[0]?.textContent || 'Сейчас';
   // Предпросмотр перед отправкой — защита от случайной рассылки
   const recip = document.getElementById('bcastRecip')?.textContent || '';
-  const preview = `${schedMin>0?'Запланировать':'Отправить'} рассылку?\n\n🕐 ${schedLabel}\n👥 ${segLabel}\n📨 ${recip}\n\n«${text.slice(0,160)}${text.length>160?'…':''}»`
+  const preview = `${schedMin>0?'Запланировать':'Отправить'} ${textB?'A/B-тест':'рассылку'}?\n\n🕐 ${schedLabel}\n👥 ${segLabel}\n📨 ${recip}\n\n«${text.slice(0,160)}${text.length>160?'…':''}»`
+    + (textB?`\n\nВариант Б: «${textB.slice(0,160)}${textB.length>160?'…':''}»\n🧪 Аудитория делится пополам случайно`:'')
     + (buttons.length?`\n\n🔘 Кнопок: ${buttons.length}`:'')
     + (silent?'\n🔕 Без звука':'');
   if (!await askConfirm(preview)) return;
@@ -15300,12 +15582,22 @@ async function sendBcast() {
     if (silent) payload.silent = true;
     if (segment !== 'all') payload.segment = segment;
     if (schedMin > 0) payload.schedule_minutes = schedMin;
-    const d = await api('/api/miniapp/broadcast', {method:'POST', body:JSON.stringify(payload)});
+    // Второй текст — это A/B-тест: движок делит аудиторию и ставит по
+    // рассылке на вариант. Сегмент, кнопки, тихая отправка и отсрочка те же,
+    // поэтому экран ничего не обещает мимо исполнителя.
+    let d;
+    if (textB) {
+      d = await api('/api/miniapp/broadcast/ab_test', {method:'POST', body:JSON.stringify(
+        Object.assign({}, payload, {variants: [{text, weight: 1}, {text: textB, weight: 1}]}))});
+    } else {
+      d = await api('/api/miniapp/broadcast', {method:'POST', body:JSON.stringify(payload)});
+    }
     clearDraft('bcast');                       // отправлено — черновик больше не нужен
     saveFormPrefs('bcast', {segment});         // запоминаем выбранный сегмент
     closeBcast();
     tg.HapticFeedback?.notificationOccurred('success');
-    toast(schedMin>0 ? `⏰ Рассылка запланирована (${schedLabel.toLowerCase()}) · ${num(d.total_users)} получателей`
+    toast(textB ? `🧪 A/B-тест запущен · ${num(d.total_users)} получателей, ${(d.broadcasts||[]).length} ${plural((d.broadcasts||[]).length,'вариант','варианта','вариантов')}`
+        : schedMin>0 ? `⏰ Рассылка запланирована (${schedLabel.toLowerCase()}) · ${num(d.total_users)} получателей`
                      : '✅ Рассылка запущена · '+num(d.total_users)+' получателей');
     LOADED['broadcasts']=false; if (CUR==='broadcasts') { LOADED['broadcasts']=true; loadBroadcasts(); }
   } catch(e) {
@@ -16928,20 +17220,38 @@ async function openSchedule(botId, botName) {
   await loadSchedules();
 }
 
-async function loadSchedules() {
+async function loadSchedules(more) {
+  // Расписание листается: было жёсткое LIMIT 20 по времени отправки, то есть у
+  // бота с регулярной рассылкой экран показывал последние двадцать строк как
+  // всё расписание — и отменить двадцать первую было нельзя.
+  if (!more) { SCH_ROWS = []; SCH_PAGE = null; }
   try {
-    const d = await api('/api/miniapp/bot/'+SCH_BOT_ID+'/schedules');
-    const items = d.schedules||[];
-    if (!items.length) {
-      txt('schList', empty('⏰','Нет запланированных рассылок','Нажмите + Запланировать'));
-      return;
-    }
+    const d = await api('/api/miniapp/bot/'+SCH_BOT_ID+'/schedules?limit=20&offset=' + SCH_ROWS.length);
+    SCH_ROWS = SCH_ROWS.concat(d.schedules||[]);
+    SCH_PAGE = d.page||null;
+    schRender();
+  } catch(e) {
+    if (SCH_ROWS.length) { toast('⚠️ ' + errRu(e, 'Не удалось подгрузить')); return; }
+    txt('schList', errHtml(errRu(e), retryCall('loadSchedules')));
+  }
+}
+
+function schMore() { loadSchedules(true); }
+
+function schRender() {
+  if (!SCH_ROWS.length) {
+    txt('schList', empty('⏰','Нет запланированных рассылок','Нажмите + Запланировать'));
+    return;
+  }
     const statIco = {pending:'⏳',done:'✅',cancelled:'❌',missed:'⚠️'};
     // Время печатается в часовом поясе устройства (toLocaleString), а подпись
     // рядом утверждала «UTC»: в Киеве рассылка на 12:00 выглядела как
     // назначенная на 12:00 по Гринвичу, то есть на два часа позже.
-    txt('schList', items.map(s=>{
-      const dt = new Date(s.execute_at).toLocaleString('ru-RU',{dateStyle:'short',timeStyle:'short'});
+    txt('schList', SCH_ROWS.map(s=>{
+      // Пустое или битое время печаталось как «Invalid Date» — по-английски и
+      // без смысла. Без даты строка честно говорит «время не задано».
+      const _at = new Date(s.execute_at);
+      const dt = (s.execute_at && !isNaN(_at)) ? _at.toLocaleString('ru-RU',{dateStyle:'short',timeStyle:'short'}) : 'Время не задано';
       const [bc,bl] = stb(s.status);
       const preview = (s.message_text||'').substring(0,60);
       const canCancel = s.status==='pending';
@@ -16958,10 +17268,10 @@ async function loadSchedules() {
           </div>
         </div>
       </div>`;
-    }).join(''));
-  } catch(e) {
-    txt('schList', errHtml(errRu(e), retryCall('loadSchedules')));
-  }
+    }).join('')
+      + UI.more({shown: SCH_ROWS.length, total: SCH_PAGE ? SCH_PAGE.total : null,
+                 maybeMore: !!(SCH_PAGE && SCH_PAGE.has_more), fn: 'schMore',
+                 allLabel: 'Показано всё расписание'}));
 }
 
 function openSchModal() {
@@ -17056,10 +17366,13 @@ async function loadTemplates(more) {
     }
     txt('tplList', items.map(t=>{
       const txt2 = (t.template?.text || '').substring(0, 60);
+      const tr = (typeof tplTraits === 'function') ? tplTraits(t.template?.text) : {};
+      const badges = (tr.personal ? ' <span class="badge b-bl" title="Подставит имя получателя">👤 с именем</span>' : '')
+        + (tr.variants ? ' <span class="badge b-gy" title="Каждый раз — свой вариант текста">🎲 варианты</span>' : '');
       return `<div class="li">
         <div class="ava ava-green">📝</div>
         <div class="li-body" onclick="openTplEdit(${t.id})" style="cursor:pointer">
-          <div class="li-name">${esc(t.name||'Шаблон')}</div>
+          <div class="li-name">${esc(t.name||'Шаблон')}${badges}</div>
           <div class="li-sub">${esc(txt2)}${txt2.length===60?'…':''}</div>
         </div>
         <div class="li-right">
@@ -17092,12 +17405,7 @@ function previewTpl() {
   const raw = document.getElementById('tplText').value;
   const el = document.getElementById('tplPreview');
   if (!raw.trim()) { el.style.display='none'; return; }
-  let t = raw.replace(/\{name\}/g, 'Иван').replace(/\{first_name\}/g, 'Иван')
-    .replace(/\{last_name\}/g, 'Петров').replace(/\{username\}/g, '@ivan');
-  let guard = 0;
-  while (t.indexOf('{')>=0 && t.indexOf('}')>=0 && guard++ < 50) {
-    t = t.replace(/\{([^{}]+)\}/g, (m,g)=>{ const p=g.split('|'); return p[Math.floor(Math.random()*p.length)]; });
-  }
+  const t = tplFill(raw, {name: 'Иван Петров', username: 'ivan'});
   el.textContent = '🎲 ' + t + '\n(имя — пример; нажмите ещё раз для другого варианта)';
   el.style.display = 'block';
 }
@@ -17109,10 +17417,11 @@ function useTpl(id, name, text) {
     ta.value = text;
     // Обновить счётчик длины: у mpText/cmpText/bcastText свои input-слушатели.
     ta.dispatchEvent(new Event('input', {bubbles:true}));
-    const lenId = {bcastText:'bcastLen', mpText:'mpLen', cmpText:'cmpLen'}[TPL_TARGET];
+    const lenId = {bcastText:'bcastLen', mpText:'mpLen', cmpText:'cmpLen', netbcText:'netbcLen', chPostText:'chPostLen'}[TPL_TARGET];
     const lenEl = lenId && document.getElementById(lenId);
     if (lenEl) lenEl.textContent = text.length;
   }
+  if (typeof tplNoteUse === 'function') tplNoteUse(id);
   back();
   toast('📝 Шаблон «'+name+'» вставлен');
 }
@@ -17122,6 +17431,7 @@ async function deleteTpl(id, _el) {
   try {
     await api('/api/miniapp/template/'+id, {method:'DELETE'});
     toast('✅ Удалено'); loadTemplates();
+    if (typeof tplCachesReset === 'function') tplCachesReset();
   } catch(e) { toast('⚠️ '+errRu(e,'Ошибка')); }
 }
 
@@ -17136,6 +17446,7 @@ function openTplModal() {
   document.getElementById('tplBtn').disabled=false;
   document.getElementById('tplBtn').textContent='💾 Сохранить';
   document.getElementById('tplMbg').classList.add('show');
+  if (typeof tplRenderVarsBar === 'function') tplRenderVarsBar();
   tg.HapticFeedback?.impactOccurred('medium');
 }
 function closeTplModal() { document.getElementById('tplMbg').classList.remove('show'); }
@@ -17159,6 +17470,7 @@ async function saveTpl() {
     closeTplModal();
     tg.HapticFeedback?.notificationOccurred('success');
     toast('✅ Шаблон сохранён');
+    if (typeof tplCachesReset === 'function') tplCachesReset();
     loadTemplates();
   } catch(e) {
     errEl.textContent='Ошибка: '+errRu(e); errEl.style.display='block';
@@ -21180,6 +21492,7 @@ async function openVaultChat(chatId) {
   }
   const comp = document.getElementById('vchatComposer');
   comp.style.display = VAULT_CAN_REPLY ? 'flex' : 'none';
+  if (typeof vaultQuickReplies === 'function') vaultQuickReplies();
   await reloadVaultChat();
 }
 
@@ -21766,8 +22079,8 @@ async function openContactDetail(id) {
     document.getElementById('cdFavBtn').style.opacity = c.is_favorite ? '1' : '.4';
     let html = `<div class="lst" style="margin:12px 16px 0">
       <div class="row"><div class="row-body"><div class="row-name">Имя</div><div class="row-val">${esc(name)}</div></div></div>
-      ${c.username?`<div class="row"><div class="row-body"><div class="row-name">Имя в Telegram</div><div class="row-val">@${esc(c.username)}</div></div></div>`:''}
-      ${c.telegram_user_id?`<div class="row"><div class="row-body"><div class="row-name">Telegram ID</div><div class="row-val">${c.telegram_user_id}</div></div></div>`:''}
+      ${c.username?`<div class="row" data-copy="@${esc(c.username)}" data-copy-what="Ник скопирован" title="Удерживайте, чтобы скопировать"><div class="row-body"><div class="row-name">Имя в Telegram</div><div class="row-val">@${esc(c.username)}</div></div></div>`:''}
+      ${c.telegram_user_id?`<div class="row" data-copy="${c.telegram_user_id}" data-copy-what="Telegram ID скопирован" title="Удерживайте, чтобы скопировать"><div class="row-body"><div class="row-name">Telegram ID</div><div class="row-val">${c.telegram_user_id}</div></div></div>`:''}
       ${c.is_premium?`<div class="row"><div class="row-body"><div class="row-name">Premium</div><div class="row-val">💎 Да</div></div></div>`:''}
       ${c.registered_estimate?`<div class="row"><div class="row-body"><div class="row-name">Регистрация (оценка)</div><div class="row-val">📅 ≈ ${esc(c.registered_estimate)}</div></div></div>`:''}
       ${lastSeenLabel(c.last_seen_type, c.last_seen_at)?`<div class="row"><div class="row-body"><div class="row-name">Был в сети</div><div class="row-val">${esc(lastSeenLabel(c.last_seen_type, c.last_seen_at))}${c.last_seen_at?' · '+esc(String(c.last_seen_at).slice(0,16).replace('T',' ')):''}</div></div></div>`:''}
@@ -21775,8 +22088,8 @@ async function openContactDetail(id) {
       ${c.is_mutual?`<div class="row"><div class="row-body"><div class="row-name">Взаимный</div><div class="row-val">↔ Да</div></div></div>`:''}
       ${enr.activity&&enr.activity.level!=='unknown'?`<div class="row"><div class="row-body"><div class="row-name">Активность</div><div class="row-val">${enr.activity.level==='hot'?'🔥':enr.activity.level==='warm'?'🌤':'❄️'} ${esc(enr.activity.label)}</div></div></div>`:''}
       ${enr.language&&enr.language.code?`<div class="row"><div class="row-body"><div class="row-name">Язык (оценка)</div><div class="row-val">${esc(({ru:'🇷🇺 Русский',en:'🌐 Латиница',cjk:'🀄 Иероглифы',ar:'☪ Арабский'})[enr.language.code]||enr.language.code)} · ${Math.round((enr.language.confidence||0)*100)}%</div></div></div>`:''}
-      ${Array.isArray(c.phones)&&c.phones.length?`<div class="row"><div class="row-body"><div class="row-name">Телефон</div><div class="row-val">${esc(c.phones.join(', '))}</div></div></div>`:''}
-      ${Array.isArray(c.emails)&&c.emails.length?`<div class="row"><div class="row-body"><div class="row-name">Почта</div><div class="row-val">${esc(c.emails.join(', '))}</div></div></div>`:''}
+      ${Array.isArray(c.phones)&&c.phones.length?`<div class="row" data-copy="${esc(c.phones.join(', '))}" data-copy-what="Телефон скопирован" title="Удерживайте, чтобы скопировать"><div class="row-body"><div class="row-name">Телефон</div><div class="row-val">${esc(c.phones.join(', '))}</div></div></div>`:''}
+      ${Array.isArray(c.emails)&&c.emails.length?`<div class="row" data-copy="${esc(c.emails.join(', '))}" data-copy-what="Почта скопирована" title="Удерживайте, чтобы скопировать"><div class="row-body"><div class="row-name">Почта</div><div class="row-val">${esc(c.emails.join(', '))}</div></div></div>`:''}
       ${c.company?`<div class="row"><div class="row-body"><div class="row-name">Компания</div><div class="row-val">${esc(c.company)}</div></div></div>`:''}
       ${c.position?`<div class="row"><div class="row-body"><div class="row-name">Должность</div><div class="row-val">${esc(c.position)}</div></div></div>`:''}
       ${c.websites&&c.websites.length?`<div class="row"><div class="row-body"><div class="row-name">Сайты</div><div class="row-val">${c.websites.map(w=>'<a href="'+esc(w)+'" target="_blank" style="color:var(--accent)">'+esc(w)+'</a>').join(', ')}</div></div></div>`:''}
@@ -27094,6 +27407,9 @@ function humanDur(sec) {
 const DM_LOG_STATUS = {
   sent:'✅ доставлено', blocked:'🚫 заблокирован', skip:'🔒 недоступен',
   auth:'🔑 сессия мертва', peer_flood:'⛔ слишком много сообщений незнакомым', retry:'⚠️ сбой', failed:'⚠️ сбой',
+  // Исполнитель пишет и этот исход (dm_engine: отправка ушла, а Telegram её не
+  // подтвердил) — без подписи он показывался владельцу словом «unconfirmed».
+  unconfirmed:'❔ доставка не подтверждена',
 };
 // Причина недоставки приходит от Telegram английской строкой
 // (USER_PRIVACY_RESTRICTED, PEER_FLOOD) и в таком виде показывалась владельцу,
@@ -27209,12 +27525,12 @@ async function openDmReport(id) {
     } else {
       // Каждая строка сводки ведёт к списку тех, кто за числом стоит: раньше
       // отчёт отвечал «заблокировали: 54» и не отвечал «кто именно».
-      h += `<div class="sec-t">Исходы</div><div class="lst">` + _DMR_STATUSES.map((s,i)=>
+      h += `<div class="sec">Исходы</div><div class="lst">` + _DMR_STATUSES.map((s,i)=>
         `<div class="li tap" onclick="dmrGoStatus(${i})" role="button" tabindex="0">
            <div class="row-body"><div class="row-name">${esc(DM_LOG_STATUS[s.status]||s.status)}</div></div>
            <div class="row-right"><span class="badge b-bl">${num(s.n)}</span></div><span class="chev">›</span></div>`).join('') + `</div>`;
       if (_DMR_ERRS.length) {
-        h += `<div class="sec-t">Частые причины недоставки</div><div class="lst">` + _DMR_ERRS.map((e,i)=>
+        h += `<div class="sec">Частые причины недоставки</div><div class="lst">` + _DMR_ERRS.map((e,i)=>
           `<div class="li tap" onclick="dmrGoReason(${i})" role="button" tabindex="0">
              <div class="row-body"><div class="row-name" style="font-weight:400">${esc(dmErrRu(e.reason))}</div>${
                dmErrRu(e.reason) !== String(e.reason) ? `<div class="li-sub wrap">${esc(e.reason)}</div>` : ''}</div>
@@ -27223,14 +27539,14 @@ async function openDmReport(id) {
       if (accs.length) {
         // Аккаунт, который сыплет ошибками, чинят в его карточке — тап ведёт
         // туда, а не оставляет владельца с номером на руках.
-        h += `<div class="sec-t">По аккаунтам</div><div class="lst">` + accs.map(a=>
+        h += `<div class="sec">По аккаунтам</div><div class="lst">` + accs.map(a=>
           `<div class="li tap" onclick="openAccount(${Number(a.account_id)})" role="button" tabindex="0">
              <div class="row-body"><div class="row-name">${esc(a.label||('Аккаунт '+a.account_id))}</div>
                <div class="li-sub wrap">✅ ${num(a.sent||0)} · ❌ ${num(a.failed||0)}</div></div>
              <span class="chev">›</span></div>`).join('') + `</div>`;
       }
       if (_DMR_RECENT.length) {
-        h += `<div class="sec-t">Последние отправки</div><div class="lst">`
+        h += `<div class="sec">Последние отправки</div><div class="lst">`
            + _DMR_RECENT.slice(0,20).map((r,i)=>dmrRow('rep',i)).join('') + `</div>`;
         if (_DMR_RECENT.length > 20) {
           h += `<button class="btn btn-s" style="width:100%;margin:8px 0" onclick="openDmLog({status:'',reason:'',title:'Все получатели'})">Показать всех получателей</button>`;
@@ -27403,6 +27719,7 @@ async function deleteDm(id, status, _el) {
 // Правка идущего плана живёт в той же форме: id плана — режим правки.
 let WARMUP_EDIT_ID = null;
 let _WU_PLANS = [];
+let _WU_PAGE = null;   // конверт страницы планов прогрева
 const _WU_KEEP = '<option value="" data-keep="1">— не менять —</option>';
 function _warmupMode(edit) {
   WARMUP_EDIT_ID = edit || null;
@@ -27569,14 +27886,19 @@ const WARMUP_STATUS = {active:'🟢 Активен',paused:'⏸ Пауза',comp
 const WARMUP_STATE_COLOR = {running:'var(--green)', stalled:'var(--orange,#f59e0b)',
                             blocked:'var(--red,#ef4444)', paused:'var(--hint)',
                             completed:'var(--blue,#3b82f6)', cancelled:'var(--hint)'};
-async function openWarmup() {
+async function openWarmup(more) {
+  // Планы листаются: флот из двух сотен аккаунтов давал ровно 50 строк, а
+  // «Всего планов» рядом показывало настоящее число — экран противоречил сам
+  // себе, и плана за пятидесятым нельзя было ни открыть, ни остановить.
+  if (more) { openWarmupPage(true); return; }
   push('s-warmup');
+  _WU_PLANS = []; _WU_PAGE = null;
   txt('warmupStats','<div class="spin-wrap"><div class="spin"></div></div>');
   txt('warmupList','');
   const warnBox = document.getElementById('warmupWarn');
   if (warnBox) { warnBox.style.display='none'; warnBox.innerHTML=''; }
   try {
-    const d = await api('/api/miniapp/warmup');
+    const d = await api('/api/miniapp/warmup?limit=50&offset=0');
     const att = d.attention||0;
     txt('warmupStats',`
       <div class="kpi-card"><div class="kpi-val">${d.total||0}</div><div class="kpi-lbl">Всего планов</div></div>
@@ -27592,10 +27914,18 @@ async function openWarmup() {
     }
     const plans = d.plans||[];
     _WU_PLANS = plans;
+    _WU_PAGE = d.page||null;
     const bulkBox = document.getElementById('warmupBulk');
     if (bulkBox) bulkBox.style.display = plans.some(p=>p.status==='active'||p.status==='paused') ? 'flex' : 'none';
     if (!plans.length) { txt('warmupList', empty('🌱','Нет планов прогрева','Нажмите + Запустить', {label:'🌱 Запустить прогрев', fn:'openWarmupModal()'})); return; }
-    txt('warmupList', plans.map(p=>{
+    warmupRenderList();
+  } catch(e) {
+    txt('warmupStats','');
+    txt('warmupList', empty('⚠️','Ошибка',errRu(e), {label:'↺ Повторить',fn:retryCall('openWarmup')}));
+  }
+}
+function warmupRenderList() {
+  txt('warmupList', _WU_PLANS.map(p=>{
       const h = p.health || {state:'running', label:(WARMUP_STATUS[p.status]||p.status), hint:'', resumable:p.status==='paused'};
       const col = WARMUP_STATE_COLOR[h.state] || 'var(--hint)';
       return `
@@ -27615,12 +27945,24 @@ async function openWarmup() {
           <button class="icon-btn sm danger" onclick="deleteWarmupPlan(${p.id}, this)" aria-label="Удалить" title="Удалить">🗑</button>
         </div>
       </div>`;
-    }).join(''));
-  } catch(e) {
-    txt('warmupStats','');
-    txt('warmupList', empty('⚠️','Ошибка',errRu(e), {label:'↺ Повторить',fn:retryCall('openWarmup')}));
-  }
+    }).join('')
+      + UI.more({shown: _WU_PLANS.length,
+                 total: _WU_PAGE ? _WU_PAGE.total : null,
+                 maybeMore: !!(_WU_PAGE && _WU_PAGE.has_more), fn: 'warmupMore',
+                 allLabel: 'Показаны все планы прогрева'}));
 }
+// Догрузка следующей страницы планов. Шапка и счётчики уже на экране —
+// перерисовываем только список, иначе каждая догрузка мигала бы всем экраном.
+async function openWarmupPage() {
+  try {
+    const d = await api('/api/miniapp/warmup?limit=50&offset=' + _WU_PLANS.length);
+    _WU_PLANS = _WU_PLANS.concat(d.plans || []);
+    _WU_PAGE = d.page || null;
+    warmupRenderList();
+  } catch (e) { toast('⚠️ ' + errRu(e, 'Не удалось подгрузить планы')); }
+}
+function warmupMore() { openWarmupPage(); }
+
 // ── Восстановление аккаунтов ───────────────────────────────────────────
 // Модуль существовал и работал, но был невидим целиком: ни экрана, ни
 // уведомления. Аккаунт со спам-блоком выглядел потерянным, хотя система его
@@ -28871,27 +29213,50 @@ const EXP_TYPE = {start_message:'Приветствие',auto_reply:'Авто-о
 async function openExperiments() {
   push('s-experiments');
   txt('experimentsList','<div class="spin-wrap"><div class="spin"></div></div>');
+  EXP_ROWS = []; EXP_PAGE = null;
+  await expLoadPage();
+}
+
+// Эксперименты листаются. Было жёсткое LIMIT 50 и подпись «N экспериментов» по
+// длине страницы: сравнить сегодняшний опыт с прошлогодним было нельзя — его
+// просто не существовало на экране, а число в плитке раздела было неверным и
+// выдавалось как факт.
+async function expLoadPage() {
   try {
-    const d = await api('/api/miniapp/experiments');
-    const exps = d.experiments||[];
-    txt('m-exp-cnt', exps.length+' экспериментов');
-    if (!exps.length) { txt('experimentsList', empty('🧪','Экспериментов ещё нет',
-      'Эксперимент показывает двум половинам пользователей разные тексты приветствия или авто-ответа и считает, какой сработал лучше',
-      {label:'+ Создать эксперимент', fn:'openExpModal()'})); return; }
-    txt('experimentsList', exps.map(e=>`
-      <div class="row tap" onclick="openExpDetail(${e.id},'${escJs(e.name)}')">
-        <div class="row-ico" style="background:var(--bg-yellow-16)">🧪</div>
-        <div class="row-body">
-          <div class="row-name">${esc(e.name)}</div>
-          <div class="row-val">${EXP_STATUS[e.status]||e.status||'—'} · @${esc(e.bot_username||'')} · ${EXP_TYPE[e.experiment_type]||e.experiment_type||'—'} · ${e.variant_count||0} вариантов</div>
-        </div>
-        <div class="row-right chev">›</div>
-      </div>
-    `).join(''));
+    const d = await api('/api/miniapp/experiments?limit=50&offset=' + EXP_ROWS.length);
+    EXP_ROWS = EXP_ROWS.concat(d.experiments || []);
+    EXP_PAGE = d.page || null;
+    expRender();
   } catch(e) {
+    if (EXP_ROWS.length) { toast('⚠️ ' + errRu(e, 'Не удалось подгрузить')); return; }
     txt('experimentsList', errHtml(errRu(e), 'openExperiments()'));
   }
 }
+
+function expRender() {
+  const total = EXP_PAGE && EXP_PAGE.total != null ? EXP_PAGE.total : EXP_ROWS.length;
+  txt('m-exp-cnt', num(total)+' экспериментов');
+  if (!EXP_ROWS.length) {
+    txt('experimentsList', empty('🧪','Экспериментов ещё нет',
+      'Эксперимент показывает двум половинам пользователей разные тексты приветствия или авто-ответа и считает, какой сработал лучше',
+      {label:'+ Создать эксперимент', fn:'openExpModal()'}));
+    return;
+  }
+  txt('experimentsList', EXP_ROWS.map(e=>`
+      <div class="row tap" onclick="openExpDetail(${Number(e.id)},'${escJs(e.name)}')">
+        <div class="row-ico" style="background:var(--bg-yellow-16)">🧪</div>
+        <div class="row-body">
+          <div class="row-name">${esc(e.name)}</div>
+          <div class="row-val">${EXP_STATUS[e.status]||e.status||'—'} · @${esc(e.bot_username||'')} · ${EXP_TYPE[e.experiment_type]||e.experiment_type||'—'} · ${esc(e.variant_count||0)} вариантов</div>
+        </div>
+        <div class="row-right chev">›</div>
+      </div>
+    `).join('')
+    + UI.more({shown: EXP_ROWS.length, total: EXP_PAGE ? EXP_PAGE.total : null,
+               maybeMore: !!(EXP_PAGE && EXP_PAGE.has_more), fn: 'expLoadPage',
+               allLabel: 'Показаны все эксперименты'}));
+}
+
 async function openExpDetail(id, name) {
   push('s-expdetail');
   txt('expdetail-title','🧪 '+esc(name));
@@ -30930,6 +31295,7 @@ async function openErrorReport() {
 const ERR_REP_STATUS = {new:'🆕 Новый', viewing:'👀 Просмотрен', fixing:'🔧 В работе',
   fixed:'✅ Исправлен', duplicate:'🔁 Дубликат'};
 let _ERR_REPS = [];
+let _ERR_PAGE = null;   // конверт страницы отчётов
 // Ответ на отчёт писали в заметки разбора, и он никогда не доходил до того,
 // кто отчёт прислал: экран показывал только статус и первые 120 символов
 // собственного текста.
@@ -30940,28 +31306,47 @@ function errRepTap(i) {
   if (r.answer) parts.push('', '— Ответ —', String(r.answer));
   showInfo(parts.join('\n'));
 }
-async function loadErrReports() {
-  txt('errRepList', '<div class="spin-wrap"><div class="spin"></div></div>');
+async function loadErrReports(more) {
+  // Отчёты листаются: было жёсткое LIMIT 20, то есть двадцать первый отчёт —
+  // и ответ разбора в нём — до отправителя не доходил вообще.
+  if (!more) {
+    _ERR_REPS = []; _ERR_PAGE = null;
+    txt('errRepList', '<div class="spin-wrap"><div class="spin"></div></div>');
+  }
   try {
-    const d = await api('/api/miniapp/error_reports');
-    _ERR_REPS = d.reports||[];
-    if (!_ERR_REPS.length) {
-      txt('errRepList', empty('🐛','Отчётов пока нет',
-        'Опишите проблему в поле выше — отчёт появится здесь, и сюда же придёт ответ по нему'));
-      return;
-    }
-    txt('errRepList', _ERR_REPS.map((r,i)=>`
+    const d = await api('/api/miniapp/error_reports?limit=20&offset=' + _ERR_REPS.length);
+    _ERR_REPS = _ERR_REPS.concat(d.reports || []);
+    _ERR_PAGE = d.page || null;
+    _errRepsRender();
+  } catch(e) {
+    if (_ERR_REPS.length) { toast('⚠️ ' + errRu(e, 'Не удалось подгрузить')); return; }
+    txt('errRepList', empty('⚠️','Ошибка',errRu(e), {label:'↺ Повторить',fn:retryCall('loadErrReports')}));
+  }
+}
+
+function _errRepsRender() {
+  if (!_ERR_REPS.length) {
+    txt('errRepList', empty('🐛','Отчётов пока нет',
+      'Опишите проблему в поле выше — отчёт появится здесь, и сюда же придёт ответ по нему'));
+    return;
+  }
+  txt('errRepList', _ERR_REPS.map((r,i)=>`
       <div class="li tap" onclick="errRepTap(${i})" role="button" tabindex="0">
         <div class="row-body">
-          <div class="row-name">№${r.id} · ${esc(ERR_REP_STATUS[r.status]||r.status)}${
+          <div class="row-name">№${esc(r.id)} · ${esc(ERR_REP_STATUS[r.status]||r.status)}${
             r.answer?' · <span style="color:var(--green)">есть ответ</span>':''}</div>
           <div class="li-sub wrap">${esc(String(r.description||'').slice(0,120))}${
             String(r.description||'').length>120?'…':''}</div>
           <div class="li-sub" style="color:var(--hint)">${esc(ago(r.created_at))}</div>
         </div><span class="chev">›</span></div>
-    `).join(''));
-  } catch(e) { txt('errRepList', empty('⚠️','Ошибка',errRu(e), {label:'↺ Повторить',fn:retryCall('loadErrReports')})); }
+    `).join('')
+    + UI.more({shown: _ERR_REPS.length, total: _ERR_PAGE ? _ERR_PAGE.total : null,
+               maybeMore: !!(_ERR_PAGE && _ERR_PAGE.has_more), fn: 'errRepsMore',
+               allLabel: 'Показаны все отчёты'}));
 }
+
+function errRepsMore() { loadErrReports(true); }
+
 async function submitErrReport() {
   const description = document.getElementById('errRepText').value.trim();
   const errEl = document.getElementById('errRepErr');
@@ -31543,16 +31928,16 @@ async function openGpCreateModal(presetAssetType) {
     if (_gpE) _gpE.innerHTML = '<option value="">Загрузка экосистем…</option>'; }
   // Load ecosystems
   try {
-    const ecos = await api('/api/miniapp/ecosystems');
+    const ecos = await api('/api/miniapp/ecosystems?limit=300');
     const sel = document.getElementById('gpEcosystem');
-    // /api/miniapp/ecosystems отдаёт МАССИВ (экран «Экосистемы» так его и
-    // читает: rows.length, rows.map). Здесь читали ecos.ecosystems — у массива
-    // такого поля нет, выражение всегда давало [], и в выпадашке навсегда
-    // оставалось одно «Не привязывать». То есть привязать к экосистеме было
-    // нельзя, сколько бы их владелец ни создал.
-    const ecoList = Array.isArray(ecos) ? ecos : [];
+    // Раньше /api/miniapp/ecosystems отдавал МАССИВ, а здесь читали
+    // ecos.ecosystems — у массива такого поля нет, выражение всегда давало [],
+    // и в выпадашке навсегда оставалось одно «Не привязывать». С 25.11.2026
+    // ручка отдаёт конверт страницы ({ecosystems, page}), поэтому читаем обе
+    // формы одной дверью listOf — она и есть защита от следующей такой смены.
+    const ecoList = listOf(ecos, 'ecosystems');
     sel.innerHTML = '<option value="">Не привязывать</option>' +
-      ecoList.map(e=>`<option value="${e.id}">${esc(e.name||'Экосистема #'+e.id)}</option>`).join('');
+      ecoList.map(e=>`<option value="${Number(e.id)}">${esc(e.name||'Экосистема #'+e.id)}</option>`).join('');
   } catch(e) {
     const sel = document.getElementById('gpEcosystem');
     if (sel) sel.innerHTML = '<option value="">Не привязывать</option>'
@@ -32277,9 +32662,23 @@ async function openEcosystems() {
   txt('ecoList','<div class="spin-wrap"><div class="spin"></div></div>');
   ecoLoadRecs();
   try {
-    const rows = await api('/api/miniapp/ecosystems');
-    if (!rows.length) { txt('ecoList', empty('🌐','Экосистем нет','Объедините активы в управляемую сеть',{label:'➕ Создать экосистему',fn:'openEcosystemModal()'})); return; }
-    txt('ecoList', rows.map(r => `
+    const d = await api('/api/miniapp/ecosystems?limit=30&offset=0');
+    ECO_ROWS = listOf(d, 'ecosystems');
+    ECO_PAGE = (d && !Array.isArray(d) && d.page) ? d.page : null;
+    openEcosystemsRender();
+  } catch(e) { txt('ecoList', empty('⚠️','Ошибка',errRu(e), {label:'↺ Повторить',fn:retryCall('openEcosystems')})); }
+}
+
+// Отрисовка списка экосистем: читает глобалы, поэтому догрузка не
+// перезапрашивает первую страницу и не схлопывает уже показанное.
+function openEcosystemsRender() {
+  if (!ECO_ROWS.length) {
+    txt('ecoList', empty('🌐','Экосистем нет','Объедините активы в управляемую сеть',{label:'➕ Создать экосистему',fn:'openEcosystemModal()'}));
+    const _el = document.getElementById('m-eco-val');
+    if (_el) _el.textContent = '0 экосистем';
+    return;
+  }
+  txt('ecoList', ECO_ROWS.map(r => `
       <div class="row tap" onclick="openEcoDetail(${r.id},'${escJs(r.name)}')">
         <div class="row-ico" style="background:var(--bg-green-16)">${[...(ECO_TYPES[r.ecosystem_type]||'🌐')][0]}</div>
         <div class="row-body">
@@ -32293,10 +32692,27 @@ async function openEcosystems() {
           <span class="chev">›</span>
         </div>
       </div>
-    `).join(''));
-    document.getElementById('m-eco-val').textContent = rows.length+' экосистем';
-  } catch(e) { txt('ecoList', empty('⚠️','Ошибка',errRu(e), {label:'↺ Повторить',fn:retryCall('openEcosystems')})); }
+    `).join('')
+      + UI.more({shown: ECO_ROWS.length, total: ECO_PAGE ? ECO_PAGE.total : null,
+                 maybeMore: !!(ECO_PAGE && ECO_PAGE.has_more), fn: 'ecoMore',
+                 allLabel: 'Показаны все экосистемы'}));
+  const _ecoTotal = ECO_PAGE && ECO_PAGE.total != null ? ECO_PAGE.total : ECO_ROWS.length;
+  const _ecoEl = document.getElementById('m-eco-val');
+  if (_ecoEl) _ecoEl.textContent = num(_ecoTotal)+' экосистем';
 }
+
+// Догрузка экосистем. Кнопка UI.more звала ecoMore, а функции не было:
+// нажатие бросало ReferenceError и не делало НИЧЕГО — то есть «Загрузить ещё»
+// был нарисованной кнопкой. Поймал сторож кнопок без функции.
+async function ecoMore() {
+  try {
+    const d = await api('/api/miniapp/ecosystems?limit=30&offset=' + ECO_ROWS.length);
+    ECO_ROWS = ECO_ROWS.concat(listOf(d, 'ecosystems'));
+    ECO_PAGE = (d && !Array.isArray(d) && d.page) ? d.page : null;
+    openEcosystemsRender();
+  } catch (e) { toast('⚠️ ' + errRu(e, 'Не удалось подгрузить экосистемы')); }
+}
+
 let CUR_ECO_ID = null;
 // Состав экосистемы приходил типами и номерами строк («account #17»),
 // ролями и типами событий по-английски. Владелец читает интерфейс по-русски, и
@@ -33750,6 +34166,7 @@ async function submitMeshCreate() {
 // ── Narrative Engine ────────────────────────────────────
 // Страницы по СМЕЩЕНИЮ — см. комментарий у openNewUsers.
 let NARR_ROWS = [], NARR_OFFSET = 0;
+let _NARRD_POSTS = [], _NARRD_PAGE = null, _NARRD_CID = 0;   // посты одной нарратив-кампании
 async function openNarrativeMore() { NARR_OFFSET = NARR_ROWS.length; await openNarrative(true); }
 async function openNarrative(keep) {
   if (!keep) { NARR_ROWS = []; NARR_OFFSET = 0; push('s-narrative'); }
@@ -33783,9 +34200,12 @@ async function openNarrativeDetail(cid, topic) {
   document.getElementById('narr-name').textContent = topic||'Кампания';
   txt('narr-body', '<div class="spin-wrap"><div class="spin"></div></div>');
   try {
-    const d = await api(`/api/miniapp/narrative/${cid}`);
+    const d = await api(`/api/miniapp/narrative/${cid}?limit=50&offset=0`);
     const c = d.campaign;
-    const posts = d.posts||[];
+    _NARRD_CID = cid;
+    _NARRD_POSTS = d.posts||[];
+    _NARRD_PAGE = d.page||null;
+    const posts = _NARRD_POSTS;
     const typeLabel = {trend:'📈 Тренд',launch:'🚀 Запуск',awareness:'💡 Осведомлённость',counter:'⚔️ Контр'};
     let html = `
       <div class="lst" style="margin:12px 16px 0">
@@ -33800,28 +34220,43 @@ async function openNarrativeDetail(cid, topic) {
           ? `<button class="btn btn-g" onclick="resumeNarrative(${c.id})">▶ Возобновить</button>`
           : `<button class="btn btn-o" onclick="pauseNarrative(${c.id})">⏸ Пауза</button>`}
       </div>`:''}
-      <div class="sec" style="margin-top:8px">Посты (${posts.length})</div>
+      <div class="sec" style="margin-top:8px">Посты (${_NARRD_PAGE ? _NARRD_PAGE.total : posts.length})</div>
+      <div id="narrPosts"></div>
     `;
-    if (!posts.length) {
-      html += empty('📭','Постов нет','');
-    } else {
-      const anglE = {news:'📰',expert:'🎓',story:'📖',stats:'📊',opinion:'💬',question:'❓'};
-      html += '<div class="lst" style="margin:0 16px">';
-      posts.forEach(p => {
-        const [cls,lbl]=stb(p.status);
-        html += `
-          <div class="row">
-            <div class="row-body">
-              <div class="row-name">${anglE[p.angle]||'•'} ${esc(p.channel_username)} · ${esc(p.angle||'—')}</div>
-              <div class="row-val"><span class="badge ${cls}">${lbl}</span> · ${p.published_at?ago(p.published_at):ago(p.scheduled_at)}</div>
-            </div>
-          </div>
-        `;
-      });
-      html += '</div>';
-    }
     txt('narr-body', html);
+    narrPostsRender();
   } catch(e) { txt('narr-body', empty('⚠️','Ошибка',errRu(e), {label:'↺ Повторить',fn:retryCall('openNarrativeDetail', cid, topic)})); }
+}
+
+// Посты кампании листаются. Было жёсткое LIMIT 50: у кампании на три месяца
+// посты за пятидесятым не показывались, а подпись «Посты (50)» выдавала это
+// за всё их число. Теперь число берётся из конверта страницы, а не из длины
+// отданного куска.
+function narrPostsRender() {
+  const box = document.getElementById('narrPosts');
+  if (!box) return;
+  if (!_NARRD_POSTS.length) { box.innerHTML = empty('📭','Постов нет','Кампания ещё не разложила посты по каналам и времени'); return; }
+  const anglE = {news:'📰',expert:'🎓',story:'📖',stats:'📊',opinion:'💬',question:'❓'};
+  box.innerHTML = '<div class="lst" style="margin:0 16px">'
+    + _NARRD_POSTS.map(p => {
+        const [cls,lbl]=stb(p.status);
+        return `<div class="row"><div class="row-body">
+            <div class="row-name">${anglE[p.angle]||'•'} ${esc(p.channel_username)} · ${esc(p.angle||'—')}</div>
+            <div class="row-val"><span class="badge ${cls}">${lbl}</span> · ${p.published_at?ago(p.published_at):ago(p.scheduled_at)}</div>
+          </div></div>`;
+      }).join('')
+    + '</div>'
+    + UI.more({shown: _NARRD_POSTS.length, total: _NARRD_PAGE ? _NARRD_PAGE.total : null,
+               maybeMore: !!(_NARRD_PAGE && _NARRD_PAGE.has_more), fn: 'narrPostsMore',
+               allLabel: 'Показаны все посты кампании'});
+}
+async function narrPostsMore() {
+  try {
+    const d = await api(`/api/miniapp/narrative/${_NARRD_CID}?limit=50&offset=` + _NARRD_POSTS.length);
+    _NARRD_POSTS = _NARRD_POSTS.concat(d.posts || []);
+    _NARRD_PAGE = d.page || null;
+    narrPostsRender();
+  } catch (e) { toast('⚠️ ' + errRu(e, 'Не удалось подгрузить посты')); }
 }
 
 async function pauseNarrative(cid) {
@@ -35480,6 +35915,40 @@ async function mirrorDisconnect() {
   }
 }
 
+// Переключатель темы. Рисуем из кода, а не разметкой: подпись выбранного
+// пункта должна совпадать с тем, что реально применено, а применяет тему
+// бутстрап в начале документа (он же знает про «авто»).
+function renderThemeRow() {
+  const box = document.getElementById('set-theme');
+  if (!box || typeof UI === 'undefined' || !UI.segmented) return;
+  const mode = (typeof window.__themeMode === 'function') ? window.__themeMode() : 'auto';
+  box.innerHTML = UI.segmented(
+    [{ value: 'auto', label: 'Авто' }, { value: 'light', label: '☀️ Светлая' },
+     { value: 'dark', label: '🌙 Тёмная' }],
+    mode, 'setAppTheme');
+}
+
+// Кнопка «очистить память» спрашивает ДО, а не после: шаг необратим, и
+// названо в вопросе ровно то, что исчезнет.
+async function forgetLocalData() {
+  if (!await askConfirm('Забыть закреплённые и недавние разделы, историю поиска, ' +
+                        '«продолжить», кэш списков и выбор темы на этом устройстве? ' +
+                        'Данные в облаке останутся.')) return;
+  const n = (typeof uxForgetLocal === 'function') ? uxForgetLocal() : 0;
+  if (typeof window.__setTheme === 'function') window.__setTheme('auto');
+  renderThemeRow();
+  try { uxPinnedHome(); uxResumeHome(); } catch(_) {}
+  const body = document.getElementById('navBody');
+  if (body) { body.dataset.built = ''; try { buildDrawer(); } catch(_) {} }
+  toast(n ? '🧹 Забыто записей: ' + n : '🧹 Забывать было нечего');
+}
+
+function setAppTheme(mode) {
+  if (typeof window.__setTheme === 'function') window.__setTheme(mode);
+  renderThemeRow();
+  try { tg.HapticFeedback?.impactOccurred('light'); } catch(_) {}
+}
+
 async function openSettings() {
   push('s-settings');
   const uid = window._tgUid || (tg.initDataUnsafe?.user?.id);
@@ -35501,6 +35970,7 @@ async function openSettings() {
   try { renderFullscreenRow(); } catch(_) {}
   try { loadMirror(); } catch(_) {}
   try { renderFormMemoryStatus(); } catch(_) {}
+  try { renderThemeRow(); } catch(_) {}
   document.getElementById('m-settings-val').textContent = '⚙️';
   try {
     // Источник правды — бэкенд (notification_settings + get_proxy_policy). Раньше
@@ -35796,28 +36266,49 @@ function renderBillingPlans() {
       </div>
     `).join(''));
 }
-async function _billingHistory() {
+async function _billingHistory(more) {
+  // История оплат листается. Раньше экран брал первые двадцать строк и
+  // показывал их как всю историю: владелец, сверяющий списания с продлениями,
+  // не мог дойти до двадцать первой оплаты вообще.
+  if (!more) { PAY_ROWS = []; PAY_PAGE = null; }
   try {
-    const hist = await api('/api/miniapp/payments');
-    if (!hist || !hist.length) {
-      txt('billingHistory', empty('💳','Платежей нет','История оплат появится здесь'));
-    } else {
-      txt('billingHistory', hist.map(p=>`
-        <div class="row">
-          <div class="row-ico" style="background:rgba(52,211,153,.12)">💳</div>
-          <div class="row-body">
-            <div class="row-name">${esc(({paid:'Подписка',starter:'Подписка',pro:'Подписка',enterprise:'Подписка',strike:'Массовые жалобы',host_server:'Аренда сервера'})[p.plan]||p.plan||'—')}${Number(p.period_months)>0?' · '+p.period_months+' мес.':''}</div>
-            <div class="row-val">${p.currency||'—'} · $${p.amount_usd||0}</div>
-            <div class="row-val" style="color:var(--hint)">${ago(p.created_at)}</div>
-          </div>
-          <div class="row-right"><span class="badge ${p.status==='confirmed'?'b-gr':'b-gy'}">${({confirmed:'✓ Оплачен',pending:'⏳ Ждёт оплаты',confirming:'⏳ Подтверждается',expired:'Истёк',failed:'Ошибка'})[p.status]||'—'}</span></div>
-        </div>
-      `).join(''));
-    }
+    const d = await api('/api/miniapp/payments?limit=20&offset=' + PAY_ROWS.length);
+    PAY_ROWS = PAY_ROWS.concat(d.items || []);
+    PAY_PAGE = d.page || null;
+    _billingHistoryRender();
   } catch(e) {
+    if (PAY_ROWS.length) { toast('⚠️ ' + errRu(e, 'Не удалось подгрузить')); return; }
     txt('billingHistory', empty('⚠️','Ошибка загрузки истории',errRu(e),{label:'↺ Повторить',fn:'openBilling()'}));
   }
 }
+
+function _billingHistoryRender() {
+  if (!PAY_ROWS.length) {
+    txt('billingHistory', empty('💳','Платежей нет','История оплат появится здесь'));
+    return;
+  }
+  const PLANS = {paid:'Подписка',starter:'Подписка',pro:'Подписка',enterprise:'Подписка',
+                 strike:'Массовые жалобы',host_server:'Аренда сервера'};
+  const ST = {confirmed:'✓ Оплачен',pending:'⏳ Ждёт оплаты',confirming:'⏳ Подтверждается',
+              expired:'Истёк',failed:'Ошибка'};
+  txt('billingHistory', PAY_ROWS.map(p => `
+        <div class="row">
+          <div class="row-ico" style="background:rgba(52,211,153,.12)">💳</div>
+          <div class="row-body">
+            <div class="row-name">${esc(PLANS[p.plan]||p.plan||'—')}${Number(p.period_months)>0?' · '+esc(p.period_months)+' мес.':''}</div>
+            <div class="row-val">${esc(p.currency||'—')} · $${esc(p.amount_usd||0)}</div>
+            <div class="row-val" style="color:var(--hint)">${esc(ago(p.created_at))}</div>
+          </div>
+          <div class="row-right"><span class="badge ${p.status==='confirmed'?'b-gr':'b-gy'}">${esc(ST[p.status]||'—')}</span></div>
+        </div>
+      `).join('')
+    + UI.more({shown: PAY_ROWS.length, total: PAY_PAGE ? PAY_PAGE.total : null,
+               maybeMore: !!(PAY_PAGE && PAY_PAGE.has_more), fn: 'billingHistoryMore',
+               allLabel: 'Показаны все платежи'}));
+}
+
+function billingHistoryMore() { _billingHistory(true); }
+
 function initPayment(planKey, label, price) {
   // Имя бота — только из конфигурации сервера. Раньше при неизвестном имени
   // открывался @infragram_bot — чужой бот, которому человек понёс бы деньги.
@@ -38174,7 +38665,9 @@ function renderAudSegChart(segments) {
 <script src="screens/bot_mesh.js"></script>
 <script src="screens/crm_inbox.js"></script>
 <script src="screens/vault_dialogs.js"></script>
+<script src="screens/quick_replies.js"></script>
 <script src="screens/vault_connect.js"></script>
+<script src="screens/vault_promo.js"></script>
 <script src="screens/resource_actions.js"></script>
 <script src="screens/money_funnel.js"></script>
 <script src="screens/cohorts.js"></script>
@@ -38194,5 +38687,11 @@ function renderAudSegChart(segments) {
 <script src="screens/infra.js"></script>
 <script src="screens/clone_adapt.js"></script>
 <script src="screens/persona_peers.js"></script>
+<script src="screens/notifications_feed.js"></script>
+<script src="screens/ux_kit.js"></script>
+<script src="screens/tab_badges.js"></script>
+<script src="screens/find_all.js"></script>
+<script src="screens/op_live_bar.js"></script>
+<script src="screens/planner.js"></script>
 </body>
 </html>

@@ -33,7 +33,7 @@ BOTMENU = (ROOT / "bot" / "handlers" / "botmother_menu.py").read_text(encoding="
 
 
 def _catalog() -> str:
-    s = HTML.index('<div class="screen" id="s-more">')
+    s = HTML.index('<div class="screen" id="s-more"')
     e = HTML.index("<!-- Админ-панель (только для админов) -->", s)
     return HTML[s:e]
 

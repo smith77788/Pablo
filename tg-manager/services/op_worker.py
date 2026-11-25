@@ -1138,7 +1138,7 @@ _OP_NOTIFY_DEDUP_S = 48 * 3600
 
 async def _notify_owner_about_op(
     pool: "asyncpg.Pool", bot, owner_id: int | None, text: str,
-    dedup_key: str | None = None,
+    dedup_key: str | None = None, op_id: int | None = None,
 ) -> None:
     """Сказать владельцу о судьбе его операции. Никогда не бросает.
 
@@ -1167,8 +1167,11 @@ async def _notify_owner_about_op(
             # Fail-open: сбой анти-спама не повод молчать о судьбе операции.
             log_exc_swallow(log, f"op_worker: анти-повтор {dedup_key} не сработал")
     try:
+        # Строка в ленте мини-аппа ведёт в саму операцию: без этого владелец
+        # читал «Операция #412» и шёл искать её руками через очередь.
         _delivered = await db.notify_if_enabled(
-            pool, bot, owner_id, "op_complete", text, dedup_key=dedup_key)
+            pool, bot, owner_id, "op_complete", text, dedup_key=dedup_key,
+            link=({"fn": "openOpDetail", "arg": int(op_id)} if op_id else None))
     except Exception:
         log_exc_swallow(log, f"op_worker: уведомление владельцу {owner_id} не ушло")
         _delivered = False
@@ -1928,7 +1931,7 @@ async def _finish_fleet_starved_op(
          f"❌ <b>Операция #{op_id}</b> не запустилась: {waited_min} мин не "
          f"удавалось начать работу.\n\nПомеха: {_held}\n\nЗапустите её "
          f"снова, когда помеха уйдёт."),
-        dedup_key=f"no-accounts:{op_id}",
+        dedup_key=f"no-accounts:{op_id}", op_id=op_id,
     )
 
 
@@ -2003,7 +2006,7 @@ async def _defer_op_for_flood(
                      + (f"\n\n<i>{reason[:200]}</i>" if reason else ""))
         await _notify_owner_about_op(
             pool, bot, owner_id, _text,
-            dedup_key=f"flood-defer:{op_id}",
+            dedup_key=f"flood-defer:{op_id}", op_id=op_id,
         )
 
 
@@ -2054,7 +2057,7 @@ async def _resume_op_over_ceiling(
         f"продолжится автоматически с того же места.\n\nЭто не ошибка: большой "
         f"рассылке/набору положено идти часами на безопасном темпе. Отменять и "
         f"запускать заново не нужно — повтор только сбил бы прогресс.",
-        dedup_key=f"ceiling-resume:{op_id}",
+        dedup_key=f"ceiling-resume:{op_id}", op_id=op_id,
     )
 
 
@@ -3111,7 +3114,7 @@ async def _maybe_requeue(
             f"Она возобновится сама, отменять и запускать заново не нужно — "
             f"повторный запуск только добавит ограничений."
             + (f"\n\n<i>{str(exc)[:200]}</i>" if str(exc) else ""),
-            dedup_key=f"retry:{op_id}:{retry_count}",
+            dedup_key=f"retry:{op_id}:{retry_count}", op_id=op_id,
         )
     return True
 
@@ -3484,6 +3487,7 @@ async def _progress_monitor(
                             f"⏳ <b>Операция #{op_id}</b> — в процессе…\n"
                             f"<code>{op_type}</code>",
                             dedup_key=f"progress:{op_id}",
+                            link={"fn": "openOpDetail", "arg": op_id},
                         )
                     continue
                 _ticks_without_total = 0
@@ -3511,6 +3515,7 @@ async def _progress_monitor(
                         f"[{bar}] {done}/{total}\n"
                         f"<code>{op_type}</code> {speed_text} {eta_text}",
                         dedup_key=f"progress:{op_id}",
+                        link={"fn": "openOpDetail", "arg": op_id},
                     )
                 
                 # Milestone notifications (25/50/75%)
@@ -3726,7 +3731,7 @@ async def _finish_poisoned_op(pool: "asyncpg.Pool", row, *, source: str,
          f"❌ <b>Операция #{op_id}</b> остановлена: {_times(_MAX_REVIVES)} "
          f"подряд она прерывалась, не сделав ни одной цели.\n\nПроверьте "
          f"аккаунты и прокси — обычно причина там."),
-        dedup_key=f"poisoned:{op_id}",
+        dedup_key=f"poisoned:{op_id}", op_id=op_id,
     )
 
 
@@ -6529,7 +6534,7 @@ async def _run_op_task_guarded(pool: asyncpg.Pool, bot: Bot, row: dict) -> None:
                         f"{str(e)[:150]}\n\nПопробуйте запустить её снова."
                         + (f"\n\nУже отработанные цели ({_pro_ok}) повтор "
                            f"пропустит." if _pro_ok else ""),
-                        dedup_key=f"prologue-fail:{op_id}",
+                        dedup_key=f"prologue-fail:{op_id}", op_id=op_id,
                     )
         except Exception:
             log_exc_swallow(log, f"op_worker: разбор сбоя пролога op={op_id}")
@@ -10927,6 +10932,7 @@ async def _exec_global_presence_channel(
                         f"🌍 <b>Создание каналов (план #{plan_id}):</b> {created_count + failed_count}/{total}\n"
                         f"✅ Создано: {created_count} | ❌ Ошибок: {failed_count}",
                         dedup_key=f"progress:{op_id}",
+                        link={"fn": "openOpDetail", "arg": op_id},
                     )
                 except Exception:
                     log_exc_swallow(
@@ -11747,6 +11753,7 @@ async def _exec_global_presence_bot(
                         f"🤖 <b>Создание ботов (план #{plan_id}):</b> {created_count + failed_count}/{total}\n"
                         f"✅ Создано: {created_count} | ❌ Ошибок: {failed_count}",
                         dedup_key=f"progress:{op_id}",
+                        link={"fn": "openOpDetail", "arg": op_id},
                     )
                 except Exception:
                     log_exc_swallow(
@@ -12488,6 +12495,7 @@ async def _exec_bulk_create_channels(
                         f"📡 <b>Массовое создание каналов #{op_id}:</b> {created_count + failed_count}/{count}\n"
                         f"✅ Создано: {created_count} | ❌ Ошибок: {failed_count}",
                         dedup_key=f"progress:{op_id}",
+                        link={"fn": "openOpDetail", "arg": op_id},
                     )
                 except Exception:
                     log_exc_swallow(
@@ -27270,14 +27278,6 @@ async def _exec_run_broadcast(
     buttons = params.get("buttons") or None
     silent = bool(params.get("silent"))
     segment = str(params.get("segment") or "all")
-    _seg_sql = {
-        "active_7d": " AND last_seen >= now() - interval '7 days'",
-        "active_30d": " AND last_seen >= now() - interval '30 days'",
-        # Спящие: ДНК аудитории советует реактивационную рассылку, а выбрать
-        # эту аудиторию было нечем. Порог 14 дней — тот же, по которому
-        # audience_dna считает churn_risk_pct.
-        "inactive_14d": " AND (last_seen IS NULL OR last_seen < now() - interval '14 days')",
-    }.get(segment, "")
 
     if not bot_id or not text:
         return {"status": "failed", "summary": "⚠️ bot_id и text обязательны"}
@@ -27300,10 +27300,11 @@ async def _exec_run_broadcast(
         if isinstance(explicit_ids, list) and explicit_ids:
             user_ids = [int(x) for x in explicit_ids]
         else:
-            user_ids = [r["user_id"] for r in await pool.fetch(
-                "SELECT user_id FROM bot_users WHERE bot_id=$1 AND is_active=TRUE "
-                "AND is_blocked=FALSE AND suspect=FALSE" + _seg_sql, int(bot_id)
-            )]
+            # Условие сегмента — общая дверь broadcaster.broadcast_audience_ids:
+            # второй список условий означал бы, что «Спящим» в двух местах
+            # продукта — это две разные аудитории.
+            from services.broadcaster import broadcast_audience_ids
+            user_ids = await broadcast_audience_ids(pool, int(bot_id), segment)
     except Exception as exc:
         return {"status": "failed", "summary": f"⚠️ Ошибка получения подписчиков: {exc}"}
 
@@ -27319,7 +27320,10 @@ async def _exec_run_broadcast(
     # обе ветки ниже: они уже разъезжались — ветка с готовым broadcast_id
     # считала подмножеством только сегмент, и список недоставленных в строку
     # рассылки не попадал вовсе.
-    _is_subset = bool(_seg_sql) or bool(isinstance(explicit_ids, list) and explicit_ids)
+    # «Это подмножество аудитории?» — спрашиваем у того же списка сегментов,
+    # что и выборка: иначе ответ разъедется с тем, кого реально выбрали.
+    from services.broadcaster import BROADCAST_SEGMENTS as _SEG
+    _is_subset = bool(_SEG.get(segment)) or bool(isinstance(explicit_ids, list) and explicit_ids)
 
     # Create/reuse broadcast record
     if not broadcast_id:

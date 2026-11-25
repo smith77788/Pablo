@@ -85,9 +85,34 @@ const UI = (() => {
       `<button type="button" class="ui-seg-btn${o.value === active ? ' on' : ''}" aria-pressed="${o.value === active}" ` +
       `onclick="${call(fn, o.value)}">${uiEsc(o.label)}</button>`).join('') + `</div>`;
   }
+  // Догрузка списка — ОДНА дверь на все экраны.
+  //
+  // Почти каждый список мини-аппа просил у сервера первые 30–100 строк и
+  // рисовал их без единого слова о том, что строк больше: «показано 30» и
+  // «всего 30» выглядят на экране одинаково, и владелец считал, что у него
+  // тридцать ботов. Поэтому подпись здесь обязательная, а кнопка — только
+  // когда звать есть куда.
+  //
+  // total === null означает «сервер не сказал сколько всего»: тогда честно
+  // пишем только показанное, а кнопку рисуем, пока последняя страница пришла
+  // полной (экран передаёт maybeMore).
+  function more({ shown, total, fn, maybeMore, allLabel }) {
+    const s = Number(shown) || 0;
+    const t = (total === null || total === undefined || !isFinite(Number(total)))
+      ? null : Number(total);
+    const hasMore = t === null ? !!maybeMore : s < t;
+    if (!hasMore) {
+      if (!s) return '';
+      return `<div class="ui-more"><div class="ui-more-note">${uiEsc(allLabel || 'Показано всё')}: ${uiNum(s)}</div></div>`;
+    }
+    const note = t === null ? `Показано ${uiNum(s)}` : `Показано ${uiNum(s)} из ${uiNum(t)}`;
+    return `<div class="ui-more"><div class="ui-more-note">${note}</div>` +
+      (fn ? `<button type="button" class="ui-more-btn" onclick="${call(fn)}">Загрузить ещё</button>` : '') +
+      `</div>`;
+  }
   function skeleton(n) { return `<div class="ui-stats">${'<div class="ui-skel"></div>'.repeat(n || 4)}</div>`; }
   // Внутренние имена с префиксом ui*: function esc/num уже объявлены в
   // index.html, и одноимённые объявления ловит test_miniapp_no_dup_functions.
   return { esc: uiEsc, call, num: uiNum, block, group, stat, stats, alert, button, sectionTile, sections, ok,
-           empty: uiEmpty, skeleton, segmented };
+           empty: uiEmpty, skeleton, segmented, more };
 })();

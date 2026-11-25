@@ -52,10 +52,16 @@ async def test_counts_on_real_schema_and_concurrent_messages_do_not_deadlock():
 
     pool = await asyncpg.create_pool(DSN, min_size=1, max_size=8)
     try:
-        await pool.execute("DELETE FROM managed_bots WHERE bot_id=$1", BOT_ID)
+        # Токен у managed_bots УНИКАЛЕН, поэтому он обязан быть своим у каждого
+        # файла: общий 'x' делал набор красным в зависимости от порядка файлов
+        # (другой тест вставлял тот же токен под своим bot_id, и вставка падала
+        # UniqueViolation — зелено в одиночку, красно в наборе).
+        token = f"test-keyword-stats-{BOT_ID}"
         await pool.execute(
-            "INSERT INTO managed_bots(bot_id, token, added_by) VALUES($1, 'x', 1)",
-            BOT_ID)
+            "DELETE FROM managed_bots WHERE bot_id=$1 OR token=$2", BOT_ID, token)
+        await pool.execute(
+            "INSERT INTO managed_bots(bot_id, token, added_by) VALUES($1, $2, 1)",
+            BOT_ID, token)
 
         await db.record_message_keywords(pool, BOT_ID, "Привет мир, привет!")
         await db.record_message_keywords(pool, BOT_ID, "мир да")

@@ -12,7 +12,7 @@ HTML = (Path(__file__).resolve().parent.parent / "mini_app" / "index.html").read
 
 
 def _screen(sid: str) -> str:
-    s = HTML.index(f'<div class="screen" id="{sid}">')
+    s = HTML.index(f'<div class="screen" id="{sid}"')
     e = HTML.find('<div class="screen" id="', s + 10)
     return HTML[s:e]
 

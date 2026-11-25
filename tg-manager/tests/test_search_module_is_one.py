@@ -39,7 +39,7 @@ TABS = {  # ключ вкладки → (экран, функция, котор�
 
 
 def _catalog() -> str:
-    s = HTML.index('<div class="screen" id="s-more">')
+    s = HTML.index('<div class="screen" id="s-more"')
     return HTML[s:HTML.index("<!-- Админ-панель (только для админов) -->", s)]
 
 
@@ -76,7 +76,7 @@ def test_every_tab_is_a_live_screen_with_the_tab_strip():
     for key, (sid, fn) in TABS.items():
         assert re.search(r"key:'" + key + r"'.*?sid:'" + sid + r"'.*?" + fn + r"\(\)", reg), (
             f"вкладка {key} не ведёт на {sid} через {fn}()")
-        s = HTML.index(f'<div class="screen" id="{sid}">')
+        s = HTML.index(f'<div class="screen" id="{sid}"')
         head = HTML[s:s + 1200]
         assert '<div class="hdr-title">🔎 Поиск Telegram</div>' in head, (
             f"{sid}: шапка не называет модуль — непонятно, где находишься")

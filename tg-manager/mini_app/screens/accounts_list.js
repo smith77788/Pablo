@@ -63,9 +63,29 @@ async function reauthAccount(id) {
   } catch(e) { toast('⚠️ '+errRu(e,'Ошибка')); }
 }
 
+// Кэшируем только НЕОТФИЛЬТРОВАННУЮ первую страницу: показать из кэша срез
+// («спамблок», поиск по номеру) значило бы показать не то, что выбрано сейчас.
+function _accUnfiltered() {
+  return !ACC_SEARCH && (!ACC_FILTER || ACC_FILTER === 'all') && !ACC_STAGE_FILTER
+    && !ACC_POOL_FILTER && !ACC_GEO_FILTER && !ACC_TAG_FILTER;
+}
+
 async function loadAccounts() {
   fleetToolsInit('accounts');
   loadAccTags();
+  // Экран открывается последними данными, а не спиннером: ответ по сотне
+  // аккаунтов со статистикой идёт секунды, и всё это время список был пуст.
+  // Кэш называет себя полоской «показаны последние данные» (ux_kit.uxStale).
+  if (_accUnfiltered() && !CUR_ACCS.length) {
+    const c = getCached('infragram_cache_accounts');
+    if (c && (c.accounts || []).length) {
+      CUR_ACCS = c.accounts;
+      ACC_OFFSET = CUR_ACCS.length;
+      updateAccKpi(CUR_ACCS, c.stats);
+      renderAccounts(CUR_ACCS);
+      if (typeof uxStale === 'function') uxStale('accList', true);
+    }
+  }
   // Accounts and channels load independently — one failure doesn't break the other
   api(_accQuery(0)).then(ad => {
     catalogResourceMenus.account = ad.resource_menu === true;
@@ -81,7 +101,16 @@ async function loadAccounts() {
     renderStageChips(ad.stats && ad.stats.by_stage);
     renderAccounts(CUR_ACCS);
     renderLoadMore(ad.page);
+    if (typeof uxStale === 'function') uxStale('accList', false);
+    if (_accUnfiltered()) {
+      setCache('infragram_cache_accounts',
+               {accounts: CUR_ACCS.slice(0, 60), stats: ad.stats});
+    }
   }).catch(e => {
+    if (typeof uxStale === 'function') uxStale('accList', false);
+    // Кэш уже на экране — затирать его ошибкой нельзя: показанные строки
+    // честнее пустоты, а про обрыв скажет полоска «нет сети».
+    if (CUR_ACCS.length) { toast('⚠️ ' + errRu(e, 'Не удалось обновить список')); return; }
     document.getElementById('accList').innerHTML=errHtml(errRu(e),'loadAccounts()');
   });
   loadAccSurvival();

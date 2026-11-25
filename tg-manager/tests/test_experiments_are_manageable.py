@@ -113,16 +113,26 @@ def test_verdict_block_is_honest_about_small_samples():
     assert "vd.leader" in v
 
 
+def _list_screen() -> str:
+    """Экран списка экспериментов целиком: открытие, страница и отрисовка.
+
+    Список стал листаться, и запрос с отрисовкой уехали в свои функции
+    (`expLoadPage`, `expRender`). Мерка, читающая только `openExperiments`,
+    видит четыре строки и объявляет живой экран тупиком — чинить надо мерку.
+    """
+    return "\n".join(_fn(n) for n in ("openExperiments", "expLoadPage", "expRender"))
+
+
 def test_detail_screen_offers_a_retry_on_error():
     body = _fn("openExpDetail")
     assert re.search(r"errHtml\(errRu\(e\)\s*,", body), "ошибка без «Повторить»"
-    lst = _fn("openExperiments")
+    lst = _list_screen()
     assert re.search(r"errHtml\(errRu\(e\)\s*,", lst), \
         "список экспериментов: ошибка без «Повторить»"
 
 
 def test_empty_list_offers_to_create():
-    lst = _fn("openExperiments")
+    lst = _list_screen()
     assert "openExpModal()" in lst, "«Нет экспериментов» — тупик без действия"
 
 
