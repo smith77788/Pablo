@@ -36,6 +36,7 @@ from services import mini_app_invite
 from services import mini_app_channels
 from services import mini_app_notify_routes
 from services import mini_app_monitor
+from services import mini_app_planner
 from services import mini_app_operations
 from services import mini_app_dashboard
 from services import mini_app_dm
@@ -10377,6 +10378,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     mini_app_media.setup_routes(app, pool)
     mini_app_va.setup_routes(app, pool)
     mini_app_monitor.setup_routes(app, pool)
+    mini_app_planner.setup_routes(app, pool)
     # Analytics
     # Subscription
     app.router.add_get("/api/miniapp/subscription", subscription)

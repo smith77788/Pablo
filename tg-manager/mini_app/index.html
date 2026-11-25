@@ -2317,6 +2317,7 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
       <button class="btn btn-s" onclick="openNetBcModal()" style="flex:1 1 45%;font-size:13px;padding:9px 6px" title="Один текст подписчикам всех или выбранных ботов">🕸 По ботам</button>
     </div>
     <div style="display:flex;gap:8px;padding:0 0 2px">
+      <button class="btn btn-s" onclick="openPlanner()" style="flex:1 1 auto;font-size:13px;padding:9px 6px">🗓 Запланировано</button>
       <button class="btn btn-s" onclick="openBroadcastSchedule()" style="flex:1 1 auto;font-size:13px;padding:9px 6px">📅 Расписание</button>
       <button class="btn btn-s" onclick="openExperiments()" style="flex:1 1 auto;font-size:13px;padding:9px 6px">🧪 A/B Тесты</button>
       <button class="btn btn-s" onclick="openTemplates()" style="flex:1 1 auto;font-size:13px;padding:9px 6px">📝 Шаблоны</button>
@@ -2648,6 +2649,14 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
       <div class="mgmt-tile" onclick="goTab('broadcasts')">
         <div class="mgmt-tile-ico">📨</div>
         <div class="mgmt-tile-lbl">Рассылки</div>
+        <div class="mgmt-tile-val"></div>
+      </div>
+      <!-- «Запланировано» — всё, что продукт сделает сам по времени: отложенные
+           рассылки ботов, отложенные публикации и повторяемые круги
+           (screens/planner.js, services/mini_app_planner.py). -->
+      <div class="mgmt-tile" onclick="openPlanner()">
+        <div class="mgmt-tile-ico">🗓</div>
+        <div class="mgmt-tile-lbl">Запланировано</div>
         <div class="mgmt-tile-val"></div>
       </div>
       <!-- Одни «Сценарии» с вкладками Сценарии / Авто-воронки (SCREEN_MODULES.scenarios):
@@ -38674,5 +38683,6 @@ function renderAudSegChart(segments) {
 <script src="screens/tab_badges.js"></script>
 <script src="screens/find_all.js"></script>
 <script src="screens/op_live_bar.js"></script>
+<script src="screens/planner.js"></script>
 </body>
 </html>
