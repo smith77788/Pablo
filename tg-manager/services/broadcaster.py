@@ -1208,12 +1208,17 @@ async def resend_undelivered(pool: asyncpg.Pool, owner_id: int, bc_id: int) -> d
 
 # Сегменты аудитории бота — ОДИН список условий на продукт.
 #
+# Имя намеренно не `segment_audience`: так зовётся функция в
+# `services/audience_analytics`, и она отдаёт СТАТИСТИКУ сегментов, а не
+# идентификаторы получателей. Два одинаковых имени рядом — приглашение
+# выбрать не ту функцию по подписи (в этом проекте так уже выбирали).
+#
 # Это условие стояло только внутри исполнителя рассылки
 # (`op_worker._exec_run_broadcast`), поэтому любой второй путь, которому нужна
 # та же аудитория (A/B-рассылка), выбирал между «взять всех» и «списать
 # условие себе». Второй список условий означал бы, что «Спящим» в двух местах
 # продукта — это две разные аудитории.
-SEGMENT_SQL = {
+BROADCAST_SEGMENTS = {
     "active_7d": " AND last_seen >= now() - interval '7 days'",
     "active_30d": " AND last_seen >= now() - interval '30 days'",
     # Спящие: порог 14 дней — тот же, по которому audience_dna считает churn_risk_pct.
@@ -1221,9 +1226,9 @@ SEGMENT_SQL = {
 }
 
 
-async def segment_audience(pool, bot_id: int, segment: str | None = None) -> list[int]:
+async def broadcast_audience_ids(pool, bot_id: int, segment: str | None = None) -> list[int]:
     """Активные подписчики бота, суженные сегментом. Пустой/незнакомый — все."""
-    cond = SEGMENT_SQL.get(str(segment or "all"), "")
+    cond = BROADCAST_SEGMENTS.get(str(segment or "all"), "")
     rows = await pool.fetch(
         "SELECT user_id FROM bot_users WHERE bot_id=$1 AND is_active=TRUE "
         "AND is_blocked=FALSE AND suspect=FALSE" + cond, int(bot_id))
@@ -1269,7 +1274,7 @@ async def ab_test_broadcast(
     if not bot_row:
         return {"ok": False, "error": "Бот не найден"}
 
-    user_ids = await segment_audience(pool, bot_id, segment)
+    user_ids = await broadcast_audience_ids(pool, bot_id, segment)
     if not user_ids:
         return {"ok": False, "error": "В этом сегменте нет активных подписчиков"}
 

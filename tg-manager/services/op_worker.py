@@ -27300,11 +27300,11 @@ async def _exec_run_broadcast(
         if isinstance(explicit_ids, list) and explicit_ids:
             user_ids = [int(x) for x in explicit_ids]
         else:
-            # Условие сегмента — общая дверь broadcaster.segment_audience:
+            # Условие сегмента — общая дверь broadcaster.broadcast_audience_ids:
             # второй список условий означал бы, что «Спящим» в двух местах
             # продукта — это две разные аудитории.
-            from services.broadcaster import segment_audience
-            user_ids = await segment_audience(pool, int(bot_id), segment)
+            from services.broadcaster import broadcast_audience_ids
+            user_ids = await broadcast_audience_ids(pool, int(bot_id), segment)
     except Exception as exc:
         return {"status": "failed", "summary": f"⚠️ Ошибка получения подписчиков: {exc}"}
 
@@ -27322,7 +27322,7 @@ async def _exec_run_broadcast(
     # рассылки не попадал вовсе.
     # «Это подмножество аудитории?» — спрашиваем у того же списка сегментов,
     # что и выборка: иначе ответ разъедется с тем, кого реально выбрали.
-    from services.broadcaster import SEGMENT_SQL as _SEG
+    from services.broadcaster import BROADCAST_SEGMENTS as _SEG
     _is_subset = bool(_SEG.get(segment)) or bool(isinstance(explicit_ids, list) and explicit_ids)
 
     # Create/reuse broadcast record

@@ -31864,11 +31864,11 @@ async function openGpCreateModal(presetAssetType) {
   try {
     const ecos = await api('/api/miniapp/ecosystems?limit=300');
     const sel = document.getElementById('gpEcosystem');
-    // /api/miniapp/ecosystems отдаёт МАССИВ (экран «Экосистемы» так его и
-    // читает: rows.length, rows.map). Здесь читали ecos.ecosystems — у массива
-    // такого поля нет, выражение всегда давало [], и в выпадашке навсегда
-    // оставалось одно «Не привязывать». То есть привязать к экосистеме было
-    // нельзя, сколько бы их владелец ни создал.
+    // Раньше /api/miniapp/ecosystems отдавал МАССИВ, а здесь читали
+    // ecos.ecosystems — у массива такого поля нет, выражение всегда давало [],
+    // и в выпадашке навсегда оставалось одно «Не привязывать». С 25.11.2026
+    // ручка отдаёт конверт страницы ({ecosystems, page}), поэтому читаем обе
+    // формы одной дверью listOf — она и есть защита от следующей такой смены.
     const ecoList = listOf(ecos, 'ecosystems');
     sel.innerHTML = '<option value="">Не привязывать</option>' +
       ecoList.map(e=>`<option value="${Number(e.id)}">${esc(e.name||'Экосистема #'+e.id)}</option>`).join('');

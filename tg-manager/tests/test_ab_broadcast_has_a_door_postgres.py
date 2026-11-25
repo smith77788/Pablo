@@ -16,7 +16,7 @@
 сегмент, ни про кнопки, ни про тихую отправку, ни про отсрочку. Экран рассылки
 всё это обещает, поэтому «Спящим, через 3 часа» ушло бы всем и сразу. Условие
 сегмента жило внутри исполнителя — теперь это одна дверь
-(`broadcaster.segment_audience`), которую читают оба пути.
+(`broadcaster.broadcast_audience_ids`), которую читают оба пути.
 """
 from __future__ import annotations
 
@@ -41,6 +41,11 @@ def _run(coro):
 
 
 async def _clean(pool):
+    # Квота бесплатного тарифа живёт в отдельной таблице и НЕ исчезает вместе
+    # с операциями: без этой уборки второй прогон файла падает отказом
+    # «бесплатные операции закончились», а причина выглядит как дефект кода.
+    await pool.execute(
+        "DELETE FROM free_op_usage WHERE owner_id = ANY($1::bigint[])", [OWNER, OWNER + 1])
     await pool.execute("DELETE FROM operation_queue WHERE owner_id=$1", OWNER)
     await pool.execute("DELETE FROM broadcasts WHERE bot_id=$1", BOT)
     await pool.execute("DELETE FROM bot_users WHERE bot_id=$1", BOT)
@@ -175,4 +180,4 @@ def test_the_segment_condition_lives_in_one_place():
     worker = (root / "services" / "op_worker.py").read_text(encoding="utf-8")
     assert "interval '14 days'" not in worker, (
         "условие сегмента снова списано в исполнитель — оно обязано жить в "
-        "broadcaster.SEGMENT_SQL")
+        "broadcaster.BROADCAST_SEGMENTS")
