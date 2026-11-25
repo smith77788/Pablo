@@ -108,9 +108,14 @@ def test_frontend_has_attention_tab_and_calls_endpoint():
 
 
 def test_dashboard_opens_on_problems_first():
-    """Оператор должен видеть проблемы сразу, а не после переключения вкладки."""
+    """Оператор должен видеть проблемы сразу, а не после переключения вкладки.
+
+    Дашборд открывается на живой вкладке «Флот сейчас», и карточки «требует
+    внимания» стоят в ней сразу под здоровьем флота — с теми же кнопками."""
     m = re.search(r"async function openUnifiedDashboard\(\)\s*\{(.*?)\n\}", DASH, re.S)
-    assert m and "_udTabCur = 'attention'" in m.group(1)
+    assert m and "_udTabCur = 'live'" in m.group(1)
+    live = (ROOT / "mini_app" / "screens" / "fleet_live.js").read_text(encoding="utf-8")
+    assert "d.attention" in live and "_udAct" in live
 
 
 def test_analytics_renders_data_it_already_receives():

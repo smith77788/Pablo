@@ -43,6 +43,9 @@ function _udEnsureScreen() {
 }
 
 const _UD_TABS = [
+  // «Флот сейчас» — живая сводка (screens/fleet_live.js): состояние флота,
+  // первые карточки «требует внимания», идущие операции, лента за сутки.
+  { key: 'live',      label: '🛰 Флот сейчас' },
   { key: 'attention', label: '⚠️ Требует внимания' },
   { key: 'infra',     label: '📊 Инфраструктура' },
   { key: 'analytics', label: '📈 Аналитика' },
@@ -65,7 +68,9 @@ function _udRenderTabs() {
 async function openUnifiedDashboard() {
   _udEnsureScreen();
   push('s-uni-dash');
-  _udTabCur = 'attention';
+  // Открывается на живой сводке: проблемы («требует внимания») стоят в ней
+  // сразу под здоровьем флота, а рядом — что идёт прямо сейчас.
+  _udTabCur = 'live';
   _udRenderTabs();
   await _udLoad();
 }
@@ -113,6 +118,7 @@ async function _udLoad() {
   const body = document.getElementById('udBody');
   if (!body) return;
   if (_udTabCur === 'more') { body.innerHTML = _udRenderMore(); return; }
+  if (_udTabCur === 'live' && typeof _flLoad === 'function') { await _flLoad(); return; }
   _udLoading();
   try {
     if (_udTabCur === 'attention') {

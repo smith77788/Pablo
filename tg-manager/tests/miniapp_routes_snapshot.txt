@@ -186,6 +186,7 @@ GET /api/miniapp/crm_connections/{wh_id}
 GET /api/miniapp/crosspost/links
 GET /api/miniapp/dashboard
 GET /api/miniapp/dashboard/attention
+GET /api/miniapp/dashboard/live
 GET /api/miniapp/dashboard/visual
 GET /api/miniapp/dashboard_realtime
 GET /api/miniapp/devices
@@ -564,6 +565,7 @@ HEAD /api/miniapp/crm_connections/{wh_id}
 HEAD /api/miniapp/crosspost/links
 HEAD /api/miniapp/dashboard
 HEAD /api/miniapp/dashboard/attention
+HEAD /api/miniapp/dashboard/live
 HEAD /api/miniapp/dashboard/visual
 HEAD /api/miniapp/dashboard_realtime
 HEAD /api/miniapp/devices
