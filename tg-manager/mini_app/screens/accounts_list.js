@@ -81,7 +81,7 @@ async function loadAccOwnerSessions() {
   try {
     const data = await api('/api/miniapp/owner/sessions');
     if (box.dataset.request !== String(sequence)) return;
-    if (data.unavailable || !Array.isArray(data.sessions)) throw new Error('Недоступно');
+    if (!Array.isArray(data.sessions)) throw new Error('Недоступно');
     const live = data.sessions.filter(session => !session.revoked);
     const count = data.tracked ? live.filter(session => !session.current).length : live.length;
     const prefix = data.sessions.length >= Number(data.limit || 50) ? 'не менее ' : '';

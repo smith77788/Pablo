@@ -25,7 +25,7 @@ p=run();pending.shift().resolve({tracked:false,sessions:[{},{}],limit:2});await 
 assert(status.textContent.includes('не менее 2'));
 assert(status.textContent.includes('Текущий вход не распознан'));
 assert(!status.textContent.includes('Других'));
-p=run();pending.shift().resolve({unavailable:true,sessions:[]});await p;
+p=run();pending.shift().resolve({});await p;
 assert(status.textContent.includes('Не удалось проверить'));
 const old=run(),oldRequest=pending.shift(),fresh=run();
 pending.shift().resolve({tracked:true,sessions:[{},{}]});await fresh;

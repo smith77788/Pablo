@@ -3069,6 +3069,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         try:
             rows = await _os.list_sessions(pool, uid, limit=50, strict=True)
         except Exception:
+            log.exception("owner_sessions_list: inventory unavailable uid=%s", uid)
             return _err("Не удалось загрузить входы в Infragram. Попробуйте ещё раз.", 503)
         return _json_resp({"limit": 50, "sessions": [
             {"id": r["id"], "kind": r["kind"], "kind_ru": _os.KIND_RU.get(r["kind"], r["kind"]),
