@@ -24,8 +24,8 @@ def setup_routes(app: web.Application, pool) -> None:
     from services import operation_bus as _obus
     from services.mini_app_api import (
         _INTERNAL_ERROR, _dna_to_dict, _err, _get_uid, _json_resp, _list_limit,
-        _list_offset, _safe_count, _safe_fetch, _safe_fetchrow, _spintax_pack,
-        int_field, log,
+        _list_offset, _page_meta, _safe_count, _safe_fetch, _safe_fetchrow,
+        _spintax_pack, int_field, log,
     )
     from services.security import validate_integer, validate_string
 
@@ -359,12 +359,24 @@ def setup_routes(app: web.Application, pool) -> None:
             )
             if not campaign:
                 return _err("Не найдено", 404)
+            # Страницами: у кампании на три месяца постов больше пятидесяти,
+            # и те, что дальше, не показывались и не считались — отменить или
+            # поправить такой пост было нельзя.
+            limit = _list_limit(request, 50, 200)
+            offset = _list_offset(request)
+            total = await _safe_count(
+                pool, "SELECT COUNT(*) FROM narrative_posts WHERE campaign_id=$1", cid)
             posts = await pool.fetch(
                 "SELECT channel_username, angle, status, scheduled_at, published_at "
-                "FROM narrative_posts WHERE campaign_id=$1 ORDER BY scheduled_at LIMIT 50",
-                cid,
+                "FROM narrative_posts WHERE campaign_id=$1 "
+                "ORDER BY scheduled_at, id LIMIT $2 OFFSET $3",
+                cid, limit, offset,
             )
-            return _json_resp({"campaign": dict(campaign), "posts": [dict(p) for p in posts]})
+            return _json_resp({
+                "campaign": dict(campaign),
+                "posts": [dict(p) for p in posts],
+                "page": _page_meta(offset, limit, len(posts), total),
+            })
         except Exception:
             log.exception("narrative_campaign_detail uid=%d cid=%d", uid, cid)
             return _err(_INTERNAL_ERROR, 500)

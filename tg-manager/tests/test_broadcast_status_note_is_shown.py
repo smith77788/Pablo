@@ -30,7 +30,7 @@ def _render(rows: list[dict]) -> str:
     prog = f"""
 const els = {{}};
 const document = {{ getElementById(id) {{ return els[id] || (els[id] = {{ innerHTML: '', className: '', textContent: '', style: {{}} }}); }} }};
-let BCAST_TOTAL = 1, BCAST_FILTER = '', BCAST_ROWS = [];
+let BCAST_TOTAL = 1, BCAST_FILTER = '', BCAST_ROWS = [], BCAST_SEARCH = '', BCAST_FOUND = null;
 function _bcastShownTotal() {{ return 1; }}
 function renderBcastChips() {{}} function renderBcastMore() {{}}
 function empty() {{ return ''; }}

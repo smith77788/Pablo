@@ -337,11 +337,27 @@ async def create_pool() -> asyncpg.Pool:
     # Соединение без лишнего похода в базу на каждом возврате в пул: сброс
     # сессии только тому, кто оставил состояние (database/lean_reset.py).
     from database.lean_reset import LeanResetConnection
-    pool = await asyncpg.create_pool(
-        DATABASE_URL,
-        connection_class=LeanResetConnection,
-        **pool_config,
-    )
+    try:
+        pool = await asyncpg.create_pool(
+            DATABASE_URL,
+            connection_class=LeanResetConnection,
+            **pool_config,
+        )
+    except Exception as exc:
+        # Параметр сессии (jit) — ускорение, а не условие работы: пулер
+        # соединений может отказать в незнакомом параметре подключения, и
+        # тогда без повтора не стартует весь продукт. Повторяем без него;
+        # настоящая недоступность базы упадёт и во второй раз.
+        if not pool_config.get("server_settings"):
+            raise
+        log.warning("create_pool с параметрами сессии %s не прошёл (%s) — "
+                    "подключаюсь без них", pool_config["server_settings"], exc)
+        pool_config = {k: v for k, v in pool_config.items() if k != "server_settings"}
+        pool = await asyncpg.create_pool(
+            DATABASE_URL,
+            connection_class=LeanResetConnection,
+            **pool_config,
+        )
     # Ожидание соединения пула — в метрики в момент, когда оно случается
     # (database/pool_metrics.py). Сбой обёртки не мешает старту.
     try:
@@ -5638,6 +5654,54 @@ async def notify_dedup_forget(pool, user_id: int, key: str) -> None:
         log.debug("notify_dedup_forget (%s): %s", key, exc)
 
 
+# Лента уведомлений мини-аппа (schema_v385) — история «что произошло, пока
+# меня не было». Длинный отчёт операции режем: лента это список, а не архив
+# переписки; полный текст владелец видел и видит в личке бота.
+_FEED_TEXT_LIMIT = 2000
+
+
+def _feed_link(link) -> str | None:
+    """Дверь строки ленты: {"fn": "openOpDetail", "arg": 412} → json или None.
+
+    Форма проверяется ЗДЕСЬ, у единственной двери записи: строка ленты живёт
+    месяцами, и мусор в ней означал бы кнопку, которая ничего не делает, —
+    а такую кнопку владелец нажмёт и решит, что сломано приложение.
+    """
+    if not isinstance(link, dict):
+        return None
+    fn = str(link.get("fn") or "").strip()
+    if not fn or not fn.replace("_", "").isalnum():
+        return None
+    arg = link.get("arg")
+    if isinstance(arg, bool) or not isinstance(arg, (int, str, type(None))):
+        return None
+    if isinstance(arg, str):
+        arg = arg[:120]
+    return json.dumps({"fn": fn[:60], "arg": arg}, ensure_ascii=False)
+
+
+async def _feed_record(pool, user_id: int, pref: str, text: str,
+                       dedup_key: str | None, link=None) -> None:
+    """Записать уведомление в ленту. Никогда не бросает и не задерживает.
+
+    Fail-soft намеренно: сбой записи в ленту не должен отменить само
+    уведомление — владельцу нужнее сообщение, чем строка в истории.
+    """
+    try:
+        body = str(text or "")
+        if len(body) > _FEED_TEXT_LIMIT:
+            body = body[:_FEED_TEXT_LIMIT - 1].rstrip() + "…"
+        await pool.execute(
+            "INSERT INTO notification_feed(owner_id, pref, text, dedup_key, link) "
+            "VALUES($1, $2, $3, $4, $5::jsonb)",
+            int(user_id), str(pref or "")[:64], body,
+            (str(dedup_key)[:200] if dedup_key else None), _feed_link(link),
+        )
+    except Exception as exc:
+        log.debug("notification_feed: не записано user=%s pref=%s: %s",
+                  user_id, pref, str(exc)[:120])
+
+
 async def notify_if_enabled(
     pool: asyncpg.Pool,
     bot,
@@ -5647,6 +5711,7 @@ async def notify_if_enabled(
     reply_markup=None,
     *,
     dedup_key: str | None = None,
+    link: dict | None = None,
 ) -> bool:
     """Send a notification to user only if the given preference flag is True.
 
@@ -5694,6 +5759,13 @@ async def notify_if_enabled(
             settings = {}
         if not settings.get(pref, True):
             return True
+        # Лента уведомлений мини-аппа (schema_v385). Пишем ЗДЕСЬ, а не рядом с
+        # успешной отправкой: событие произошло независимо от того, принял ли
+        # его Telegram, и именно историю «что было, пока меня не было» владелец
+        # ищет в приложении. Место единственное — ниже путь ветвится на тихие
+        # часы, повторы и очередь доставки, и запись в каждой ветке означала бы
+        # дубли. Запись fail-soft: лента не может стоить уведомления.
+        await _feed_record(pool, user_id, pref, text, dedup_key, link)
         # Тихие часы (services/quiet_hours.py): несрочное ночью — в сводку,
         # она придёт одним сообщением, когда окно закончится. Сбой очереди —
         # отправка как обычно: потерять отчёт хуже, чем разбудить.

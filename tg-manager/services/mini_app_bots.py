@@ -51,8 +51,9 @@ def setup_routes(app: web.Application, pool) -> None:
     from services import operation_bus as _obus
     from services.mini_app_api import (
         _BOTS_VISIBLE_SQL, _INTERNAL_ERROR, _cached_user, _err, _get_uid,
-        _json_resp, _list_limit, _safe_count, _safe_fetch, _safe_fetchrow,
-        _str_list, _text, _user_can_use_bot, log, schedule_repeat_minutes,
+        _json_resp, _list_limit, _list_offset, _page_meta, _safe_count,
+        _safe_fetch, _safe_fetchrow, _str_list, _text, _user_can_use_bot, log,
+        schedule_repeat_minutes,
     )
     from services.security import (
         escape_html, resolve_url_is_public, selection_ids, tg_id, validate_bot_token,
@@ -1660,12 +1661,23 @@ def setup_routes(app: web.Application, pool) -> None:
             "SELECT COUNT(*) FROM managed_bots WHERE bot_id=$1 AND added_by=$2 AND deleted_at IS NULL", bot_id, uid)
         if not owns:
             return _err("Бот не найден", 404)
+        # Страницами и с общим числом: было жёсткое LIMIT 20 по времени
+        # отправки, то есть у бота с регулярной рассылкой экран показывал
+        # последние двадцать как всё расписание.
+        limit = _list_limit(request, 20, 200)
+        offset = _list_offset(request)
+        total = await _safe_count(
+            pool, "SELECT COUNT(*) FROM scheduled_broadcasts WHERE bot_id=$1", bot_id)
         rows = await _safe_fetch(pool,
             """SELECT id, message_text, execute_at, status, created_at,
                       COALESCE(repeat_interval_min, 0) AS repeat_interval_min
                FROM scheduled_broadcasts WHERE bot_id=$1
-               ORDER BY execute_at DESC LIMIT 20""", bot_id)
-        return _json_resp({"schedules": rows})
+               ORDER BY execute_at DESC, id DESC
+               LIMIT $2 OFFSET $3""", bot_id, limit, offset)
+        return _json_resp({
+            "schedules": rows,
+            "page": _page_meta(offset, limit, len(rows or []), total),
+        })
 
     async def create_schedule(request: web.Request) -> web.Response:
         uid = _get_uid(request)

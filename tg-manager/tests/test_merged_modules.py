@@ -17,7 +17,7 @@ SRC = miniapp_source()
 
 
 def _catalog_labels() -> list[str]:
-    s = HTML.index('<div class="screen" id="s-more">')
+    s = HTML.index('<div class="screen" id="s-more"')
     cat = HTML[s:HTML.index("<!-- Админ-панель (только для админов) -->", s)]
     return re.findall(r'mgmt-tile-lbl">([^<]*)<', cat)
 
@@ -65,7 +65,7 @@ def test_factory_is_one_module():
                      ("groups", "s-chanfactory")):
         assert re.search(r"key:'" + key + r"'[^\n]*sid:'" + sid + "'", reg), key
     for sid, key in (("s-botfactory", "bots"), ("s-chanfactory", "channels")):
-        head = HTML[HTML.index(f'<div class="screen" id="{sid}">'):][:900]
+        head = HTML[HTML.index(f'<div class="screen" id="{sid}"'):][:900]
         assert '<div class="hdr-title">🏭 Фабрика</div>' in head, sid
         assert f'data-module="factory" data-tab="{key}"' in head, sid
     cf = _fn_body("_cfTab")
@@ -89,8 +89,8 @@ def _assert_module(mod: str, title: str, tile: str, tabs: dict[str, tuple[str, s
     for key, (sid, fn) in tabs.items():
         assert re.search(r"key:'" + key + r"'[^\n]*sid:'" + sid + r"'[^\n]*" + fn + r"\(", block), key
         assert f"push('{sid}')" in _fn_body(fn), f"{fn}() больше не открывает {sid}"
-        if f'<div class="screen" id="{sid}">' in HTML:
-            head = HTML[HTML.index(f'<div class="screen" id="{sid}">'):][:1200]
+        if f'<div class="screen" id="{sid}"' in HTML:
+            head = HTML[HTML.index(f'<div class="screen" id="{sid}"'):][:1200]
             assert f'<div class="hdr-title">{title}</div>' in head, sid
             assert f'data-module="{mod}" data-tab="{key}"' in head, sid
         else:  # экран, который собирает JS (s-uni-dash)
@@ -158,7 +158,7 @@ def test_mailing_is_one_module():
     for old in ("Публикация / рассылка", "Единая кампания", "Рассылка по сети ботов",
                 "Расписание", "A/B Тесты"):
         assert old not in labels and section_of_tile(old) is None, f"«{old}» вернулась"
-    s = HTML.index('<div class="screen" id="s-broadcasts">')
+    s = HTML.index('<div class="screen" id="s-broadcasts"')
     hub = HTML[s:s + 4000]
     for fn in ("openMassPub()", "openUniCampaign()", "openNetBcModal()",
                "openBroadcastSchedule()", "openExperiments()", "openTemplates()"):

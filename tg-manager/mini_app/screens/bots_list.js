@@ -17,6 +17,18 @@ function _botsCountLabel(n) {
 
 async function loadBots() {
   fleetToolsInit('bots');
+  // Последние данные — сразу, свежие заменят их, когда придут (ux_kit.uxStale
+  // держит полоску «показаны последние данные»).
+  if (!BOTS.length) {
+    const c = getCached('infragram_cache_bots');
+    if (c && (c.bots || []).length) {
+      BOTS = c.bots;
+      BOT_OFFSET = BOTS.length;
+      BOT_TOTAL = c.total != null ? c.total : BOTS.length;
+      renderBots();
+      if (typeof uxStale === 'function') uxStale('botList', true);
+    }
+  }
   try {
     BOT_OFFSET = 0;
     const d = await api('/api/miniapp/bots?limit=' + BOT_PAGE + '&offset=0' + fleetSortQS('bots'));
@@ -28,7 +40,11 @@ async function loadBots() {
     if (cntEl) cntEl.textContent = _botsCountLabel(BOT_TOTAL);
     renderBotFilterChips();
     renderBots();
+    if (typeof uxStale === 'function') uxStale('botList', false);
+    setCache('infragram_cache_bots', {bots: BOTS.slice(0, 60), total: BOT_TOTAL});
   } catch(e) {
+    if (typeof uxStale === 'function') uxStale('botList', false);
+    if (BOTS.length) { toast('⚠️ ' + errRu(e, 'Не удалось обновить список')); return; }
     const wrap = document.getElementById('botList');
     if (wrap) { wrap.className=''; wrap.innerHTML = errHtml(errRu(e),'loadBots()'); }
   }

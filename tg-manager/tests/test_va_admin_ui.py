@@ -20,7 +20,7 @@ def _read(*p):
 
 def test_more_screen_has_admin_tile():
     html = _read("mini_app", "index.html")
-    more = html[html.index('<div class="screen" id="s-more">'):]
+    more = html[html.index('<div class="screen" id="s-more"'):]
     more = more[:more.index('<div class="screen"', 10)]
     assert 'onclick="openVaAdmin()"' in more
 

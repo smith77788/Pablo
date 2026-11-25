@@ -117,6 +117,7 @@ GET /api/miniapp/auto_funnel/{funnel_id}
 GET /api/miniapp/auto_funnel/{funnel_id}/people
 GET /api/miniapp/auto_funnels
 GET /api/miniapp/autoreg
+GET /api/miniapp/badges
 GET /api/miniapp/bot/{bot_id}
 GET /api/miniapp/bot/{bot_id}/audience
 GET /api/miniapp/bot/{bot_id}/auto_replies
@@ -180,6 +181,7 @@ GET /api/miniapp/crm/board
 GET /api/miniapp/crm/contacts
 GET /api/miniapp/crm/deals
 GET /api/miniapp/crm/funnel_analytics
+GET /api/miniapp/crm/sales_insights
 GET /api/miniapp/crm_connections/{wh_id}
 GET /api/miniapp/crosspost/links
 GET /api/miniapp/dashboard
@@ -282,6 +284,7 @@ GET /api/miniapp/node/{node_id}/threads
 GET /api/miniapp/nodes
 GET /api/miniapp/notary
 GET /api/miniapp/notary/{watch_id}
+GET /api/miniapp/notifications
 GET /api/miniapp/notify_routes
 GET /api/miniapp/onboarding
 GET /api/miniapp/operation/{op_id}
@@ -305,6 +308,8 @@ GET /api/miniapp/persona/{persona_id}/memory
 GET /api/miniapp/personas
 GET /api/miniapp/physics
 GET /api/miniapp/physics/{account_id}/telemetry
+GET /api/miniapp/planner
+GET /api/miniapp/planner/candidates
 GET /api/miniapp/platform_users
 GET /api/miniapp/platform_users/export
 GET /api/miniapp/presence/map
@@ -339,6 +344,7 @@ GET /api/miniapp/sales/orders
 GET /api/miniapp/sales/persona/{pid}
 GET /api/miniapp/sales/persona/{pid}/stats
 GET /api/miniapp/sales/personas
+GET /api/miniapp/search/everything
 GET /api/miniapp/self_promo
 GET /api/miniapp/self_promo/audience
 GET /api/miniapp/selfpromo/overview
@@ -489,6 +495,7 @@ HEAD /api/miniapp/auto_funnel/{funnel_id}
 HEAD /api/miniapp/auto_funnel/{funnel_id}/people
 HEAD /api/miniapp/auto_funnels
 HEAD /api/miniapp/autoreg
+HEAD /api/miniapp/badges
 HEAD /api/miniapp/bot/{bot_id}
 HEAD /api/miniapp/bot/{bot_id}/audience
 HEAD /api/miniapp/bot/{bot_id}/auto_replies
@@ -552,6 +559,7 @@ HEAD /api/miniapp/crm/board
 HEAD /api/miniapp/crm/contacts
 HEAD /api/miniapp/crm/deals
 HEAD /api/miniapp/crm/funnel_analytics
+HEAD /api/miniapp/crm/sales_insights
 HEAD /api/miniapp/crm_connections/{wh_id}
 HEAD /api/miniapp/crosspost/links
 HEAD /api/miniapp/dashboard
@@ -654,6 +662,7 @@ HEAD /api/miniapp/node/{node_id}/threads
 HEAD /api/miniapp/nodes
 HEAD /api/miniapp/notary
 HEAD /api/miniapp/notary/{watch_id}
+HEAD /api/miniapp/notifications
 HEAD /api/miniapp/notify_routes
 HEAD /api/miniapp/onboarding
 HEAD /api/miniapp/operation/{op_id}
@@ -677,6 +686,8 @@ HEAD /api/miniapp/persona/{persona_id}/memory
 HEAD /api/miniapp/personas
 HEAD /api/miniapp/physics
 HEAD /api/miniapp/physics/{account_id}/telemetry
+HEAD /api/miniapp/planner
+HEAD /api/miniapp/planner/candidates
 HEAD /api/miniapp/platform_users
 HEAD /api/miniapp/platform_users/export
 HEAD /api/miniapp/presence/map
@@ -711,6 +722,7 @@ HEAD /api/miniapp/sales/orders
 HEAD /api/miniapp/sales/persona/{pid}
 HEAD /api/miniapp/sales/persona/{pid}/stats
 HEAD /api/miniapp/sales/personas
+HEAD /api/miniapp/search/everything
 HEAD /api/miniapp/self_promo
 HEAD /api/miniapp/self_promo/audience
 HEAD /api/miniapp/selfpromo/overview
@@ -1073,6 +1085,7 @@ POST /api/miniapp/niche/keywords
 POST /api/miniapp/node
 POST /api/miniapp/notary
 POST /api/miniapp/notary/{watch_id}/check
+POST /api/miniapp/notifications/read
 POST /api/miniapp/notify_routes
 POST /api/miniapp/notify_routes/{route_id}/test
 POST /api/miniapp/onboarding/goal
@@ -1104,6 +1117,10 @@ POST /api/miniapp/persona/preview
 POST /api/miniapp/persona/{persona_id}/apply_profile
 POST /api/miniapp/persona/{persona_id}/memory/rebuild
 POST /api/miniapp/phone_check
+POST /api/miniapp/planner/broadcast/{sch_id}
+POST /api/miniapp/planner/operation/{op_id}
+POST /api/miniapp/planner/operation/{op_id}/schedule
+POST /api/miniapp/planner/operation/{op_id}/stop_repeat
 POST /api/miniapp/presence_pack
 POST /api/miniapp/presence_pack/{pack_id}/promote
 POST /api/miniapp/presence_pack/{pack_id}/seed

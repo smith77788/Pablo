@@ -59,7 +59,6 @@ _KNOWN_DOORLESS = frozenset({
     "/api/miniapp/audience/analyze/{bot_id}",
     "/api/miniapp/audience/segment/{bot_id}",
     "/api/miniapp/audit",
-    "/api/miniapp/broadcast/ab_test",
     "/api/miniapp/channel_factory/submit",
     "/api/miniapp/circuit_breaker",
     "/api/miniapp/cloud/set-paid",

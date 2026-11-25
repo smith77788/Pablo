@@ -72,5 +72,11 @@ def test_period_switch_sits_inside_the_summary_block():
     assert "UI.segmented(" in _fn("_sumPeriodRow")
     kit = (ROOT / "mini_app" / "screens" / "ui_kit.js").read_text(encoding="utf-8")
     css = (ROOT / "mini_app" / "ui_kit.css").read_text(encoding="utf-8")
-    assert "function segmented(" in kit and "segmented }" in kit
+    # Проверяем, что компонент ЕСТЬ и ЭКСПОРТИРОВАН, а не что он последний в
+    # списке экспорта: «segmented }» краснело от любого нового компонента,
+    # дописанного после него.
+    assert "function segmented(" in kit
+    exported = re.search(r"return \{([^}]*)\};", kit, re.S)
+    assert exported and "segmented" in exported.group(1), (
+        "компонент есть, но наружу не отдан — экран его не увидит")
     assert ".ui-seg-btn{" in css and "aria-pressed" in kit

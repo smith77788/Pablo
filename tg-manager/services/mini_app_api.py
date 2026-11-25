@@ -36,6 +36,7 @@ from services import mini_app_invite
 from services import mini_app_channels
 from services import mini_app_notify_routes
 from services import mini_app_monitor
+from services import mini_app_planner
 from services import mini_app_operations
 from services import mini_app_dashboard
 from services import mini_app_dm
@@ -1813,6 +1814,27 @@ def _geo_code(raw) -> str:
     if cc == "UNKNOWN":
         return cc
     return cc if len(cc) == 2 and cc.isalpha() and cc.isascii() else ""
+
+
+def _page_meta(offset: int, limit: int, shown: int, total=None) -> dict:
+    """Конверт страницы — ОДНА форма на все списки мини-аппа.
+
+    Экран должен уметь ответить на два вопроса: сколько строк он показывает и
+    есть ли ещё. Раньше каждый список отвечал по-своему (где-то `has_more`,
+    где-то `shown`, где-то ничего), и экраны, у которых формы не было вовсе,
+    рисовали первые тридцать строк как «всё, что есть»: тридцать из восьмидесяти
+    на экране выглядят ровно как восемьдесят из восьмидесяти.
+
+    `total=None` допустим — не у каждого списка счёт по всей выборке дёшев. Тогда
+    «есть ещё» определяется по полной странице, и фронт (UI.more) пишет только
+    показанное, не выдумывая итог.
+    """
+    has_more = (offset + shown) < int(total) if total is not None else shown >= limit
+    out = {"offset": int(offset), "limit": int(limit), "shown": int(shown),
+           "has_more": bool(has_more)}
+    if total is not None:
+        out["total"] = int(total)
+    return out
 
 
 def _list_limit(request: web.Request, default: int, maximum: int) -> int:
@@ -3675,38 +3697,37 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         # владельца (раньше строка была на КАЖДЫЙ бот — тот же человек десять
         # раз). И без СВОИХ аккаунтов флота: они подписаны на боты доставки, но
         # это не лиды, а собственный флот владельца.
-        rows = await _safe_fetch(pool,
-            """WITH own AS (
-                   SELECT tg_user_id FROM tg_accounts
-                   WHERE owner_id=$1 AND tg_user_id IS NOT NULL
-               ),
-               agg AS (
-                   SELECT bu.user_id,
-                          MAX(bu.first_seen) AS first_seen,
-                          COUNT(DISTINCT bu.bot_id) AS bot_count,
-                          (array_agg(bu.bot_id ORDER BY bu.first_seen DESC NULLS LAST))[1] AS bot_id
-                   FROM bot_users bu
-                   JOIN managed_bots mb ON mb.bot_id = bu.bot_id
-                   WHERE mb.added_by = $1 AND bu.user_id > 0
-                     AND bu.user_id NOT IN (SELECT tg_user_id FROM own)
-                   GROUP BY bu.user_id
-               )
-               SELECT a.user_id, a.first_seen, a.bot_count, a.bot_id,
-                      bu.username, bu.first_name, mb.username AS bot_username
-               FROM agg a
-               JOIN bot_users bu ON bu.user_id = a.user_id AND bu.bot_id = a.bot_id
-               JOIN managed_bots mb ON mb.bot_id = a.bot_id
-               ORDER BY a.first_seen DESC NULLS LAST, a.user_id DESC
-               LIMIT $2 OFFSET $3""", uid, lim, _list_offset(request))
-        total = await _safe_count(pool,
-            """WITH own AS (
-                   SELECT tg_user_id FROM tg_accounts
-                   WHERE owner_id=$1 AND tg_user_id IS NOT NULL
-               )
-               SELECT COUNT(DISTINCT bu.user_id) FROM bot_users bu
-               JOIN managed_bots mb ON mb.bot_id = bu.bot_id
-               WHERE mb.added_by = $1 AND bu.user_id > 0
-                 AND bu.user_id NOT IN (SELECT tg_user_id FROM own)""", uid)
+        #
+        # Скорость. Подписчики берутся по индексу (bot_id, first_seen) через
+        # массив ботов владельца, а имя/ник — из той же строки (DISTINCT ON),
+        # без второго прохода по bot_users. Прежний запрос (агрегат + JOIN
+        # обратно на bot_users, NOT IN) Postgres исполнял двумя полными
+        # проходами по таблице подписчиков ВСЕЙ платформы: на 1,5 млн строк
+        # 290 мс против 31 мс сейчас, ответ тот же строка в строку
+        # (tests/test_new_users_feed_is_fast_postgres.py). Список и счётчик
+        # независимы — идут разом.
+        _from = """
+            FROM bot_users bu
+            WHERE bu.bot_id = ANY(ARRAY(SELECT bot_id FROM managed_bots WHERE added_by = $1))
+              AND bu.user_id > 0
+              AND NOT EXISTS (SELECT 1 FROM tg_accounts ta
+                              WHERE ta.owner_id = $1 AND ta.tg_user_id = bu.user_id)"""
+        rows, total = await asyncio.gather(
+            _safe_fetch(pool,
+                """WITH latest AS (
+                       SELECT DISTINCT ON (bu.user_id)
+                              bu.user_id, bu.first_seen, bu.bot_id, bu.username, bu.first_name,
+                              COUNT(*) OVER (PARTITION BY bu.user_id) AS bot_count"""
+                + _from + """
+                       ORDER BY bu.user_id, bu.first_seen DESC NULLS LAST
+                   )
+                   SELECT l.user_id, l.first_seen, l.bot_count, l.bot_id,
+                          l.username, l.first_name, mb.username AS bot_username
+                   FROM latest l
+                   JOIN managed_bots mb ON mb.bot_id = l.bot_id
+                   ORDER BY l.first_seen DESC NULLS LAST, l.user_id DESC
+                   LIMIT $2 OFFSET $3""", uid, lim, _list_offset(request)),
+            _safe_count(pool, "SELECT COUNT(DISTINCT bu.user_id)" + _from, uid))
         return _json_resp({"users": rows or [], "total": total})
 
     async def new_users_export(request: web.Request) -> web.Response:
@@ -7991,12 +8012,20 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         uid = _get_uid(request)
         if not uid:
             return _err("Unauthorized", 401)
+        limit = _list_limit(request, 20, 200)
+        offset = _list_offset(request)
         try:
+            # Страницами и с общим числом: было жёсткое LIMIT 20, то есть
+            # двадцать первый отчёт (и ответ разбора в нём) до отправителя не
+            # доходил вообще.
+            total = await _safe_count(
+                pool, "SELECT COUNT(*) FROM error_reports WHERE user_id=$1", uid)
             rows = await pool.fetch(
                 "SELECT id, description, status, created_at, updated_at, notes "
                 "FROM error_reports "
-                "WHERE user_id=$1 ORDER BY created_at DESC LIMIT 20",
-                uid,
+                "WHERE user_id=$1 ORDER BY created_at DESC, id DESC "
+                "LIMIT $2 OFFSET $3",
+                uid, limit, offset,
             )
         except Exception:
             log.exception("my_error_reports uid=%d", uid)
@@ -8015,7 +8044,8 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                 "answer": (r.get("notes") or "").strip() or None,
             }
             for r in rows
-        ]})
+        ],
+            "page": _page_meta(offset, limit, len(rows), total)})
 
     # ── Bot toggle / edit ─────────────────────────────────────────────────────
 
@@ -9162,22 +9192,37 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             return _err("Не удалось сохранить", 500)
 
     async def payments_history(request: web.Request) -> web.Response:
+        """История оплат владельца, страницами и с общим числом.
+
+        Было `LIMIT 20` без слова о том, что платежей больше: двадцать первая
+        оплата для владельца не существовала, а именно её он и ищет, когда
+        сверяет списанное с продлениями. Счёт по всей истории здесь дёшев
+        (строк единицы-десятки) и нужен: «показано 20 из 34» — это ответ, а
+        «показано 20» — нет.
+        """
         uid = _get_uid(request)
         if not uid:
             return _err("Unauthorized", 401)
+        limit = _list_limit(request, 20, 200)
+        offset = _list_offset(request)
         try:
+            total = await _safe_count(
+                pool, "SELECT COUNT(*) FROM payments WHERE user_id=$1", uid)
             rows = await pool.fetch(
                 """SELECT plan, period_months, amount_usd, currency, status, created_at
                    FROM payments
                    WHERE user_id=$1
-                   ORDER BY created_at DESC
-                   LIMIT 20""",
-                uid,
+                   ORDER BY created_at DESC, id DESC
+                   LIMIT $2 OFFSET $3""",
+                uid, limit, offset,
             )
-            return _json_resp([dict(r) for r in rows])
+            return _json_resp({
+                "items": [dict(r) for r in rows],
+                "page": _page_meta(offset, limit, len(rows), total),
+            })
         except Exception as e:
             log.warning("payments_history uid=%d: %s", uid, e)
-            return _json_resp([])
+            return _json_resp({"items": [], "page": _page_meta(offset, limit, 0, 0)})
 
     async def referral(request: web.Request) -> web.Response:
         uid = _get_uid(request)
@@ -10279,6 +10324,15 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     mini_app_invite.setup_routes(app, pool)
     mini_app_channels.setup_routes(app, pool)
     mini_app_notify_routes.setup_routes(app, pool)
+    # Лента уведомлений владельца (services/mini_app_notifications.py).
+    from services import mini_app_notifications
+    mini_app_notifications.setup_routes(app, pool)
+    # Значки на вкладках таббара (services/mini_app_badges.py).
+    from services import mini_app_badges
+    mini_app_badges.setup_routes(app, pool)
+    # Поиск по своим данным (services/mini_app_global_search.py).
+    from services import mini_app_global_search
+    mini_app_global_search.setup_routes(app, pool)
     mini_app_operations.setup_routes(app, pool)
     mini_app_dashboard.setup_routes(app, pool)
     mini_app_dm.setup_routes(app, pool)
@@ -10286,6 +10340,8 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     mini_app_accounts.setup_routes(app, pool)
     mini_app_links.setup_routes(app, pool)
     mini_app_deals_board.setup_routes(app, pool)
+    from services import mini_app_sales_insights
+    mini_app_sales_insights.setup_routes(app, pool)
     from services import mini_app_find
     mini_app_find.setup_routes(app, pool)
     from services import mini_app_saved_views
@@ -10322,6 +10378,7 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     mini_app_media.setup_routes(app, pool)
     mini_app_va.setup_routes(app, pool)
     mini_app_monitor.setup_routes(app, pool)
+    mini_app_planner.setup_routes(app, pool)
     # Analytics
     # Subscription
     app.router.add_get("/api/miniapp/subscription", subscription)
@@ -10737,12 +10794,15 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             acc_active = int(acc["active"]) if acc else 0
             ch_total = int(await _safe_fetchval(pool,
                 "SELECT COUNT(*) FROM managed_channels WHERE owner_id=$1", uid) or 0)
+            # Подписчики — массивом ботов владельца, а не JOIN managed_bots:
+            # с JOIN база шла полным проходом по bot_users всей платформы.
             aud_row = await _safe_fetchrow(pool,
                 """SELECT COUNT(DISTINCT bu.user_id) AS total,
                           COUNT(DISTINCT bu.user_id) FILTER (
                               WHERE bu.first_seen > NOW() - INTERVAL '7 days') AS new_7d
-                   FROM bot_users bu JOIN managed_bots mb ON mb.bot_id=bu.bot_id
-                   WHERE mb.added_by=$1 AND bu.is_active=TRUE""", uid)
+                   FROM bot_users bu
+                   WHERE bu.bot_id = ANY(ARRAY(SELECT bot_id FROM managed_bots WHERE added_by=$1))
+                     AND bu.is_active=TRUE""", uid)
             aud_total = int(aud_row["total"]) if aud_row else 0
             aud_new_7d = int(aud_row["new_7d"]) if aud_row else 0
             ops_row = await _safe_fetchrow(pool,
@@ -10903,20 +10963,39 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         if not uid:
             return _err("Unauthorized", 401)
         try:
-            total = await _safe_fetchval(pool,
-                """SELECT COUNT(DISTINCT bu.user_id) FROM bot_users bu
-                   JOIN managed_bots mb ON mb.bot_id=bu.bot_id
-                   WHERE mb.added_by=$1 AND bu.is_active=TRUE""", uid) or 0
-            active = await _safe_fetchval(pool,
-                """SELECT COUNT(DISTINCT bu.user_id) FROM bot_users bu
-                   JOIN managed_bots mb ON mb.bot_id=bu.bot_id
-                   WHERE mb.added_by=$1 AND bu.is_active=TRUE
-                     AND bu.last_seen > NOW() - INTERVAL '7 days'""", uid) or 0
-            total = int(total); active = int(active)
-            new_7d = await _safe_fetchval(pool,
-                """SELECT COUNT(DISTINCT bu.user_id) FROM bot_users bu
-                   JOIN managed_bots mb ON mb.bot_id=bu.bot_id
-                   WHERE mb.added_by=$1 AND bu.first_seen > NOW() - INTERVAL '7 days'""", uid) or 0
+            # Подписчики владельца — по индексу через массив его ботов, а не
+            # JOIN managed_bots: с JOIN Postgres выбирал полный проход по
+            # bot_users ВСЕЙ платформы (на 1,5 млн строк ~50 мс на каждый из
+            # четырёх запросов, и шли они друг за другом). Счётчики, сегменты
+            # и тепловая карта независимы — идут разом.
+            _own = """FROM bot_users bu
+                   WHERE bu.bot_id = ANY(ARRAY(SELECT bot_id FROM managed_bots WHERE added_by=$1))"""
+
+            async def _segments():
+                try:
+                    from services.audience_analytics import segment_audience
+                    return await segment_audience(pool, uid)
+                except Exception:
+                    log.exception("audience_analytics segments uid=%s", uid)
+                    return []
+
+            total, active, new_7d, seg_list, hm_rows = await asyncio.gather(
+                _safe_fetchval(pool,
+                    "SELECT COUNT(DISTINCT bu.user_id) " + _own
+                    + " AND bu.is_active=TRUE", uid),
+                _safe_fetchval(pool,
+                    "SELECT COUNT(DISTINCT bu.user_id) " + _own
+                    + """ AND bu.is_active=TRUE
+                     AND bu.last_seen > NOW() - INTERVAL '7 days'""", uid),
+                _safe_fetchval(pool,
+                    "SELECT COUNT(DISTINCT bu.user_id) " + _own
+                    + " AND bu.first_seen > NOW() - INTERVAL '7 days'", uid),
+                _segments(),
+                _safe_fetch(pool,
+                    "SELECT EXTRACT(HOUR FROM bu.last_seen)::int AS h, COUNT(*) AS c "
+                    + _own + """ AND bu.last_seen IS NOT NULL
+                   GROUP BY 1 ORDER BY 1""", uid))
+            total = int(total or 0); active = int(active or 0); new_7d = new_7d or 0
             dormant = max(total - active, 0)
             # Сегменты считает services/audience_analytics одним запросом по
             # всем ботам владельца: «Лидеры», «Постоянные», «Под риском»,
@@ -10929,12 +11008,11 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
                        "Новые": "#af52de"}
             segments = []
             try:
-                from services.audience_analytics import segment_audience
                 from services.audience_analytics import SEGMENT_NAMES
                 # Ключ сегмента нужен экрану, чтобы спросить «кто в нём»:
                 # по русскому имени маршрут искать нельзя.
                 _key_by_name = {v: k for k, v in SEGMENT_NAMES.items()}
-                for sg in await segment_audience(pool, uid):
+                for sg in seg_list:
                     segments.append({
                         "key": _key_by_name.get(sg.name),
                         "name": sg.name, "count": sg.user_count,
@@ -10947,11 +11025,6 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
             except Exception:
                 log.exception("audience_analytics segments uid=%s", uid)
             avg_eng = round(active / total * 100, 1) if total else 0.0
-            hm_rows = await _safe_fetch(pool,
-                """SELECT EXTRACT(HOUR FROM bu.last_seen)::int AS h, COUNT(*) AS c
-                   FROM bot_users bu JOIN managed_bots mb ON mb.bot_id=bu.bot_id
-                   WHERE mb.added_by=$1 AND bu.last_seen IS NOT NULL
-                   GROUP BY 1 ORDER BY 1""", uid)
             heatmap = [{"hour": int(r["h"]), "value": int(r["c"])} for r in (hm_rows or [])]
             insights = []
             if total:
@@ -11101,15 +11174,35 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
         try:
             # Только операции самого пользователя (oq.owner_id = uid).
             # Без этого фильтра юзер видел бы аудит ВСЕХ владельцев — утечка.
+            limit = _list_limit(request, 200, 1000)
+            offset = _list_offset(request)
+            # Двести строк за неделю набирает одна массовая операция, а
+            # владелец приходит сюда разбираться именно после большой: журнал
+            # обрывался на самом интересном и молчал об этом.
+            total = await _safe_count(
+                pool,
+                "SELECT COUNT(*) FROM operation_log ol "
+                "JOIN operation_queue oq ON oq.id = ol.op_id "
+                "WHERE oq.owner_id = $1 "
+                "AND ol.created_at > NOW() - INTERVAL '7 days'",
+                uid)
             rows = await pool.fetch(
                 "SELECT ol.op_id, ol.step_num, ol.target, ol.status, ol.message, ol.created_at, "
                 "oq.owner_id, oq.op_type, oq.label "
                 "FROM operation_log ol JOIN operation_queue oq ON oq.id = ol.op_id "
                 "WHERE oq.owner_id = $1 AND ol.created_at > NOW() - INTERVAL '7 days' "
-                "ORDER BY ol.created_at DESC LIMIT 200",
-                uid,
+                # Добивка — первичный ключ строки журнала: порядок внутри равного
+                # времени Postgres не обещает, а пара (op_id, step_num)
+                # уникальной не объявлена, так что страницы могли
+                # повторить одну запись и потерять другую.
+                "ORDER BY ol.created_at DESC, ol.id DESC "
+                "LIMIT $2 OFFSET $3",
+                uid, limit, offset,
             )
-            return _json_resp({"entries": [dict(r) for r in rows]})
+            return _json_resp({
+                "entries": [dict(r) for r in rows],
+                "page": _page_meta(offset, limit, len(rows), total),
+            })
         except Exception:
             log.exception("audit_trail")
             return _err(_INTERNAL_ERROR, 500)

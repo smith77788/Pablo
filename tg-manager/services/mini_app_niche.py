@@ -18,7 +18,8 @@ def setup_routes(app: web.Application, pool) -> None:
     from services import niche_radar as nr
     from services import operation_bus as _obus
     from services.mini_app_api import (
-        _INTERNAL_ERROR, _err, _get_uid, _json_resp, bad_body_response, log,
+        _INTERNAL_ERROR, _err, _get_uid, _json_resp, _list_limit, _list_offset,
+        _page_meta, _safe_count, bad_body_response, log,
     )
     from services.security import validate_integer
 
@@ -41,9 +42,16 @@ def setup_routes(app: web.Application, pool) -> None:
         if not uid:
             return _err("Unauthorized", 401)
         try:
+            # Страницами и с общим числом: было жёсткое LIMIT 50, и кампании
+            # старше пятидесятой для экрана не существовали.
+            limit = _list_limit(request, 20, 100)
+            offset = _list_offset(request)
+            total = await _safe_count(
+                pool, "SELECT COUNT(*) FROM niche_campaigns "
+                      "WHERE owner_id=$1 AND status <> 'archived'", uid)
             rows = await pool.fetch(
                 "SELECT * FROM niche_campaigns WHERE owner_id=$1 AND status <> 'archived' "
-                "ORDER BY created_at DESC LIMIT 50", uid)
+                "ORDER BY created_at DESC, id DESC LIMIT $2 OFFSET $3", uid, limit, offset)
             items = []
             for r in rows:
                 d = dict(r)
@@ -57,6 +65,7 @@ def setup_routes(app: web.Application, pool) -> None:
             log.exception("niche_overview uid=%s", uid)
             return _err(_INTERNAL_ERROR, 500)
         return _json_resp({"campaigns": items, "accounts": accounts,
+                           "page": _page_meta(offset, limit, len(items), total),
                            "tones": [{"key": k, "label": v} for k, v in nr.TONE_RU.items()]})
 
     async def niche_save(request: web.Request) -> web.Response:

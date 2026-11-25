@@ -72,7 +72,14 @@ def test_endpoint_pages_counts_and_slices():
     assert '"total": total' in body, "нет общего числа рассылок"
     assert "GROUP BY status" in body, "нет счётчиков по статусам"
     assert 'request.query.get("status")' in body, "нельзя запросить только неудачные"
-    assert "lower(b.status)=$2" in body, "статус подставляется не параметром"
+    # Номер параметра больше не фиксирован: условие собирается ОДНО на срез по
+    # статусу и на поиск, и номер считается по длине args. Проверяем суть, а не
+    # цифру — статус уходит ПАРАМЕТРОМ, а не вклеивается в текст запроса.
+    assert re.search(r"lower\(b\.status\)=\$(?:\{len\(args\)\}|\d)", body), (
+        "среза по статусу нет в условии запроса")
+    assert "args.append(status)" in body, "статус подставляется не параметром"
+    assert not re.search(r"lower\(b\.status\)\s*=\s*['\"]?\{?status", body), (
+        "статус вклеен в SQL значением — это и инъекция, и потеря плана запроса")
 
 
 def test_delivery_is_summed_over_the_whole_history():

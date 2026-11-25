@@ -44,7 +44,7 @@ def test_catalog_has_no_duplicates_and_russian_names():
 
 def test_miniapp_screen_keeps_no_own_language_list():
     html = miniapp_html()
-    start = html.index('<div class="screen" id="s-multigeo">')
+    start = html.index('<div class="screen" id="s-multigeo"')
     end = html.index("CONTENT CLONER", start)
     block = html[start:end]
     assert 'value="de"' not in block and "Deutsch" not in block, \
