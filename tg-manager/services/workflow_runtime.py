@@ -2006,13 +2006,13 @@ async def on_button(pool, http, token, bot_id: int, chat_id: int,
     await _log(pool, run, idx, "message", f"button:{bidx}", btn.get("text"))
     # Убрать клавиатуру с сообщения: второе нажатие той же кнопки иначе
     # выглядело бы рабочим, а не делало ничего.
-    msg = callback.get("message") or {}
-    if token and msg.get("message_id"):
+    from services.bot_api_105_runtime import callback_edit_target
+    edit_target = callback_edit_target(callback)
+    if token and edit_target:
         try:
             from services import bot_api
             await bot_api._call(http, token, "editMessageReplyMarkup",
-                                chat_id=chat_id, message_id=msg["message_id"],
-                                reply_markup={"inline_keyboard": []})
+                                **edit_target, reply_markup={"inline_keyboard": []})
         except Exception:
             log.debug("workflow_runtime: клавиатура не снята", exc_info=True)
     await bus.emit(pool, run["owner_id"], "button.clicked",

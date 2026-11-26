@@ -3912,6 +3912,27 @@ input:disabled,select:disabled,textarea:disabled{opacity:.5;cursor:not-allowed}
   </div>
 </div>
 
+<!-- Настройки бота: только явно изменённые поля -->
+<div class="mbg" id="mo-bot-settings" onclick="if(event.target===this)closeModal('mo-bot-settings')">
+  <div class="modal">
+    <div class="modal-x" onclick="closeModal('mo-bot-settings')" role="button" tabindex="0" aria-label="Закрыть">✕</div>
+    <div class="modal-title">⚙️ Настройки Telegram</div>
+    <div id="botSettingsIdentity" style="overflow-wrap:anywhere"></div>
+    <div class="field-note">Неизменённые поля сохранятся. Telegram может не сообщать текущее значение некоторых настроек.</div>
+    <div id="botSettingsInviteBlock" style="display:none">
+    <a id="botSettingsInvite" class="btn btn-o" target="_blank" rel="noopener noreferrer" style="display:block;margin-top:8px">Пригласить людей к боту</a>
+    <div class="field-note">Приглашение доступно владельцу бота в Telegram: до 10 человек за один раз.</div>
+    <button class="btn btn-s" onclick="copyBotInvite()">Скопировать ссылку приглашения</button>
+    </div>
+    <div id="botSettingsFields"></div>
+    <div id="botSettingsStatus" role="status" aria-live="polite" style="margin:8px 0"></div>
+    <div class="actions" style="display:flex;gap:8px;flex-wrap:wrap">
+      <button class="btn btn-s" onclick="openBotSettings(BOT_SETTINGS.id)">Обновить</button>
+      <button class="btn btn-p" id="botSettingsSave" onclick="saveBotSettings()">Применить изменения</button>
+    </div>
+  </div>
+</div>
+
 <!-- Modal: Add Bot -->
 <div class="mbg" id="mo-bot-add" onclick="if(event.target===this)closeModal('mo-bot-add')">
   <div class="modal">
@@ -38676,6 +38697,7 @@ function renderAudSegChart(segments) {
 <script src="screens/accounts_list.js"></script>
 <script src="screens/bots_list.js"></script>
 <script src="screens/bot_detail.js"></script>
+<script src="screens/bot_settings.js"></script>
 <script src="screens/bot_factory.js"></script>
 <script src="screens/bot_mesh.js"></script>
 <script src="screens/crm_inbox.js"></script>

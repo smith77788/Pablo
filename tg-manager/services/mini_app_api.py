@@ -10344,6 +10344,8 @@ def setup_routes(app: web.Application, pool: asyncpg.Pool) -> None:
     mini_app_proxies.setup_routes(app, pool)
     mini_app_uch.setup_routes(app, pool)
     mini_app_bots.setup_routes(app, pool)
+    from services import mini_app_bot_settings
+    mini_app_bot_settings.setup_routes(app, pool)
     mini_app_invite.setup_routes(app, pool)
     mini_app_channels.setup_routes(app, pool)
     mini_app_notify_routes.setup_routes(app, pool)

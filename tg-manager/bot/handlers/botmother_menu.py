@@ -65,6 +65,7 @@ from bot.callbacks import (
     AssetTplCb,
     BmCb,
     BotCb,
+    VaultCb,
     ChanCb,
     ChanFactCb,
     CleanerCb,
@@ -235,9 +236,9 @@ def _main_menu_kb(live: dict | None = None):
         rows.append(1)
     if _app_button(kb, "🌐 Открыть приложение"):
         rows.append(1)
-        kb.button(text="🌐 Telegram X / браузер", callback_data=BmCb(action="browser_login"))
-        rows.append(1)
     kb.button(text="📊 Итоги за неделю", callback_data=BmCb(action="summary"))
+    rows.append(1)
+    kb.button(text="🗄 Хранилище диалогов", callback_data=VaultCb(a="how"))
     rows.append(1)
     secs = [s for s in CORE if s.key != "overview"]
     for sec in secs:

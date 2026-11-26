@@ -181,7 +181,6 @@ async def _onboarding_message(pool: asyncpg.Pool, uid: int):
     url = _valid_mini_app_url(MINI_APP_URL)
     if url:
         kb.button(text="🚀 Открыть быстрый старт", web_app=WebAppInfo(url=f"{url}#onboarding"))
-        kb.button(text="🌐 Telegram X / браузер", callback_data=BmCb(action="browser_login"))
     acc_step = next((st for st in d["steps"] if st["id"] == "accounts"), None)
     if acc_step and not acc_step["done"]:
         kb.button(text="📱 Подключить аккаунт здесь", callback_data=AccCb(action="add"))
@@ -860,19 +859,18 @@ async def cmd_app(message: Message) -> None:
 
     kb = InlineKeyboardBuilder()
     kb.button(text="🌐 Открыть приложение", web_app=WebAppInfo(url=url))
-    kb.button(text="🌐 Telegram X / браузер", callback_data=BmCb(action="browser_login"))
     kb.adjust(1)
     await message.answer(
         "📱 <b>Infragram Mini App</b>\n\n"
         "Откройте приложение кнопкой ниже. Если Telegram X не поддерживает "
-        "мини-приложения, выберите «Telegram X / браузер»: вход подтверждается "
+        "мини-приложения, отправьте /browser для входа в браузере. Вход подтверждается "
         "одноразовым кодом из этого бота.",
         parse_mode="HTML",
         reply_markup=kb.as_markup(),
     )
 
 
-@router.message(Command("pair", "svyaz", "svyazat"))
+@router.message(Command("pair", "browser", "svyaz", "svyazat"))
 async def cmd_pair(message: Message, pool) -> None:
     """Выдать одноразовый код для входа в приложение на телефоне (вне Telegram).
 

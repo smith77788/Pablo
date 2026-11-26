@@ -28,6 +28,7 @@ log = logging.getLogger(__name__)
 # их подписями ниже; неизвестный тип emit всё равно примет (интеграции и
 # входящие вебхуки могут добавлять свои), но экран его не предложит.
 EVENT_LABELS: dict[str, str] = {
+    "contact.write_access_allowed": "Владелец пригласил человека в бота",
     "contact.started": "Человек открыл бота (/start)",
     "message.received": "Человек написал боту",
     "button.clicked": "Человек нажал кнопку сценария",

@@ -62,6 +62,9 @@ async def send_vault_screen(message: Message, pool: asyncpg.Pool, uid) -> None:
         from aiogram.types import CopyTextButton
         kb.button(text=f"📋 Скопировать {handle}", copy_text=CopyTextButton(text=handle))
         _has_btn = True
+    if conn:
+        kb.button(text="📂 Диалоги в боте", callback_data=VaultCb(a="list"))
+        _has_btn = True
     kb.adjust(1)
     if conn:
         head = ("✅ <b>Хранилище подключено.</b>\n\n"

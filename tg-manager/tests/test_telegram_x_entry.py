@@ -11,9 +11,7 @@ def test_main_menu_has_native_and_compatible_browser_entry(monkeypatch):
     monkeypatch.setattr(menu, '_APP_URL', 'https://example.org/miniapp')
     buttons = [b for row in menu._main_menu_kb().inline_keyboard for b in row]
     assert any(b.web_app for b in buttons)
-    fallback = next(b for b in buttons if b.text == '🌐 Telegram X / браузер')
-    assert fallback.callback_data == 'bm:browser_login::0:0'
-    assert fallback.web_app is None
+    assert not any(b.callback_data == 'bm:browser_login::0:0' for b in buttons)
 
 
 def test_commands_share_menu_and_keep_returning_user_statistics():
@@ -91,5 +89,13 @@ def test_new_user_onboarding_also_has_compatible_entry(monkeypatch):
         'steps': [{'id': 'accounts', 'title': 'Аккаунт', 'done': False}],
         'next_step': 'accounts', 'done': 0, 'total': 1}))
     _, keyboard = asyncio.run(start._onboarding_message(object(), 42))
-    assert any(button.callback_data == 'bm:browser_login::0:0'
-               for row in keyboard.inline_keyboard for button in row)
+    assert not any(button.callback_data == 'bm:browser_login::0:0'
+                   for row in keyboard.inline_keyboard for button in row)
+
+
+def test_unified_main_menu_keeps_dialogue_vault_entry():
+    from bot.callbacks import VaultCb
+    from bot.handlers.botmother_menu import _main_menu_kb
+    buttons = [button for row in _main_menu_kb().inline_keyboard for button in row]
+    vault = next(button for button in buttons if 'Хранилище' in button.text)
+    assert VaultCb.unpack(vault.callback_data).a == 'how'

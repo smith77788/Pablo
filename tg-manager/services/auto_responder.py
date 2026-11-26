@@ -1071,8 +1071,12 @@ async def _process_bot(
             if cbq:
                 # Кнопка сценария: ветка прогона. Разбирается ДО прочего —
                 # такое нажатие не должно уйти в другие обработчики.
-                _cbchat = ((cbq.get("message") or {}).get("chat") or {}).get("id") \
-                    or (cbq.get("from") or {}).get("id")
+                _cbchat = ((cbq.get("message") or {}).get("chat") or {}).get("id")
+                if not _cbchat and cbq.get("inline_message_id"):
+                    # Только контекст личного сценария: on_button сверяет
+                    # run_id + bot_id + получателя + seq. Адрес редактирования
+                    # берётся из inline_message_id, а не из этого user_id.
+                    _cbchat = (cbq.get("from") or {}).get("id")
                 if (cbq.get("data") or "").startswith(_wf_rt.CALLBACK_PREFIX) and _cbchat:
                     try:
                         await _wf_rt.on_button(pool, http, token, bot_id,
@@ -1174,6 +1178,22 @@ async def _process_bot(
             if not _is_dm_update(upd):
                 continue
             chat_id = msg.get("chat", {}).get("id")
+            # Bot API 10.5: приглашение владельцем разрешает диалог без /start.
+            # Сервисное сообщение обычно без текста: не теряем его ниже.
+            if (isinstance(msg.get("write_access_allowed"), dict)
+                    and msg["write_access_allowed"].get("inviter")):
+                from services.bot_api_105_runtime import invited_recipient
+                invited = invited_recipient(msg)
+                if invited:
+                    recipient, access_source = invited
+                    await db.upsert_users(pool, bot_id, [recipient])
+                    await _vl_signal(recipient["user_id"], "opened", 0.5,
+                                     msg.get("from") or {})
+                    await automation_events.emit(
+                        pool, _vl_owner, "contact.write_access_allowed", access_source,
+                        bot_id=bot_id, chat_id=recipient["user_id"])
+                # Приглашение — не /start, не текст и не согласие на воронку.
+                continue
             # Оплата через Telegram Payments — сильнейший сигнал: человек КУПИЛ.
             # Это поле message, приходит и без текста, поэтому ловим ДО проверки
             # текста ниже (иначе платёж без подписи выпал бы молча).

@@ -161,6 +161,7 @@ function buildBotDetail(d) {
       <button class="btn btn-s" ${b.is_active ? '' : 'disabled'} style="flex:1 1 auto;font-size:13px;padding:10px 6px" onclick="openBotProfile(${bid})">⚙️ Профиль</button>
       <button class="btn btn-s" style="flex:0 0 auto;font-size:13px;padding:10px 10px;color:var(--red)" onclick="botDeleteConfirm(${bid},'${bnJs}')" aria-label="Удалить бота">🗑 Удалить</button>
     </div>
+    <button class="btn btn-o" style="width:100%;margin:8px 0" onclick="openBotSettings(${Number(bid)})">⚙️ Настройки Telegram и приглашения</button>
     ${mgmtSections.map(s=>`
       <div class="sec">${s.title}</div>
       <div class="mgmt-grid">

@@ -617,6 +617,9 @@ async def send_message(
     buttons: list[dict] | None = None,
     reply_markup: dict | None = None,
     disable_notification: bool = False,
+    *,
+    rich_message: dict | None = None,
+    rich_fallback_text: str | None = None,
 ) -> tuple[bool, int | None]:
     """Returns (success, retry_after_seconds_or_None)."""
     params: dict = {"chat_id": chat_id, "text": text, "parse_mode": "HTML"}
@@ -628,7 +631,13 @@ async def send_message(
         kb = _build_inline_keyboard(buttons)
         if kb:
             params["reply_markup"] = kb
-    data = await _call(session, token, "sendMessage", **params)
+    if rich_message is not None:
+        params.pop("text")
+        params.pop("parse_mode")
+        data = await send_rich_message(session, token, rich_message=rich_message,
+                                       fallback_text=rich_fallback_text, **params)
+    else:
+        data = await _call(session, token, "sendMessage", **params)
     if data.get("ok"):
         return True, None
     error_code = data.get("error_code", 0)
@@ -889,3 +898,54 @@ async def batch_set_commands(
     )
     ok = sum(1 for r in results if r is True)
     return ok, len(results) - ok
+
+
+async def send_rich_message(session: aiohttp.ClientSession, token: str,
+                            rich_message: dict, chat_id: int | str | None = None,
+                            *, fallback_text: str | None = None, **options) -> dict:
+    """Send structured content through the shared transport; return Telegram data.
+
+    A caller may explicitly provide a plain equivalent for old API servers.
+    Network errors and flood waits never trigger a second kind of send.
+    """
+    from services.bot_rich_messages import method_is_unavailable, normalize_rich_message
+
+    if any(key in options for key in ("text", "parse_mode", "entities")):
+        raise ValueError("Обычный текст нельзя смешивать с форматированным сообщением")
+    if chat_id is None and not options.get("ephemeral_message_parameters"):
+        raise ValueError("Укажите чат или параметры временного ответа")
+    if fallback_text is not None and (not isinstance(fallback_text, str) or not 1 <= len(fallback_text) <= 4096):
+        raise ValueError("Запасной текст должен содержать от 1 до 4096 символов")
+    params = dict(options, rich_message=normalize_rich_message(rich_message))
+    if chat_id is not None:
+        params["chat_id"] = chat_id
+    data = await _call(session, token, "sendRichMessage", **params)
+    if fallback_text is not None and method_is_unavailable(data):
+        # The fallback is supplied by the caller, never derived by dropping
+        # media, tables or unsupported structured content.
+        fallback_params = {key: value for key, value in params.items() if key != "rich_message"}
+        fallback_params["text"] = fallback_text
+        data = await _call(session, token, "sendMessage", **fallback_params)
+        return {**data, "rich_fallback": True}
+    return data
+
+
+async def edit_rich_message(session: aiohttp.ClientSession, token: str,
+                            rich_message: dict, *, chat_id: int | str | None = None,
+                            message_id: int | None = None,
+                            inline_message_id: str | None = None, **options) -> dict:
+    """Edit either a chat message or an inline message without inventing a chat."""
+    from services.bot_rich_messages import normalize_rich_message
+
+    if any(key in options for key in ("text", "parse_mode", "entities")):
+        raise ValueError("Обычный текст нельзя смешивать с форматированным сообщением")
+    if inline_message_id:
+        if chat_id is not None or message_id is not None:
+            raise ValueError("Укажите один адрес сообщения")
+        address = {"inline_message_id": inline_message_id}
+    elif chat_id is not None and message_id is not None:
+        address = {"chat_id": chat_id, "message_id": message_id}
+    else:
+        raise ValueError("Укажите адрес сообщения для редактирования")
+    return await _call(session, token, "editMessageText",
+                       rich_message=normalize_rich_message(rich_message), **address, **options)

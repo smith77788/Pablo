@@ -129,6 +129,7 @@ GET /api/miniapp/bot/{bot_id}/multigeo
 GET /api/miniapp/bot/{bot_id}/note
 GET /api/miniapp/bot/{bot_id}/relay/sessions
 GET /api/miniapp/bot/{bot_id}/schedules
+GET /api/miniapp/bot/{bot_id}/settings
 GET /api/miniapp/bot/{bot_id}/stats
 GET /api/miniapp/bot/{bot_id}/subscribers
 GET /api/miniapp/bot/{bot_id}/webhook
@@ -508,6 +509,7 @@ HEAD /api/miniapp/bot/{bot_id}/multigeo
 HEAD /api/miniapp/bot/{bot_id}/note
 HEAD /api/miniapp/bot/{bot_id}/relay/sessions
 HEAD /api/miniapp/bot/{bot_id}/schedules
+HEAD /api/miniapp/bot/{bot_id}/settings
 HEAD /api/miniapp/bot/{bot_id}/stats
 HEAD /api/miniapp/bot/{bot_id}/subscribers
 HEAD /api/miniapp/bot/{bot_id}/webhook
@@ -901,6 +903,7 @@ POST /api/miniapp/bot/{bot_id}/multigeo/copy
 POST /api/miniapp/bot/{bot_id}/multigeo/translate
 POST /api/miniapp/bot/{bot_id}/profile
 POST /api/miniapp/bot/{bot_id}/schedule
+POST /api/miniapp/bot/{bot_id}/settings
 POST /api/miniapp/bot/{bot_id}/swarm
 POST /api/miniapp/bot_factory/create
 POST /api/miniapp/bot_factory/create_new
